@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:./config/free-quota.local.yml
   application:
     name: traveling-agent
   profiles:

@@ -64,7 +64,7 @@ Copy-Item .env.example .env
 docker compose up -d --wait postgres redis
 ```
 
-在 IDE 中启动 `TravelingAgentApplication`，启用 `local` profile，并设置与 `.env` 一致的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 环境变量；其他连接参数默认指向本机。**Spring Boot 不会自动读取 Compose 的 `.env` 文件**。如修改数据库名、端口或用户，也需同步设置对应环境变量。启动会执行 Flyway；当前 V1 仅创建应用 schema，业务表在后续迭代追加。
+在 IDE 中启动 `TravelingAgentApplication`，启用 `local` profile，并设置与 `.env` 一致的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 环境变量；其他连接参数默认指向本机。**Spring Boot 不会自动读取 Compose 的 `.env` 文件**。如修改数据库名、端口或用户，也需同步设置对应环境变量。启动会执行 Flyway；V1 创建应用 schema，V2 建立请求预算和计量表；旅行及账号业务表在后续迭代追加。
 
 完整容器方式（先在宿主机生成后端 JAR）：
 
@@ -92,7 +92,7 @@ docker compose --profile app down
 .\scripts\verify-persistence.ps1
 ```
 
-第一个脚本临时读取 `.env` 的连接配置，验证 Flyway、PostgreSQL JSONB 与事务回滚、Redis Session 仓储读写及删除，执行后恢复当前进程环境变量。普通 Maven verify 默认跳过这 3 项容器测试，仍执行 5 项离线测试。
+第一个脚本临时读取 `.env` 的连接配置，验证 Flyway、PostgreSQL JSONB 与事务回滚、Redis Session 以及 MyBatis 请求计量、并发预占和未知用量，执行后恢复当前进程环境变量。普通 Maven verify 默认跳过需显式启用的容器测试；实际测试数以当次报告为准。
 
 第二个脚本会重新创建本项目四个容器，验证 PostgreSQL 和 Redis 数据在命名卷中保留，随后清理本轮随机探针，不删除卷或业务数据。运行时会短暂中断本地访问。它验证基础设施持久化，不代表应用阶段恢复和登录业务已经实现。
 
@@ -110,6 +110,12 @@ npm run build
 后端验证包含模块依赖边界和无需外部服务的 HTTP 启动测试；前端构建包含 TypeScript 类型检查。数据库、Redis、模型兼容性等验证状态见[开发实施计划](docs/plans/开发实施计划.md)和[工作日志](docs/work-logs/0001-2026-10-15-工程骨架.md)。
 
 ## 开发与代理约束
+
+模型调用准入默认关闭。计量代码不创建 SDK，也不会发送真实请求。`config/free-quota.example.yml` 仅是过期、零额度且未确认停用的安全示例；真实非凭证快照可放入被忽略的 `config/free-quota.local.yml`，从项目根目录启动时可选加载。不要覆盖已有本地文件，不要将 Key 写入快照。
+
+准入检查精确角色、型号、地域、接口、快照有效期、额度和供应商停用保护，再在短事务中预占原运行预算。记录已知 Token／耗时，未知或未结束请求保留保守预占；重建仓储或重复建账不重置预算。单实例实际请求最多 4 个；许可提供的超时须在下一阶段接入真实 SDK，不能仅因超时或浏览器断开就提前释放仍在途请求。
+
+本地计量只覆盖本项目，不是账户实时余额，也不保证其他程序不会消耗额度。供应商保护、实际端点、权限及用量回调要在 Harness 接线时实测；当前尚未实现完整运行状态机、活跃区间驱动和故障补偿。不得在未完成这些对应门槛时将参数存在误称为全套运行恢复已实现。
 
 开始工作前阅读根目录 [AGENTS.md](AGENTS.md)。开发阶段必须按计划串行执行，测试及推送前 Review 通过、日志补齐并核对远程 main 包含交付提交后，才可进入下一阶段。所有真实密钥禁止进入对话、日志或 Git；.env 永不提交。
 

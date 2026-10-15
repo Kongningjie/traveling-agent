@@ -1,0 +1,15 @@
+# 复制到同目录 free-quota.local.yml 后，由操作者填写真实的非凭证核实结果。
+# 示例始终拒绝：额度为零、时间过期、用完即停未确认，不包含任何 API Key。
+# 含小数点的精确型号使用方括号，避免 Spring 将其误解析成嵌套属性。
+# 不要在此文件开启 external-calls-enabled；真实 SDK 接入及核实另行验收。
+travel:
+  quota-evidence:
+    "[qwen3.8-27b]":
+      model-id: qwen3.8-27b
+      region: cn-beijing
+      api: DASHSCOPE_NATIVE_REALTIME
+      remaining-tokens: 0
+      verified-at: "1970-01-01T00:00:00Z"
+      valid-until: "1970-01-02T00:00:00Z"
+      expires-at: "1970-01-02T00:00:00Z"
+      stop-protection-confirmed: false

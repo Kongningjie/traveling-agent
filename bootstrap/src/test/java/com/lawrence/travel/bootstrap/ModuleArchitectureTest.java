@@ -41,10 +41,9 @@ class ModuleArchitectureTest {
         noClasses().that().resideInAPackage("..agent..")
                 .should().dependOnClassesThat().resideInAnyPackage("..api..", "..infrastructure..", "..bootstrap..")
                 .check(CLASSES);
-        // infrastructure 当前仅有包说明和迁移资源，允许没有可检查的生产类；
-        // 后续出现实现类时仍自动套用本条依赖约束，不意味着取消整个模块的检查。
+        // infrastructure 已包含计量仓储和并发适配，规则必须覆盖这些真实生产类。
         noClasses().that().resideInAPackage("..infrastructure..")
                 .should().dependOnClassesThat().resideInAnyPackage("..api..", "..agent..", "..bootstrap..")
-                .allowEmptyShould(true).check(CLASSES);
+                .check(CLASSES);
     }
 }

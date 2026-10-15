@@ -3,7 +3,7 @@
     验证本地 Compose 中 PostgreSQL、Flyway 和 Redis Session 的真实接线。
 .DESCRIPTION
     从根 .env 临时加载允许列表中的简单连接配置，不执行文件内容或打印凭证。
-    启动本项目中间件，显式运行 LocalInfrastructureTest；结束后恢复调用进程环境。
+    启动本项目中间件，显式运行基础设施与预算计量测试；结束后恢复调用进程环境。
     不调用模型、地图或检索服务，不清理业务表和命名卷。
 .EXAMPLE
     .\scripts\verify-local.ps1
@@ -38,7 +38,7 @@ try {
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
-        '-Dtest=LocalInfrastructureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+        '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '本地基础设施集成测试失败。' }
 } finally {
     Set-Location -LiteralPath $originalLocation
