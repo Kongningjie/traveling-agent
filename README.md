@@ -96,7 +96,7 @@ docker compose --profile app down
 
 第二个脚本会重新创建本项目四个容器，验证 PostgreSQL 和 Redis 数据在命名卷中保留，随后清理本轮随机探针，不删除卷或业务数据。运行时会短暂中断本地访问。它验证基础设施持久化，不代表应用阶段恢复和登录业务已经实现。
 
-本轮实际结果及镜像摘要见 [Docker 验证日志](docs/work-logs/2026-10-15-Docker验证.md)。
+本轮实际结果及镜像摘要见 [Docker 验证日志](docs/work-logs/0002-2026-10-15-Docker验证.md)。
 
 ## 检查与进度
 
@@ -107,4 +107,10 @@ cd web
 npm run build
 ```
 
-后端验证包含模块依赖边界和无需外部服务的 HTTP 启动测试；前端构建包含 TypeScript 类型检查。数据库、Redis、模型兼容性等验证状态见[开发实施计划](docs/plans/开发实施计划.md)和[工作日志](docs/work-logs/2026-10-15-工程骨架.md)。
+后端验证包含模块依赖边界和无需外部服务的 HTTP 启动测试；前端构建包含 TypeScript 类型检查。数据库、Redis、模型兼容性等验证状态见[开发实施计划](docs/plans/开发实施计划.md)和[工作日志](docs/work-logs/0001-2026-10-15-工程骨架.md)。
+
+## 开发与代理约束
+
+开始工作前阅读根目录 [AGENTS.md](AGENTS.md)。开发阶段必须按计划串行执行，测试及推送前 Review 通过、日志补齐并核对远程 main 包含交付提交后，才可进入下一阶段。所有真实密钥禁止进入对话、日志或 Git；.env 永不提交。
+
+用户指定 docs/ 全部只保留在本地，因此仓库页面中的 docs 链接仅在具备本地资料的工作区可用。编码、环境、技术栈和流程详见本地 [standards](docs/standards/README.md)。新克隆环境若缺少冻结方案或阶段资料，需先由用户在本机补齐；不能根据 README 摘要擅自开始实现。
