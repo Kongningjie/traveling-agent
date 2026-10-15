@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: traveling-agent
+  profiles:
+    default: local
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+travel:
+  runtime:
+    mode: local
+  external-calls-enabled: false
+  models:
+    coordinator: qwen3.8-27b
+    research: qwen3.7-flash-2026-07-15
+    planner: qwen3.8-27b
+    reviewer: qwen3.8-max-0902
+  limits:
+    active-runs: 2
+    model-concurrency: 4
+    research-concurrency-per-run: 2
+    model-calls-per-run: 30
+    tool-calls-per-run: 60
+    repair-rounds: 2
+    model-timeout: 180s
+    active-time-per-run: 15m

@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DB:traveling_agent}?currentSchema=traveling_agent
+    username: ${POSTGRES_USER:traveling_agent}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 8
+      connection-timeout: 5000
+  flyway:
+    enabled: true
+    schemas: traveling_agent
+    default-schema: traveling_agent
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      connect-timeout: 3s
+      timeout: 3s
+  session:
+    timeout: 30m
+    redis:
+      namespace: traveling-agent:local:session
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true

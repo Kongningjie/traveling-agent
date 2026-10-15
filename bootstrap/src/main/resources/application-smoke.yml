@@ -1,0 +1,15 @@
+# 只验证启动与模块装配；不证明 PostgreSQL、Redis 或真实 Agent 已通过验收。
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      - org.springframework.boot.session.data.redis.autoconfigure.SessionDataRedisAutoConfiguration
+management:
+  health:
+    redis:
+      enabled: false
+travel:
+  runtime:
+    mode: smoke
