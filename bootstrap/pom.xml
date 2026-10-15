@@ -1,19 +1,53 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<?xml version="1.0" encoding="utf-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+    <parent>
+        <groupId>com.lawrence.travel</groupId>
+        <artifactId>traveling-agent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
     <artifactId>traveling-agent-bootstrap</artifactId>
     <name>bootstrap</name>
     <dependencies>
-        <dependency><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent-api</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent-application</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent-domain</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent-agent</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.lawrence.travel</groupId><artifactId>traveling-agent-infrastructure</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
-        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
-        <dependency><groupId>com.tngtech.archunit</groupId><artifactId>archunit-junit5</artifactId><scope>test</scope></dependency>
+        <dependency>
+            <groupId>com.lawrence.travel</groupId>
+            <artifactId>traveling-agent-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lawrence.travel</groupId>
+            <artifactId>traveling-agent-application</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lawrence.travel</groupId>
+            <artifactId>traveling-agent-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lawrence.travel</groupId>
+            <artifactId>traveling-agent-agent</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lawrence.travel</groupId>
+            <artifactId>traveling-agent-infrastructure</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <finalName>traveling-agent</finalName>
@@ -21,7 +55,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration><mainClass>com.lawrence.travel.bootstrap.TravelingAgentApplication</mainClass></configuration>
+                <configuration>
+                    <mainClass>com.lawrence.travel.bootstrap.TravelingAgentApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>

@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+    验证本地 Compose 中 PostgreSQL、Flyway 和 Redis Session 的真实接线。
+.DESCRIPTION
+    从根 .env 临时加载允许列表中的简单连接配置，不执行文件内容或打印凭证。
+    启动本项目中间件，显式运行 LocalInfrastructureTest；结束后恢复调用进程环境。
+    不调用模型、地图或检索服务，不清理业务表和命名卷。
+.EXAMPLE
+    .\scripts\verify-local.ps1
+#>
 param()
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +22,7 @@ $allowedKeys = @('POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER
     'POSTGRES_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD')
 $previousValues = @{}
 foreach ($key in $allowedKeys + 'TRAVEL_INTEGRATION_TESTS') {
+    # 同时保存原值和未配置状态，finally 中可精确还原，而不是把测试配置留给后续任务。
     $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 $originalLocation = Get-Location
@@ -21,6 +32,7 @@ try {
             [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2].Trim(), 'Process')
         }
     }
+    # 普通 Maven verify 默认不连接容器；仅本次进程显式打开集成测试条件。
     $env:TRAVEL_INTEGRATION_TESTS = 'true'
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis

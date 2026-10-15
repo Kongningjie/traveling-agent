@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+    重新创建本项目容器，校验 PostgreSQL 与 Redis 的命名卷数据保留。
+.DESCRIPTION
+    会短暂中断本项目四个容器。写入随机数据库表和 Redis key 后重建容器，
+    再校验内容并清理本轮探针；不删除卷，不修改已有业务表，不打印凭证。
+    此测试不证明应用阶段恢复或完整备份恢复能力已实现。
+.EXAMPLE
+    .\scripts\verify-persistence.ps1
+#>
 param()
 
 $ErrorActionPreference = 'Stop'
@@ -7,6 +17,14 @@ $probeId = [Guid]::NewGuid().ToString('N')
 $tableName = 'm0_probe_' + $probeId
 $redisKey = 'traveling-agent:verification:' + $probeId
 
+<#
+.SYNOPSIS
+    执行当前项目的 Compose 子命令，并将非零退出码转换为终止错误。
+.PARAMETER DockerArguments
+    作为独立参数传给 Docker 的固定命令及本轮随机探针值，不接受真实密钥。
+.OUTPUTS
+    Docker 的标准输出；调用方负责提取并比较探针结果。
+#>
 function Invoke-Compose {
     param([string[]]$DockerArguments)
     $result = & docker compose @DockerArguments

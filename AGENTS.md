@@ -40,7 +40,7 @@
 - 遵循 `docs/standards/编码规范.md`。Java 的每个手写类、接口、枚举、record、构造器和方法（含 private、测试方法）都必须有解释职责与契约的中文 Javadoc；TypeScript 类型、组件及手写函数使用对应 TSDoc／组件说明。此处“注解”指文档注释，不能为了凑数量增加无意义的运行时注解。
 - 写清输入限制、结果含义、异常、事务、副作用及线程安全等实际契约；对覆盖方法可使用 `{@inheritDoc}`，并解释新增行为。注释须随代码维护，不能仅把方法名翻译一遍。
 - 在复杂业务块中详细说明约束、执行顺序和原因，特别是状态转换、锁顺序、租约、幂等键、预算计数、Patch 范围和证据／偏好版本检查。
-- 生成代码、第三方文件和工具生成的锁文件不手工逐项补注释；当前骨架的历史注释欠账必须列入计划并在后续专门阶段补齐，不能宣称现有代码已全面合规。
+- 生成代码、第三方文件和工具生成的锁文件不手工逐项补注释；既有骨架注释已在 DEV-0004 补齐，后续手写类型和方法须持续满足本规则，不能以历史补齐代替新增代码检查。
 - 六个后端模块：api → application → domain；agent、infrastructure 依赖 application／domain；bootstrap 唯一装配启动。domain 不依赖框架，适配器之间不得相互直调，Controller／Agent 工具不能直接访问 Mapper。
 - Java 21、Spring Boot 4.1.1、MyBatis Starter 4.1.0、AgentScope Java 2.0.4 HarnessAgent；Vue 3＋TypeScript。详细版本以父 POM、Wrapper、package-lock 和本地技术栈文档为准，不能擅自升级或改栈。
 - PostgreSQL 是业务及文本／JSON 恢复数据的权威存储；Redis 存登录会话；文件卷仅存附件和必要框架文件。首版不引入 MQ、微服务或向量数据库。
