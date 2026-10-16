@@ -10,6 +10,10 @@
     <name>infrastructure</name>
     <dependencies>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jackson</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.lawrence.travel</groupId>
             <artifactId>traveling-agent-application</artifactId>
             <version>${project.version}</version>

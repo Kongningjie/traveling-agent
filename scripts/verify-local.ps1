@@ -38,7 +38,7 @@ try {
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
-        '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+        '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '本地基础设施集成测试失败。' }
 } finally {
     Set-Location -LiteralPath $originalLocation

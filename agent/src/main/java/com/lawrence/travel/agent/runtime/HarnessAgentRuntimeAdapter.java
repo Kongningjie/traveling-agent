@@ -29,6 +29,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final Map<String, String> models;
     private final Supplier<String> keySupplier;
     private final Path workspaceRoot;
+    private final java.util.function.BiFunction<UUID, String, Toolkit> toolkits;
     private final OkHttpClient client = new OkHttpClient();
 
     /** smoke 仅提供状态，没有请求发送能力。 */
@@ -45,10 +46,25 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
      */
     public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models,
                                      Supplier<String> keySupplier, Path workspaceRoot) {
+        this(admission, models, keySupplier, workspaceRoot, (run, role) -> new Toolkit());
+    }
+
+    /**
+     * 装配按运行及角色创建的工具集，不能跨尝试共享可变 Toolkit。
+     * @param admission 请求门禁
+     * @param models 精确型号白名单
+     * @param keySupplier 密钥提供器
+     * @param workspaceRoot 工作区
+     * @param toolkits 每次调用工具集工厂
+     */
+    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models,
+                                     Supplier<String> keySupplier, Path workspaceRoot,
+                                     java.util.function.BiFunction<UUID, String, Toolkit> toolkits) {
         this.admission = admission;
         this.models = Map.copyOf(models);
         this.keySupplier = keySupplier;
         this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
+        this.toolkits = toolkits;
     }
 
     /** @return 固定框架类型，仅用于依赖接线检查 */
@@ -80,7 +96,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                 .stream(false).enableThinking(false).enableSearch(false).httpTransport(transport)
                 .defaultOptions(GenerateOptions.builder().maxTokens(1024)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
-        var harness = RestrictedHarnessFactory.create(model, new Toolkit(),
+        var harness = RestrictedHarnessFactory.create(model, toolkits.apply(runId, role),
                 workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);
         var invocation = new ActiveInvocation(harness, transport);
         Thread.startVirtualThread(() -> invocation.execute(prompt));

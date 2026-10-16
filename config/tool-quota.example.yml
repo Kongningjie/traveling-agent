@@ -1,0 +1,12 @@
+# 复制为本地 tool-quota.local.yml 后填写已核实数据；不得自动刷新核实时间。
+# 本示例永久失效且关闭调用；allowance 是保守上限，不应超过供应商实际免费余量。
+travel:
+  tools:
+    enabled: false
+    evidence-hosts: [www.dpm.org.cn]
+    grants:
+      amap-search:
+        verified-at: "1970-01-01T00:00:00Z"
+        valid-until: "1970-01-01T00:00:00Z"
+        allowance: 0
+        free-only-confirmed: false
