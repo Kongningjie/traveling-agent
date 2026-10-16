@@ -75,28 +75,11 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
      */
     @Override
     public HttpResponse execute(HttpRequest request) {
-        if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
-        if (!ENDPOINT.equals(request.getUrl()) || !"POST".equals(request.getMethod())) {
-            throw new HttpTransportException("MODEL_ENDPOINT_REJECTED");
-        }
-        String body = request.getBody();
-        if (body == null || body.getBytes(StandardCharsets.UTF_8).length > 65536) {
-            throw new HttpTransportException("MODEL_INPUT_TOO_LARGE");
-        }
-        Map<?, ?> json = JsonUtils.getJsonCodec().fromJson(body, Map.class);
-        requireTextOnly(json);
-        Map<?, ?> parameters = (Map<?, ?>) json.get("parameters");
-        if (parameters == null || !(parameters.get("max_tokens") instanceof Number max)
-                || max.intValue() < 1 || max.intValue() > 2048
-                || Boolean.TRUE.equals(parameters.get("enable_thinking"))
-                || Boolean.TRUE.equals(parameters.get("enable_search"))) {
-            throw new HttpTransportException("MODEL_OPTIONS_REJECTED");
-        }
-        // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
-        // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
-        long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
+        var prepared = prepare(request);
+        String body = prepared.body();
+        long upper = prepared.upper();
         try (var permit = admission.begin(runId, role, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME", upper)) {
-            if (!permit.target().modelId().equals(json.get("model"))) {
+            if (!permit.target().modelId().equals(prepared.model())) {
                 throw new HttpTransportException("MODEL_ID_REJECTED");
             }
             Request.Builder outgoing = new Request.Builder().url(ENDPOINT)
@@ -129,6 +112,47 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
             }
         }
     }
+
+    /**
+     * 共用发送前输入限制，避免流式绕过非流式的免费额度和文本权限检查。
+     * @param request SDK 已格式化请求
+     * @return 验证后的正文、型号及保守 Token 上界
+     */
+    private Prepared prepare(HttpRequest request) {
+        if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
+        if (!ENDPOINT.equals(request.getUrl()) || !"POST".equals(request.getMethod())) {
+            throw new HttpTransportException("MODEL_ENDPOINT_REJECTED");
+        }
+        String body = request.getBody();
+        if (body == null || body.getBytes(StandardCharsets.UTF_8).length > 65536) {
+            throw new HttpTransportException("MODEL_INPUT_TOO_LARGE");
+        }
+        Map<?, ?> json;
+        try { json = JsonUtils.getJsonCodec().fromJson(body, Map.class); }
+        catch (RuntimeException invalid) { throw new HttpTransportException("MODEL_INPUT_INVALID"); }
+        if (json == null) throw new HttpTransportException("MODEL_INPUT_INVALID");
+        requireTextOnly(json);
+        if (!(json.get("model") instanceof String)) throw new HttpTransportException("MODEL_INPUT_INVALID");
+        Map<?, ?> parameters = json.get("parameters") instanceof Map<?, ?> values ? values : null;
+        if (parameters == null || !(parameters.get("max_tokens") instanceof Number max)
+                || max.intValue() < 1 || max.intValue() > 2048
+                || Boolean.TRUE.equals(parameters.get("enable_thinking"))
+                || Boolean.TRUE.equals(parameters.get("enable_search"))) {
+            throw new HttpTransportException("MODEL_OPTIONS_REJECTED");
+        }
+        // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
+        // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
+        long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
+        return new Prepared(body, (String) json.get("model"), upper);
+    }
+
+    /**
+     * 发送前不可变检查结果。
+     * @param body 有界文本 JSON
+     * @param model 请求中的精确型号
+     * @param upper 保守 Token 上界
+     */
+    private record Prepared(String body, String model, long upper) { }
 
     /**
      * 限制多模态端点仅接收文本和工具消息，媒体内容必须在申请额度前拒绝。
@@ -194,13 +218,91 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     }
 
     /**
-     * 当前接线只使用非流式响应，拒绝隐式切换到未验证的 SSE 传输。
-     * @param request 未发送的请求
-     * @return 固定失败信号
+     * 每次订阅只发送一次受门禁保护的 SSE 请求，不缓冲完整生成结果。
+     * @param request SDK 完成格式化后的请求
+     * @return 逐个 SSE data 帧的 JSON，终止信号在响应关闭和计量结束后发出
      */
     @Override
     public Flux<String> stream(HttpRequest request) {
-        return Flux.error(new HttpTransportException("MODEL_STREAM_NOT_ENABLED"));
+        return Flux.defer(() -> Flux.create(sink -> {
+            var cancelled = new AtomicBoolean();
+            var connection = new java.util.concurrent.atomic.AtomicReference<Call>();
+            sink.onCancel(() -> {
+                cancelled.set(true);
+                var call = connection.get();
+                if (call != null) call.cancel();
+            });
+            Thread.startVirtualThread(() -> {
+                try {
+                    readStream(request, sink, cancelled, connection);
+                    if (!sink.isCancelled()) sink.complete();
+                } catch (RuntimeException failure) {
+                    // 只允许本边界定义的分类，不把 SDK、JSON 或网络异常正文传出去。
+                    if (!sink.isCancelled()) {
+                        if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) {
+                            // 保留固定领域类别，应用层才能区分等待并发与额度暂停；不携带原异常链。
+                            sink.error(new com.lawrence.travel.domain.execution.control.CallRejectedException(rejected.reason()));
+                        } else {
+                            String code = failure instanceof HttpTransportException
+                                    ? failure.getMessage() : "MODEL_TRANSPORT_FAILED";
+                            sink.error(new HttpTransportException(code));
+                        }
+                    }
+                }
+            });
+        }, reactor.core.publisher.FluxSink.OverflowStrategy.ERROR));
+    }
+
+    /**
+     * 后台读取实际流；取消只关闭连接，计量及许可释放必须等待此方法的实际退出。
+     * @param request 原始请求，仅固定端点可发送
+     * @param sink 下游数据接收器，不输出内部推理日志
+     * @param cancelled 本订阅取消标记
+     * @param connection 供取消回调关闭本次实际连接
+     */
+    private void readStream(HttpRequest request, reactor.core.publisher.FluxSink<String> sink,
+                            AtomicBoolean cancelled, java.util.concurrent.atomic.AtomicReference<Call> connection) {
+        if (cancelled.get()) return;
+        var prepared = prepare(request);
+        try (var permit = admission.begin(runId, role, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME", prepared.upper())) {
+            if (!permit.target().modelId().equals(prepared.model())) throw new HttpTransportException("MODEL_ID_REJECTED");
+            var outgoing = new Request.Builder().url(ENDPOINT).post(RequestBody.create(prepared.body(),
+                    MediaType.get("application/json; charset=utf-8")));
+            request.getHeaders().forEach(outgoing::header);
+            outgoing.header("X-DashScope-SSE", "enable");
+            var call = client.newCall(outgoing.build());
+            call.timeout().timeout(permit.timeout().toMillis(), TimeUnit.MILLISECONDS);
+            connection.set(call);
+            inFlight.add(call);
+            if (closed.get() || cancelled.get()) call.cancel();
+            try {
+                TokenUsage usage;
+                try (var response = call.execute()) {
+                    if (!response.isSuccessful()) {
+                        String error = "";
+                        // 错误体也有界读取，只用于固定错误分类，绝不交给 SDK 或日志。
+                        if (response.body() != null) {
+                            var reader = response.body().charStream();
+                            var chars = new char[4096];
+                            int length = reader.read(chars);
+                            error = length < 0 ? "" : new String(chars, 0, length);
+                        }
+                        throw new HttpTransportException(safeError(response.code(), error));
+                    }
+                    if (response.body() == null || !response.header("Content-Type", "").toLowerCase(java.util.Locale.ROOT)
+                            .startsWith("text/event-stream")) throw new HttpTransportException("MODEL_STREAM_INVALID");
+                    usage = DashScopeSseReader.read(response.body().charStream(), data -> {
+                        if (!cancelled.get() && !closed.get()) sink.next(data);
+                    }, () -> cancelled.get() || closed.get());
+                }
+                // 最终累计用量只在流正常结束、关闭响应后生效；取消或截断保持 UNKNOWN。
+                if (cancelled.get() || closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
+                permit.complete(usage);
+            } catch (IOException failure) {
+                throw new HttpTransportException(cancelled.get() || closed.get()
+                        ? "MODEL_CANCELLED" : "MODEL_TRANSPORT_FAILED");
+            } finally { inFlight.remove(call); }
+        }
     }
 
     /** 停止新的发送并取消实际连接；许可仍由 execute 的退出路径结算，不提前释放。 */

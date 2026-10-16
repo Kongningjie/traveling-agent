@@ -81,6 +81,54 @@ public class HarnessContractTest {
         }
     }
 
+    /** 实际 Harness 工具委派另一 Harness；分支使用独立执行资源，不建立框架后台调度。 */
+    @Test
+    void delegatesToChildHarnessOnSeparateBoundedResources() throws Exception {
+        try (var resources = new com.lawrence.travel.infrastructure.execution.BoundedExecutionResources(1, 1);
+             var scope = resources.openRun()) {
+            var toolkit = new Toolkit();
+            toolkit.registerTool(new ChildHarnessTool(scope, workspace.resolve("child")));
+            try (var parent = RestrictedHarnessFactory.create(new ScriptedModel(), toolkit,
+                    workspace.resolve("parent"), "coordinator")) {
+                var result = parent.call(List.of(Msg.builder().name("user").role(MsgRole.USER)
+                        .content(TextBlock.builder().text("delegate then answer").build()).build()),
+                        RestrictedHarnessFactory.StructuredReply.class).block(Duration.ofSeconds(10));
+                assertThat(result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer()).isEqualTo("7");
+            }
+        }
+    }
+
+    /** 显式委派的诊断工具；不开放默认 subagent 工具，也不直接访问存储。 */
+    public static final class ChildHarnessTool {
+        private final com.lawrence.travel.application.port.ExecutionResources.RunScope scope;
+        private final Path workspace;
+
+        /**
+         * 绑定父运行共享的分支额度和独立子上下文目录。
+         * @param scope 父运行资源范围
+         * @param workspace 隔离子目录
+         */
+        public ChildHarnessTool(com.lawrence.travel.application.port.ExecutionResources.RunScope scope, Path workspace) {
+            this.scope = scope;
+            this.workspace = workspace;
+        }
+
+        /** @return 从真实子 Harness 工具循环取得的固定结果；失败不补造答案 */
+        @Tool(name = "lookup_validation_value", description = "Delegate the offline validation to a child agent.")
+        public String lookup() {
+            return scope.forkResearch(() -> {
+                var toolkit = new Toolkit();
+                toolkit.registerTool(new ProbeTool());
+                try (var child = RestrictedHarnessFactory.create(new ScriptedModel(), toolkit, workspace, "research")) {
+                    var result = child.call(List.of(Msg.builder().name("user").role(MsgRole.USER)
+                            .content(TextBlock.builder().text("lookup then answer").build()).build()),
+                            RestrictedHarnessFactory.StructuredReply.class).block(Duration.ofSeconds(5));
+                    return result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer();
+                }
+            }).toCompletableFuture().orTimeout(8, java.util.concurrent.TimeUnit.SECONDS).join();
+        }
+    }
+
     /** 无外部副作用的测试工具，不读取真实用户数据。 */
     public static class ProbeTool {
         final AtomicInteger calls = new AtomicInteger();

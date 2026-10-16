@@ -93,7 +93,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         var transport = new GuardedDashScopeTransport(admission, runId, role, client);
         var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
                 .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
-                .stream(false).enableThinking(false).enableSearch(false).httpTransport(transport)
+                .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
                 .defaultOptions(GenerateOptions.builder().maxTokens(1024)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
         var harness = RestrictedHarnessFactory.create(model, toolkits.apply(runId, role),
@@ -117,7 +117,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                         "MODEL_ACCESS_DENIED", "MODEL_INVALID_PARAMETER", "MODEL_NOT_FOUND",
                         "MODEL_RATE_LIMITED", "MODEL_TRANSPORT_FAILED", "MODEL_OPTIONS_REJECTED",
                         "MODEL_ENDPOINT_REJECTED", "MODEL_INPUT_TOO_LARGE", "MODEL_INPUT_INVALID",
-                        "MODEL_MEDIA_NOT_ALLOWED", "MODEL_ID_REJECTED", "MODEL_STREAM_NOT_ENABLED").contains(code)
+                        "MODEL_MEDIA_NOT_ALLOWED", "MODEL_ID_REJECTED", "MODEL_STREAM_INVALID",
+                        "MODEL_STREAM_INCOMPLETE", "MODEL_STREAM_TOO_LARGE", "MODEL_STREAM_PROVIDER_ERROR").contains(code)
                         || code.matches("MODEL_PROVIDER_HTTP_[1-5][0-9]{2}"))) return code;
             }
         }

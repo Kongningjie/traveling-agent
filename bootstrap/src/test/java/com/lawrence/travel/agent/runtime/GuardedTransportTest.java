@@ -158,4 +158,20 @@ class GuardedTransportTest {
             verify(call, never()).execute();
         }
     }
+    /** 单个模型槽即可执行父请求与后续调查请求，父流程不会跨工具委派占用请求许可。 */
+    @Test
+    void releasesParentRequestBeforeDispatchingChild() throws Exception {
+        try (var transport = transport(true);
+             var resources = new com.lawrence.travel.infrastructure.execution.BoundedExecutionResources(1, 1);
+             var scope = resources.openRun()) {
+            when(call.execute()).thenAnswer(invocation -> response(200,
+                    "{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"));
+            assertThat(transport.execute(request()).isSuccessful()).isTrue();
+            var child = scope.forkResearch(() -> transport.execute(request()).isSuccessful());
+            assertThat(child.toCompletableFuture().get(3, TimeUnit.SECONDS)).isTrue();
+            verify(call, org.mockito.Mockito.times(2)).execute();
+            try (var lease = slots.tryAcquire()) { assertThat(lease).isNotNull(); }
+        }
+    }
+
 }
