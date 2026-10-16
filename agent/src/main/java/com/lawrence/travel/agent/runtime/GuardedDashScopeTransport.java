@@ -1,0 +1,212 @@
+package com.lawrence.travel.agent.runtime;
+
+import com.lawrence.travel.application.execution.ModelCallAdmission;
+import com.lawrence.travel.domain.execution.control.TokenUsage;
+import io.agentscope.core.model.transport.HttpRequest;
+import io.agentscope.core.model.transport.HttpResponse;
+import io.agentscope.core.model.transport.HttpTransport;
+import io.agentscope.core.model.transport.HttpTransportException;
+import io.agentscope.core.util.JsonUtils;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import okhttp3.Call;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import reactor.core.publisher.Flux;
+
+/** 北京原生实时接口的发送边界；使用多模态端点但只允许文本，每次 HTTP 独立预占。 */
+public final class GuardedDashScopeTransport implements HttpTransport, AutoCloseable {
+    public static final String ENDPOINT =
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+    private final ModelCallAdmission admission;
+    private final UUID runId;
+    private final String role;
+    private final Call.Factory client;
+    private final Set<Call> inFlight = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    /**
+     * 固定实际传输策略，不接受调用方指定替代地域或重定向。
+     * @param admission 持久化准入门禁
+     * @param runId 原运行标识
+     * @param role 已配置角色
+     * @param client 共享连接池客户端；重试、重定向及拦截器在边界重新限制
+     */
+    public GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role,
+                                    OkHttpClient client) {
+        this.admission = admission;
+        this.runId = runId;
+        this.role = role;
+        var builder = client.newBuilder().retryOnConnectionFailure(false)
+                .followRedirects(false).followSslRedirects(false)
+                // 非流式模型可能长时间无响应字节；总时限由每次 Call 的预算超时统一控制。
+                .readTimeout(0, TimeUnit.MILLISECONDS);
+        builder.interceptors().clear();
+        builder.networkInterceptors().clear();
+        this.client = builder.build();
+    }
+
+    /**
+     * 包内测试接缝，用可控连接验证取消与计量，不改变生产端点限制。
+     * @param admission 持久化门禁
+     * @param runId 原运行
+     * @param role 角色
+     * @param client 可控连接工厂
+     */
+    GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role, Call.Factory client) {
+        this.admission = admission;
+        this.runId = runId;
+        this.role = role;
+        this.client = client;
+    }
+
+    /**
+     * {@inheritDoc} 只允许有界文本请求；供应商异常只保留固定分类，原始错误正文不进入 SDK 日志。
+     * @param request SDK 完成格式化后的请求
+     * @return 已采集用量的成功响应
+     */
+    @Override
+    public HttpResponse execute(HttpRequest request) {
+        if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
+        if (!ENDPOINT.equals(request.getUrl()) || !"POST".equals(request.getMethod())) {
+            throw new HttpTransportException("MODEL_ENDPOINT_REJECTED");
+        }
+        String body = request.getBody();
+        if (body == null || body.getBytes(StandardCharsets.UTF_8).length > 65536) {
+            throw new HttpTransportException("MODEL_INPUT_TOO_LARGE");
+        }
+        Map<?, ?> json = JsonUtils.getJsonCodec().fromJson(body, Map.class);
+        requireTextOnly(json);
+        Map<?, ?> parameters = (Map<?, ?>) json.get("parameters");
+        if (parameters == null || !(parameters.get("max_tokens") instanceof Number max)
+                || max.intValue() < 1 || max.intValue() > 2048
+                || Boolean.TRUE.equals(parameters.get("enable_thinking"))
+                || Boolean.TRUE.equals(parameters.get("enable_search"))) {
+            throw new HttpTransportException("MODEL_OPTIONS_REJECTED");
+        }
+        // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
+        // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
+        long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
+        try (var permit = admission.begin(runId, role, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME", upper)) {
+            if (!permit.target().modelId().equals(json.get("model"))) {
+                throw new HttpTransportException("MODEL_ID_REJECTED");
+            }
+            Request.Builder outgoing = new Request.Builder().url(ENDPOINT)
+                    .post(RequestBody.create(body, MediaType.get("application/json; charset=utf-8")));
+            request.getHeaders().forEach(outgoing::header);
+            Call call = client.newCall(outgoing.build());
+            call.timeout().timeout(permit.timeout().toMillis(), TimeUnit.MILLISECONDS);
+            inFlight.add(call);
+            // close 与登记竞态时再检查一次，保证用户停止后不会漏掉刚登记的连接。
+            if (closed.get()) call.cancel();
+            try {
+                String responseBody;
+                int status;
+                try (var response = call.execute()) {
+                    status = response.code();
+                    responseBody = response.body() == null ? "" : response.body().string();
+                }
+                // 先耗尽并关闭响应，再结算释放许可；取消不会提前释放仍在途的连接。
+                permit.complete(readUsage(responseBody));
+                if (status < 200 || status >= 300) {
+                    throw new HttpTransportException(safeError(status, responseBody));
+                }
+                if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
+                return HttpResponse.builder().statusCode(status).body(responseBody).build();
+            } catch (IOException failure) {
+                // 不保留带 URL、请求内容或认证信息的异常链。未知用量由 permit.close 保守结算。
+                throw new HttpTransportException(closed.get() ? "MODEL_CANCELLED" : "MODEL_TRANSPORT_FAILED");
+            } finally {
+                inFlight.remove(call);
+            }
+        }
+    }
+
+    /**
+     * 限制多模态端点仅接收文本和工具消息，媒体内容必须在申请额度前拒绝。
+     * @param json 已解析请求
+     */
+    private static void requireTextOnly(Map<?, ?> json) {
+        if (!(json.get("input") instanceof Map<?, ?> input)
+                || !(input.get("messages") instanceof java.util.List<?> messages)) {
+            throw new HttpTransportException("MODEL_INPUT_INVALID");
+        }
+        for (Object item : messages) {
+            if (!(item instanceof Map<?, ?> message)) throw new HttpTransportException("MODEL_INPUT_INVALID");
+            Object content = message.get("content");
+            if (content == null || content instanceof String) continue;
+            if (!(content instanceof java.util.List<?> blocks)) throw new HttpTransportException("MODEL_INPUT_INVALID");
+            for (Object block : blocks) {
+                if (!(block instanceof Map<?, ?> fields) || fields.size() != 1
+                        || !(fields.get("text") instanceof String)) {
+                    throw new HttpTransportException("MODEL_MEDIA_NOT_ALLOWED");
+                }
+            }
+        }
+    }
+
+    /**
+     * 从供应商完整响应读取累计用量，缺失或不合法时保留未知。
+     * @param body 仅在内存中解析的响应正文
+     * @return 已知 Token 或 null
+     */
+    private static TokenUsage readUsage(String body) {
+        try {
+            Map<?, ?> json = JsonUtils.getJsonCodec().fromJson(body, Map.class);
+            if (json.get("usage") instanceof Map<?, ?> usage
+                    && usage.get("input_tokens") instanceof Number input
+                    && usage.get("output_tokens") instanceof Number output) {
+                return new TokenUsage(input.longValue(), output.longValue());
+            }
+        } catch (RuntimeException ignored) {
+            // 解析失败不能凭空补零，后续门禁根据 UNKNOWN 暂停。
+        }
+        return null;
+    }
+
+    /**
+     * 只映射明确的免费保护码和 HTTP 分类，不传播供应商任意文本。
+     * @param status HTTP 状态
+     * @param body 未记录日志的错误正文
+     * @return 固定错误码
+     */
+    private static String safeError(int status, String body) {
+        try {
+            Object code = JsonUtils.getJsonCodec().fromJson(body, Map.class).get("code");
+            if ("AllocationQuota.FreeTierOnly".equals(code)) return "MODEL_FREE_QUOTA_EXHAUSTED";
+            if ("InvalidParameter".equals(code)) return "MODEL_INVALID_PARAMETER";
+            if ("InvalidApiKey".equals(code)) return "MODEL_ACCESS_DENIED";
+            if ("ModelNotFound".equals(code)) return "MODEL_NOT_FOUND";
+        } catch (RuntimeException ignored) {
+            // 未知正文只保留数字状态，不回传自由文本。
+        }
+        if (status == 401 || status == 403) return "MODEL_ACCESS_DENIED";
+        if (status == 429) return "MODEL_RATE_LIMITED";
+        return "MODEL_PROVIDER_HTTP_" + status;
+    }
+
+    /**
+     * 当前接线只使用非流式响应，拒绝隐式切换到未验证的 SSE 传输。
+     * @param request 未发送的请求
+     * @return 固定失败信号
+     */
+    @Override
+    public Flux<String> stream(HttpRequest request) {
+        return Flux.error(new HttpTransportException("MODEL_STREAM_NOT_ENABLED"));
+    }
+
+    /** 停止新的发送并取消实际连接；许可仍由 execute 的退出路径结算，不提前释放。 */
+    @Override
+    public void close() {
+        closed.set(true);
+        inFlight.forEach(Call::cancel);
+    }
+}

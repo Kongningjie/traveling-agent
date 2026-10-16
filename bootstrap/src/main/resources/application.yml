@@ -5,6 +5,10 @@ spring:
     name: traveling-agent
   profiles:
     default: local
+logging:
+  level:
+    # 框架可能记录提示词、工具内容或供应商异常；业务层只保留脱敏分类和计量。
+    io.agentscope: OFF
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8080}

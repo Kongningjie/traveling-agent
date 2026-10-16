@@ -6,18 +6,28 @@ import com.lawrence.travel.application.system.SystemOverviewService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.beans.factory.ObjectProvider;
+import com.lawrence.travel.application.execution.ModelCallAdmission;
+import java.nio.file.Path;
 
 /** 统一绑定应用端口及运行配置，使 api 和 application 不依赖具体 Agent 实现。 */
 @Configuration(proxyBeanMethods = false)
 public class ApplicationAssembly {
     /**
-     * 为应用层绑定当前仅暴露接线标识的 Harness 适配器。
+     * 为 local 绑定受控 Harness，smoke 继续使用不可调用适配器。
      *
-     * @return 不创建模型客户端、不调用外部服务的运行端口
+     * @param admission local 门禁，smoke 中不存在
+     * @param properties 固定模型配置
+     * @param environment 仅用于按需读取本机密钥
+     * @return 不主动调用外部服务的运行端口
      */
     @Bean
-    AgentRuntimePort agentRuntimePort() {
-        return new HarnessAgentRuntimeAdapter();
+    AgentRuntimePort agentRuntimePort(ObjectProvider<ModelCallAdmission> admission,
+                                     ExecutionControlProperties properties, Environment environment) {
+        var gate = admission.getIfAvailable();
+        return gate == null ? new HarnessAgentRuntimeAdapter()
+                : new HarnessAgentRuntimeAdapter(gate, properties.models(),
+                    () -> environment.getProperty("DASHSCOPE_API_KEY"), Path.of(".runtime/harness"));
     }
 
     /**
