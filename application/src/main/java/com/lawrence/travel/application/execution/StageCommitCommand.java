@@ -8,7 +8,7 @@ import java.util.UUID;
 import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT;
 
 /**
- * 原子阶段提交契约；产物、后继请求与事件完成必须由后续仓储实现一次事务保存。
+ * 原子阶段提交契约；产物选用、后继请求与事件完成必须由引擎一次事务保存。
  * @param fence 本次执行资格
  * @param artifactId 已准备的文本／JSON 业务产物 ID，不要求独立文件落盘
  * @param contentHash 业务产物 SHA256

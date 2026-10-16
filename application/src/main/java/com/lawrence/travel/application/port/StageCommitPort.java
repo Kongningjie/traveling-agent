@@ -2,7 +2,7 @@ package com.lawrence.travel.application.port;
 
 import com.lawrence.travel.application.execution.StageCommitCommand;
 
-/** 阶段提交持久化契约；DEV-0012 才接实际事务，此接口本身不提供运行或恢复能力。 */
+/** 阶段提交持久化契约；PostgreSQL 引擎执行实际短事务，接口不允许绕过执行资格。 */
 public interface StageCommitPort {
     /** 提交结果不能用布尔成功掩盖过期执行。 */
     enum Result {

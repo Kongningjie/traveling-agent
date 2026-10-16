@@ -84,6 +84,15 @@ public record ExecutionStep(UUID id, UUID runId, TaskScope scope, Key key, Plann
     }
 
     /**
+     * 额度暂停后再次领取时可能已用尽尝试；终止逻辑阶段而不改写已结束的尝试审计。
+     * @return 有尝试历史的失败阶段，不能制造第 N+1 次执行
+     */
+    public ExecutionStep exhaustRetries() {
+        DomainViolation.require((state == State.READY || state == State.RETRY_WAIT) && attemptCount > 0, ILLEGAL_TRANSITION);
+        return new ExecutionStep(id, runId, scope, key, mode, State.FAILED, attemptCount, currentAttemptId);
+    }
+
+    /**
      * 停止任意非终态阶段，不能将完成结果重新写成可执行。
      * @param superseded 是否由新代次取代，否则为取消
      * @return 停止状态

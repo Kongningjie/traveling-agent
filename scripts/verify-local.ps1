@@ -10,11 +10,15 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel')]
-    [string]$Scope = 'All'
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine')]
+    [string]$Scope = 'All',
+    # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
+    [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
+    [string]$TestMethod
 )
 
 $ErrorActionPreference = 'Stop'
+if ($TestMethod -and $Scope -eq 'All') { throw '方法选择只能用于 Identity、Travel 或 Engine 定向作用域。' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $projectRoot '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -25,7 +29,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 $allowedKeys = @('POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER',
     'POSTGRES_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD')
 $previousValues = @{}
-foreach ($key in $allowedKeys + 'TRAVEL_INTEGRATION_TESTS') {
+foreach ($key in $allowedKeys + @('TRAVEL_INTEGRATION_TESTS', 'TRAVEL_ENGINE_ENABLED')) {
     # 同时保存原值和未配置状态，finally 中可精确还原，而不是把测试配置留给后续任务。
     $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
@@ -38,12 +42,16 @@ try {
     }
     # 普通 Maven verify 默认不连接容器；仅本次进程显式打开集成测试条件。
     $env:TRAVEL_INTEGRATION_TESTS = 'true'
+    # 集成测试手动推进发现和恢复，避免后台周期与故障注入争抢随机测试事件。
+    $env:TRAVEL_ENGINE_ENABLED = 'false'
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
     $selectedTest = if ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
         elseif ($Scope -eq 'Travel') { '-Dtest=TravelStorageIntegrationTest' }
-        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest' }
+        elseif ($Scope -eq 'Engine') { '-Dtest=ExecutionEngineIntegrationTest' }
+        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest' }
+    if ($TestMethod) { $selectedTest += "#$TestMethod" }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
         $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '本地基础设施集成测试失败。' }

@@ -1,6 +1,8 @@
 package com.lawrence.travel.application.travel;
 
 import com.lawrence.travel.application.port.TravelStore;
+import com.lawrence.travel.application.port.BusinessTransactions;
+import com.lawrence.travel.application.port.TaskChangeObserver;
 import com.lawrence.travel.domain.identity.UserIdentity;
 import com.lawrence.travel.domain.itinerary.ItineraryVersion;
 import com.lawrence.travel.domain.travel.ConstraintRevision;
@@ -13,11 +15,17 @@ import java.util.UUID;
  */
 public final class TravelStorageService {
     private final TravelStore store;
+    private final BusinessTransactions transactions;
+    private final TaskChangeObserver changes;
 
     /**
      * @param store 原子存储端口，不依赖具体 Mapper
+     * @param transactions 同源短事务
+     * @param changes 原子失效旧运行，不触发模型调用
      */
-    public TravelStorageService(TravelStore store) { this.store = java.util.Objects.requireNonNull(store); }
+    public TravelStorageService(TravelStore store, BusinessTransactions transactions, TaskChangeObserver changes) {
+        this.store = java.util.Objects.requireNonNull(store); this.transactions = transactions; this.changes = changes;
+    }
 
     /**
      * @param actor 已认证主体
@@ -59,7 +67,11 @@ public final class TravelStorageService {
      * @return 修改登记结果，不表示执行已启动
      */
     public TravelStore.StoredTask registerChange(UserIdentity actor, UUID taskId, String key, long expected, UUID inputId, long sequence) {
-        return store.registerChange(new TaskScope(requireActor(actor), taskId), key, expected, inputId, sequence);
+        return transactions.required(() -> {
+            var result = store.registerChange(new TaskScope(requireActor(actor), taskId), key, expected, inputId, sequence);
+            changes.changed(new TaskScope(actor.id(), taskId));
+            return result;
+        });
     }
 
     /**

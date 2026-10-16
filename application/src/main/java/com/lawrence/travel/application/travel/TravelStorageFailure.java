@@ -4,6 +4,7 @@ package com.lawrence.travel.application.travel;
  * 存储用例固定错误；不携带 SQL、正文或底层异常链。
  */
 public final class TravelStorageFailure extends RuntimeException {
+    private final Code code;
     /**
      * 对外映射分类，资源缺失和越权使用同一结果。
      */
@@ -31,5 +32,7 @@ public final class TravelStorageFailure extends RuntimeException {
     /**
      * @param code 固定失败分类
      */
-    public TravelStorageFailure(Code code) { super(java.util.Objects.requireNonNull(code).name()); }
+    public TravelStorageFailure(Code code) { super(java.util.Objects.requireNonNull(code).name()); this.code = code; }
+    /** @return 可确定处理的固定分类，不读取异常原文判断业务行为 */
+    public Code code() { return code; }
 }
