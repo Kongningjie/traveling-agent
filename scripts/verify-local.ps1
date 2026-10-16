@@ -8,7 +8,11 @@
 .EXAMPLE
     .\scripts\verify-local.ps1
 #>
-param()
+param(
+    # 本阶段可仅复测账号；默认仍保留本地基础设施统一验收入口。
+    [ValidateSet('All', 'Identity')]
+    [string]$Scope = 'All'
+)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -37,8 +41,10 @@ try {
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
+    $selectedTest = if ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
+        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest' }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
-        '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+        $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '本地基础设施集成测试失败。' }
 } finally {
     Set-Location -LiteralPath $originalLocation

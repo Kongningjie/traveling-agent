@@ -25,3 +25,10 @@ spring:
 mybatis:
   configuration:
     map-underscore-to-camel-case: true
+
+# 仅本地 HTTP 开发例外；未来 HTTPS 环境必须启用 Secure。
+server:
+  servlet:
+    session:
+      cookie:
+        secure: false
