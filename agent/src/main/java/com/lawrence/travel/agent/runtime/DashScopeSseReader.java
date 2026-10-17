@@ -100,7 +100,8 @@ final class DashScopeSseReader {
             }
             Object reason = choice.get("finish_reason");
             if (reason instanceof String text && !text.isBlank() && !text.equals("null")) {
-                if (!Set.of("stop", "length", "tool_calls").contains(text)) {
+                if (text.equals("length")) throw new HttpTransportException("MODEL_OUTPUT_TRUNCATED");
+                if (!Set.of("stop", "tool_calls").contains(text)) {
                     throw new HttpTransportException("MODEL_STREAM_INVALID");
                 }
                 terminal = true;

@@ -52,7 +52,7 @@ public final class StageExecutor {
         } catch (CallRejectedException rejected) {
             if (control.cancelled()) return;
             var failure = switch (rejected.reason()) {
-                case CALL_BUDGET_EXHAUSTED, ACTIVE_TIME_EXHAUSTED -> ExecutionEngineStore.Failure.BUDGET;
+                case CALL_BUDGET_EXHAUSTED, ACTIVE_TIME_EXHAUSTED, CONTEXT_BUDGET_EXHAUSTED -> ExecutionEngineStore.Failure.BUDGET;
                 case MODEL_CONCURRENCY_FULL -> ExecutionEngineStore.Failure.RETRYABLE;
                 default -> ExecutionEngineStore.Failure.QUOTA;
             };

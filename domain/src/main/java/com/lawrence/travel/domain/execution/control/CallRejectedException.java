@@ -18,6 +18,8 @@ public final class CallRejectedException extends RuntimeException {
         CALL_BUDGET_EXHAUSTED,
         /** 本运行主动执行时间已达上限。 */
         ACTIVE_TIME_EXHAUSTED,
+        /** 关键上下文无法在输入上限内完整容纳，必须保留产物并暂停。 */
+        CONTEXT_BUDGET_EXHAUSTED,
         /** 当前实际模型请求槽已占满，应排队而非忽略限制。 */
         MODEL_CONCURRENCY_FULL,
         /** 当前模式没有持久化计量仓储，不能放行真实调用。 */

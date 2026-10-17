@@ -33,8 +33,7 @@ public final class NegotiationInterpreter implements InputInterpreter {
                 + json.encode(java.util.Map.of("confirmed", com.lawrence.travel.domain.interaction.RequirementFields.fields(context.revision().requirements()),
                         "questions", context.card() == null ? java.util.List.of() : context.card().specs().values().stream().map(Negotiation.QuestionSpec::field).toList(), "text", context.message().text(),
                         "receivedAt", context.receivedAt().atZone(java.time.ZoneId.of("Asia/Shanghai")).toString()));
-        if (prompt.length() > 8192) throw new IllegalArgumentException("NEGOTIATION_CONTEXT_LIMIT");
-        try (var invocation = runtime.start(runId, "coordinator", prompt)) {
+        try (var invocation = runtime.startContextual(runId, "coordinator", prompt, new com.lawrence.travel.application.memory.AgentContext.Basis(context.revision().revision(), null))) {
             try { return json.decode(invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS), Negotiation.Interpretation.class); }
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException("INTERPRETATION_INTERRUPTED"); }
             catch (java.util.concurrent.ExecutionException failure) { if (failure.getCause() instanceof CallRejectedException rejected) throw rejected; throw new IllegalStateException("INTERPRETATION_FAILED"); }

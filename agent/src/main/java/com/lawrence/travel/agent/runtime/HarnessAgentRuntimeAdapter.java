@@ -30,6 +30,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final Supplier<String> keySupplier;
     private final Path workspaceRoot;
     private final java.util.function.BiFunction<UUID, String, Toolkit> toolkits;
+    private final com.lawrence.travel.application.memory.ContextAssembler contexts;
+    private final com.lawrence.travel.application.port.InteractionCodec json;
     private final OkHttpClient client = new OkHttpClient();
 
     /** smoke 仅提供状态，没有请求发送能力。 */
@@ -60,6 +62,11 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models,
                                      Supplier<String> keySupplier, Path workspaceRoot,
                                      java.util.function.BiFunction<UUID, String, Toolkit> toolkits) {
+        this(admission, models, keySupplier, workspaceRoot, toolkits, null, null);
+    }
+    /** @param admission 门禁 @param models 型号 @param keySupplier 本机凭据 @param workspaceRoot 隔离目录 @param toolkits 白名单工具 @param contexts 业务上下文用例 @param json 严格JSON */
+    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models, Supplier<String> keySupplier, Path workspaceRoot, java.util.function.BiFunction<UUID, String, Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts, com.lawrence.travel.application.port.InteractionCodec json) {
+        this.contexts = contexts; this.json = json;
         this.admission = admission;
         this.models = Map.copyOf(models);
         this.keySupplier = keySupplier;
@@ -85,27 +92,32 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     }
     /** {@inheritDoc} 原文提取等场景禁用所有框架工具，网页不能诱导额外付费动作。 */
     @Override public Invocation startWithoutTools(UUID runId, String role, String prompt) { return startInvocation(runId, role, prompt, false); }
+    /** {@inheritDoc} 业务入口强制使用数据库版本化上下文，不降级为原始调用。 */
+    @Override public Invocation startContextual(UUID runId, String role, String prompt, com.lawrence.travel.application.memory.AgentContext.Basis basis) { if (contexts == null || json == null || basis == null) throw new IllegalStateException("CONTEXT_NOT_CONFIGURED"); return startInvocation(runId, role, prompt, false, basis); }
     /** @param runId 原运行 @param role 模型配置角色 @param prompt 有界文本 @param allowTools 是否允许既有白名单工具 @return 隔离调用，全部经过相同门禁 */
-    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) {
+    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) { return startInvocation(runId, role, prompt, allowTools, null); }
+    /** @param runId 原运行 @param role 角色 @param prompt 当前请求 @param allowTools 工具权限 @param basis 业务输入版本，原始探针可空 @return 压缩与主调用共用传输及预算 */
+    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools, com.lawrence.travel.application.memory.AgentContext.Basis basis) {
         if (admission == null) throw new IllegalStateException("EXTERNAL_DISABLED");
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
         }
-        if (prompt == null || prompt.isBlank() || prompt.length() > (role.equals("planner") || role.equals("reviewer") ? 24000 : 8192)) {
+        if (prompt == null || prompt.isBlank() || prompt.length() > (basis == null ? (role.equals("planner") || role.equals("reviewer") ? 24000 : 8192) : 131072)) {
             throw new IllegalArgumentException("MODEL_INPUT_INVALID");
         }
         String key = keySupplier.get();
         if (key == null || key.isBlank()) throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
-        var transport = new GuardedDashScopeTransport(admission, runId, role, client);
+        var source = new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.AgentContext.Source>();
+        var transport = new GuardedDashScopeTransport(admission, runId, role, client, () -> { if (source.get() != null) contexts.guard(source.get()); });
         var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
                 .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
                 .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
-                .defaultOptions(GenerateOptions.builder().maxTokens(role.equals("planner") ? 12288 : role.equals("reviewer") ? 4096 : 1024)
+                .defaultOptions(GenerateOptions.builder().maxTokens(role.equals("planner") ? 12288 : 4096)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
         var harness = RestrictedHarnessFactory.create(model, allowTools ? toolkits.apply(runId, role) : new Toolkit(),
                 workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);
         var invocation = new ActiveInvocation(harness, transport);
-        Thread.startVirtualThread(() -> invocation.execute(prompt));
+        Thread.startVirtualThread(() -> invocation.execute(() -> basis == null ? prompt : contexts.prepare(runId, role, basis, prompt, new HarnessContextCompression(model, json, source::set)).prompt()));
         return invocation;
     }
 
@@ -124,7 +136,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                         "MODEL_RATE_LIMITED", "MODEL_TRANSPORT_FAILED", "MODEL_OPTIONS_REJECTED",
                         "MODEL_ENDPOINT_REJECTED", "MODEL_INPUT_TOO_LARGE", "MODEL_INPUT_INVALID",
                         "MODEL_MEDIA_NOT_ALLOWED", "MODEL_ID_REJECTED", "MODEL_STREAM_INVALID",
-                        "MODEL_STREAM_INCOMPLETE", "MODEL_STREAM_TOO_LARGE", "MODEL_STREAM_PROVIDER_ERROR").contains(code)
+                        "MODEL_STREAM_INCOMPLETE", "MODEL_STREAM_TOO_LARGE", "MODEL_STREAM_PROVIDER_ERROR", "MODEL_OUTPUT_TRUNCATED").contains(code)
                         || code.matches("MODEL_PROVIDER_HTTP_[1-5][0-9]{2}"))) return code;
             }
         }
@@ -150,20 +162,23 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
 
         /**
          * 后台等待框架，只公开校验后的结构化产物或固定失败码。
-         * @param prompt 本次文本
+         * @param prompt 本次完整输入提供器，先压缩与校验再调用模型
          */
-        private void execute(String prompt) {
+        private void execute(Supplier<String> prompt) {
             try (harness; transport) {
                 if (cancelled.get()) throw new IllegalStateException("MODEL_CANCELLED");
                 var message = Msg.builder().name("user").role(MsgRole.USER)
-                        .content(TextBlock.builder().text(prompt).build()).build();
+                        .content(TextBlock.builder().text(prompt.get()).build()).build();
                 var response = harness.call(List.of(message), RestrictedHarnessFactory.StructuredReply.class).block();
                 if (response == null) throw new IllegalStateException("MODEL_OUTPUT_INVALID");
                 String answer = response.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer();
+                transport.checkContext();
                 if (!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
-                result.completeExceptionally(new IllegalStateException(
-                        cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure)));
+                if (!cancelled.get()) {
+                    for (Throwable cause = failure; cause != null; cause = cause.getCause()) if (cause instanceof CallRejectedException rejected) { result.completeExceptionally(rejected); return; }
+                }
+                result.completeExceptionally(new IllegalStateException(cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure)));
             }
         }
 

@@ -2,6 +2,7 @@ package com.lawrence.travel.agent.runtime;
 
 import com.lawrence.travel.application.execution.ModelCallAdmission;
 import com.lawrence.travel.domain.execution.control.TokenUsage;
+import com.lawrence.travel.domain.execution.control.CallRejectedException;
 import io.agentscope.core.model.transport.HttpRequest;
 import io.agentscope.core.model.transport.HttpResponse;
 import io.agentscope.core.model.transport.HttpTransport;
@@ -30,6 +31,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     private final UUID runId;
     private final String role;
     private final Call.Factory client;
+    private final Runnable contextGuard;
     private final Set<Call> inFlight = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -42,6 +44,11 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
      */
     public GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role,
                                     OkHttpClient client) {
+        this(admission, runId, role, client, () -> { });
+    }
+    /** @param admission 原门禁 @param runId 原运行 @param role 角色 @param client HTTP客户端 @param contextGuard 每次真实发送前的短事务版本检查 */
+    public GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role, OkHttpClient client, Runnable contextGuard) {
+        this.contextGuard = contextGuard;
         this.admission = admission;
         this.runId = runId;
         this.role = role;
@@ -62,6 +69,11 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
      * @param client 可控连接工厂
      */
     GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role, Call.Factory client) {
+        this(admission, runId, role, client, () -> { });
+    }
+    /** @param admission 测试门禁 @param runId 原运行 @param role 角色 @param client 可控本地连接 @param contextGuard 发送前版本检查；仅包内测试接缝 */
+    GuardedDashScopeTransport(ModelCallAdmission admission, UUID runId, String role, Call.Factory client, Runnable contextGuard) {
+        this.contextGuard = contextGuard;
         this.admission = admission;
         this.runId = runId;
         this.role = role;
@@ -103,6 +115,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                     throw new HttpTransportException(safeError(status, responseBody));
                 }
                 if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
+                rejectTruncated(responseBody);
                 return HttpResponse.builder().statusCode(status).body(responseBody).build();
             } catch (IOException failure) {
                 // 不保留带 URL、请求内容或认证信息的异常链。未知用量由 permit.close 保守结算。
@@ -119,6 +132,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
      * @return 验证后的正文、型号及保守 Token 上界
      */
     private Prepared prepare(HttpRequest request) {
+        contextGuard.run();
         if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
         if (!ENDPOINT.equals(request.getUrl()) || !"POST".equals(request.getMethod())) {
             throw new HttpTransportException("MODEL_ENDPOINT_REJECTED");
@@ -135,17 +149,27 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         if (!(json.get("model") instanceof String)) throw new HttpTransportException("MODEL_INPUT_INVALID");
         Map<?, ?> parameters = json.get("parameters") instanceof Map<?, ?> values ? values : null;
         if (parameters == null || !(parameters.get("max_tokens") instanceof Number max)
-                || max.intValue() < 1 || max.intValue() > (role.equals("planner") ? 12288 : role.equals("reviewer") ? 4096 : 2048)
+                || max.intValue() < 1 || max.intValue() > (role.equals("planner") ? 12288 : 4096)
                 || Boolean.TRUE.equals(parameters.get("enable_thinking"))
                 || Boolean.TRUE.equals(parameters.get("enable_search"))) {
             throw new HttpTransportException("MODEL_OPTIONS_REJECTED");
         }
+        if (HarnessContextCompression.estimateInput(body) > com.lawrence.travel.application.memory.ContextAssembler.limit(role)) throw new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
         // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
         // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
         long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
         return new Prepared(body, (String) json.get("model"), upper);
     }
 
+    /** @param body 已脱敏边界内成功响应，供应商按长度终止时禁止将前缀当完整产物 */
+    private void rejectTruncated(String body) {
+        try {
+            var payload = JsonUtils.getJsonCodec().fromJson(body, Map.class);
+            if (payload != null && payload.get("output") instanceof Map<?, ?> output && output.get("choices") instanceof java.util.List<?> choices)
+                for (Object item : choices) if (item instanceof Map<?, ?> choice && "length".equals(choice.get("finish_reason"))) throw new HttpTransportException("MODEL_OUTPUT_TRUNCATED");
+        } catch (HttpTransportException rejected) { throw rejected; }
+        catch (RuntimeException invalid) { throw new HttpTransportException("MODEL_INPUT_INVALID"); }
+    }
     /**
      * 发送前不可变检查结果。
      * @param body 有界文本 JSON
@@ -304,6 +328,9 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
             } finally { inFlight.remove(call); }
         }
     }
+
+    /** 返回模型产物前再次检查权威版本；不发起外部请求，不代替C事务资格检查。 */
+    public void checkContext() { contextGuard.run(); }
 
     /** 停止新的发送并取消实际连接；许可仍由 execute 的退出路径结算，不提前释放。 */
     @Override

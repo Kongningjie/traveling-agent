@@ -73,8 +73,8 @@ public interface NegotiationMapper {
      */
     @Insert("""
             WITH counter AS(UPDATE travel_task SET message_sequence=message_sequence+1 WHERE user_id=#{scope.userId} AND id=#{scope.taskId} RETURNING message_sequence)
-            INSERT INTO conversation_message(id,user_id,task_id,sequence,request_hash,body,answer,status)
-            SELECT #{id},#{scope.userId},#{scope.taskId},message_sequence,#{hash},CAST(#{body} AS jsonb),CAST(#{answer} AS jsonb),#{status} FROM counter
+            INSERT INTO conversation_message(id,user_id,task_id,sequence,request_hash,body,answer,status,preference_revision)
+            SELECT #{id},#{scope.userId},#{scope.taskId},message_sequence,#{hash},CAST(#{body} AS jsonb),CAST(#{answer} AS jsonb),#{status},(SELECT preference_revision FROM app_user WHERE id=#{scope.userId}) FROM counter
             """)
     int insert(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("hash") String hash, @Param("body") String body, @Param("answer") String answer, @Param("status") String status);
     /**

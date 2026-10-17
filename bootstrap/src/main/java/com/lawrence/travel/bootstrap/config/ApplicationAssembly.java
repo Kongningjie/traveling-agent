@@ -23,12 +23,13 @@ public class ApplicationAssembly {
      * @param properties 固定模型配置
      * @param environment 仅用于按需读取本机密钥
      * @param travelTools local 工具应用服务，smoke 不存在
+     * @param contexts local上下文装配，smoke不存在 @param json local严格编解码，smoke不存在
      * @return 不主动调用外部服务的运行端口
      */
     @Bean
     AgentRuntimePort agentRuntimePort(ObjectProvider<ModelCallAdmission> admission,
                                      ExecutionControlProperties properties, Environment environment,
-                                     ObjectProvider<TravelToolService> travelTools) {
+                                     ObjectProvider<TravelToolService> travelTools, ObjectProvider<com.lawrence.travel.application.memory.ContextAssembler> contexts, ObjectProvider<com.lawrence.travel.application.port.InteractionCodec> json) {
         var gate = admission.getIfAvailable();
         return gate == null ? new HarnessAgentRuntimeAdapter()
                 : new HarnessAgentRuntimeAdapter(gate, properties.models(),
@@ -39,7 +40,7 @@ public class ApplicationAssembly {
                             toolkit.registerTool(new TravelAgentTools(run, travelTools.getObject()));
                         }
                         return toolkit;
-                    });
+                    }, contexts.getIfAvailable(), json.getIfAvailable());
     }
 
     /**

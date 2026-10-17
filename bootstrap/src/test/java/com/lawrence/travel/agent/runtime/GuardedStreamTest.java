@@ -270,4 +270,13 @@ class GuardedStreamTest {
         }
     }
 
+    /** 长度终帧即使带合法JSON前缀也必须拒绝，不把截断的方案交给SDK完成提交。 */
+    @Test void lengthFinishedStreamIsRejected() throws Exception {
+        try (var transport = transport(true)) {
+            String frames = "data: " + LAST.replace("stop", "length") + "\n\ndata: [DONE]\n\n";
+            when(call.execute()).thenReturn(response(ResponseBody.create(frames, MediaType.get("text/event-stream"))));
+            assertThatThrownBy(() -> transport.stream(request()).collectList().block(Duration.ofSeconds(3))).hasMessage("MODEL_OUTPUT_TRUNCATED"); verify(ledger).finish(eq(reservation), isNull(), any());
+        }
+    }
+
 }

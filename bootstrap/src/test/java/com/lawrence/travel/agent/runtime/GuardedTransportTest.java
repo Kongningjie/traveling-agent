@@ -184,4 +184,27 @@ class GuardedTransportTest {
         }
     }
 
+    /** 完整SDK正文超出输入预算时在预占和网络之前拒绝，不能只检查调用方字符串。 */
+    @Test void oversizedInputStopsBeforeReservationAndNetwork() throws Exception {
+        try (var transport = transport(true)) {
+            String body = "{\"model\":\"test-model\",\"parameters\":{\"max_tokens\":128},\"input\":{\"messages\":[{\"role\":\"user\",\"content\":[{\"text\":\"" + "x".repeat(30000) + "\"}]}]}}";
+            var request = HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body(body).build();
+            assertThatThrownBy(() -> transport.execute(request)).hasMessage("CONTEXT_BUDGET_EXHAUSTED"); verify(call, never()).execute(); verify(ledger, never()).reserve(any(), any(), any(), any(), anyLong(), any());
+        }
+    }
+    /** 供应商按输出上限结束时，即使前缀是合法JSON也不能作为完整草案返回。 */
+    @Test void lengthFinishedOutputIsNeverReturnedAsComplete() throws Exception {
+        try (var transport = transport(true)) {
+            when(call.execute()).thenReturn(response(200, "{\"output\":{\"choices\":[{\"finish_reason\":\"length\"}]},\"usage\":{\"input_tokens\":17,\"output_tokens\":3}}"));
+            assertThatThrownBy(() -> transport.execute(request())).hasMessage("MODEL_OUTPUT_TRUNCATED"); verify(ledger).finish(eq(reservationId), eq(new TokenUsage(17, 3)), any());
+        }
+    }
+    /** 上下文已失效时检查先于预占及连接创建，不能在旧记忆已发送后才拒绝保存。 */
+    @Test void contextRevisionCheckRunsBeforeReservationAndConnection() {
+        var connections = new java.util.concurrent.atomic.AtomicInteger();
+        try (var transport = new GuardedDashScopeTransport(null, UUID.randomUUID(), "planner", (Call.Factory) request -> { connections.incrementAndGet(); throw new AssertionError("MUST_NOT_CONNECT"); }, () -> { throw new com.lawrence.travel.application.memory.PreferenceChangedException(); })) {
+            assertThatThrownBy(() -> transport.execute(request())).hasMessage("PREFERENCE_CHANGED"); assertThat(connections.get()).isZero(); verify(ledger, never()).reserve(any(), any(), any(), any(), anyLong(), any());
+        }
+    }
+
 }

@@ -34,7 +34,7 @@ public class CandidateConfiguration {
     @Bean CandidateStore candidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets,
                                        TravelJson json, ExecutionControlProperties controls, com.lawrence.travel.application.port.ResearchStore evidence, com.lawrence.travel.application.port.PreferenceStore preferences, BusinessTransactions transactions) {
         return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v4",
-                json.hash(json.encode(List.of("review-prompt-v3", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence, preferences, transactions);
+                json.hash(json.encode(List.of("review-prompt-v4", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence, preferences, transactions);
     }
     /**
      * @param store 候选权威
