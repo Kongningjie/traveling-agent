@@ -73,10 +73,12 @@ public class NegotiationConfiguration {
     /**
      * @param candidate 候选投影
      * @param negotiation 协商投影
+     * @param research 字段证据投影
+     * @param json 规范 JSON，用于提交前互斥检查
      * @return 两类互斥投影组合；适配器不互调
      */
-    @Bean @Primary StageProjection businessStageProjection(CandidateStore candidate, NegotiationStore negotiation) {
-        var delegates = List.of(candidate, negotiation);
+    @Bean @Primary StageProjection businessStageProjection(CandidateStore candidate, NegotiationStore negotiation, com.lawrence.travel.application.port.ResearchStore research, TravelJson json) {
+        var delegates = List.of(candidate, negotiation, research);
         return new StageProjection() {
             /**
              * {@inheritDoc} 每个业务只取得自己需要的前置锁。
@@ -86,6 +88,10 @@ public class NegotiationConfiguration {
              * {@inheritDoc} 一个阶段不能同时投影候选和协商状态。
              */
             @Override public Result project(ExecutionFence fence, StageType type, StageOutput output) {
+                var envelope = json.decode(output.checkpoint(), java.util.Map.class);
+                // 必须在任何投影写入之前拒绝混合信封，不能用返回 null 推断适配器没有产生副作用。
+                long owners = java.util.stream.Stream.of("operation", "negotiation", "research").filter(envelope::containsKey).count();
+                if (owners > 1) throw new IllegalArgumentException("AMBIGUOUS_PROJECTION");
                 Result selected = null;
                 for (StageProjection port : delegates) { var result = port.project(fence, type, output); if (result != null) { if (selected != null) throw new IllegalArgumentException("AMBIGUOUS_PROJECTION"); selected = result; } }
                 return selected;

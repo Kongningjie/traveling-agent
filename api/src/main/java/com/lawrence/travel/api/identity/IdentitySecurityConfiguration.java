@@ -99,7 +99,7 @@ public class IdentitySecurityConfiguration {
                                 && request.getServletPath().matches("/api/v1/tasks/[0-9a-fA-F-]{36}/events/stream")).permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/me").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/tasks/*/view", "/api/v1/tasks/*/events", "/api/v1/tasks/*/events/stream").authenticated()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/tasks/*/messages", "/api/v1/tasks/*/decision").authenticated()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/tasks/*/messages", "/api/v1/tasks/*/decision", "/api/v1/tasks/*/evidence").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/tasks", "/api/v1/tasks/*/messages", "/api/v1/tasks/*/answers").authenticated()
                         .anyRequest().denyAll())
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contexts))

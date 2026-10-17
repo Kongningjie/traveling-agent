@@ -10,6 +10,8 @@ public interface AgentRuntimePort {
      * @return 可取消句柄；产物不代表业务提交
      */
     Invocation start(java.util.UUID runId, String role, String prompt);
+    /** @param runId 原运行 @param role 固定模型角色 @param prompt 不可信数据上下文 @return 不暴露任何工具的结构化调用句柄；原预算和取消机制不变 */
+    Invocation startWithoutTools(java.util.UUID runId, String role, String prompt);
 
     /** 隔离本次执行的结果及取消能力，不暴露 SDK 类型。 */
     interface Invocation extends AutoCloseable {

@@ -81,6 +81,12 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     /** {@inheritDoc} 工作区按原运行和本次尝试隔离，结果取消后不可回流。 */
     @Override
     public Invocation start(UUID runId, String role, String prompt) {
+        return startInvocation(runId, role, prompt, true);
+    }
+    /** {@inheritDoc} 原文提取等场景禁用所有框架工具，网页不能诱导额外付费动作。 */
+    @Override public Invocation startWithoutTools(UUID runId, String role, String prompt) { return startInvocation(runId, role, prompt, false); }
+    /** @param runId 原运行 @param role 模型配置角色 @param prompt 有界文本 @param allowTools 是否允许既有白名单工具 @return 隔离调用，全部经过相同门禁 */
+    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) {
         if (admission == null) throw new IllegalStateException("EXTERNAL_DISABLED");
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
@@ -96,7 +102,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                 .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
                 .defaultOptions(GenerateOptions.builder().maxTokens(1024)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
-        var harness = RestrictedHarnessFactory.create(model, toolkits.apply(runId, role),
+        var harness = RestrictedHarnessFactory.create(model, allowTools ? toolkits.apply(runId, role) : new Toolkit(),
                 workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);
         var invocation = new ActiveInvocation(harness, transport);
         Thread.startVirtualThread(() -> invocation.execute(prompt));
