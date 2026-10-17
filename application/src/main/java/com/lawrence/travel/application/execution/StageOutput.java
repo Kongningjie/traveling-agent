@@ -24,7 +24,7 @@ public record StageOutput(String text, String checkpoint, List<StagePlan> next, 
  * 纯咨询完成。
  */ CONSULTATION_COMPLETE, /**
  * 等待明确回答。
- */ WAIT_USER }
+ */ WAIT_USER, /** 经过精确报告门禁的候选等待用户确认，不自动生效。 */ PRESENT_CANDIDATE }
     /**
      * 禁止没有下一步却仍显示运行，也禁止把问题或行程生成当作咨询完成。
      */

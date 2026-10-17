@@ -5,6 +5,7 @@ import com.lawrence.travel.application.execution.StageOutput;
 import com.lawrence.travel.application.execution.StagePlan;
 import com.lawrence.travel.application.port.ExecutionEngineStore;
 import com.lawrence.travel.application.port.TravelStore;
+import com.lawrence.travel.application.port.StageProjection;
 import com.lawrence.travel.application.travel.TravelStorageFailure;
 import com.lawrence.travel.domain.execution.ExecutionFence;
 import com.lawrence.travel.domain.execution.ExecutionLease;
@@ -56,6 +57,7 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
     private final int maximumResearch;
     private final Duration leaseTime;
     private final int maximumAttempts;
+    private final StageProjection projection;
 
     /**
      * @param mapper 执行 SQL
@@ -72,11 +74,24 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
     public PostgresExecutionEngine(EngineMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json,
                                    PlatformTransactionManager manager, RunLimits limits, int maximumRuns,
                                    int maximumResearch, Duration leaseTime, int maximumAttempts) {
+        this(mapper, tasks, budgets, json, manager, limits, maximumRuns, maximumResearch, leaseTime, maximumAttempts,
+                new StageProjection() {
+                    /** 无候选仓储的测试引擎不投影业务产物。 */
+                    @Override public void beforeTaskLock(ExecutionFence fence, StageOutput output) { }
+                    /** @return 空；禁止无候选仓储时进入等待接受 */
+                    @Override public UUID project(ExecutionFence fence, StageType type, StageOutput output) { return null; }
+                });
+    }
+    /** @param mapper 执行 SQL @param tasks 任务 SQL @param budgets 权威预算 @param json JSON @param manager 事务 @param limits 上限 @param maximumRuns 并行数 @param maximumResearch 调查数 @param leaseTime 租约 @param maximumAttempts 尝试数 @param projection 同事务业务投影 */
+    public PostgresExecutionEngine(EngineMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json,
+                                   PlatformTransactionManager manager, RunLimits limits, int maximumRuns,
+                                   int maximumResearch, Duration leaseTime, int maximumAttempts, StageProjection projection) {
         require(maximumRuns > 0 && maximumResearch > 0 && leaseTime != null && leaseTime.toMillis() > 0 && maximumAttempts > 0, INVALID_INPUT);
         this.mapper = mapper; this.tasks = tasks; this.budgets = budgets; this.json = json;
         transaction = new TransactionTemplate(manager); transaction.setTimeout(10);
         initialLimits = limits; this.maximumRuns = maximumRuns; this.maximumResearch = maximumResearch;
         this.leaseTime = leaseTime; this.maximumAttempts = maximumAttempts;
+        this.projection = java.util.Objects.requireNonNull(projection);
     }
 
     /**
@@ -203,7 +218,10 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      */
     @Override public Result commit(StageCommitCommand command) {
         return tx(() -> {
-            var f = command.fence(); Session session = lock(f.scope(), f.runId());
+            var f = command.fence();
+            var preview = mapper.artifact(f.scope(), f.runId(), f.stepId(), command.artifactId()); require(preview != null, NOT_FOUND);
+            projection.beforeTaskLock(f, json.decode(preview.body(), StageOutput.class));
+            Session session = lock(f.scope(), f.runId());
             var event = event(session, f.claim().eventId()); var stepRow = session.steps.get(f.stepId()); require(stepRow != null, NOT_FOUND);
             var artifact = mapper.artifact(f.scope(), f.runId(), f.stepId(), command.artifactId()); require(artifact != null, NOT_FOUND);
             require(artifact.attemptId().equals(f.attemptId()) && artifact.contentHash().equals(command.contentHash()), IDEMPOTENCY_CONFLICT);
@@ -221,6 +239,12 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             // SQL 执行时再次比较数据库时钟，封住校验与写入之间到期的窗口。
             // 此时只是同一事务内占定完成资格；后续任一失败都会连 DONE 状态一起回滚。
             if (mapper.completeEvent(f) != 1) return Result.STALE;
+            UUID eligibleCandidate = projection.project(f, step(session, f.stepId()).key().type(), output);
+            if (output.outcome() == StageOutput.Outcome.PRESENT_CANDIDATE) {
+                require(eligibleCandidate != null && session.row.goal().equals(Goal.PLANNING.name())
+                        && mapper.leased(f.runId()) == 0 && mapper.pending(f.runId()) == 0
+                        && mapper.openDecisions(f.scope(), f.runId()) == 0, INVALID_INPUT);
+            }
             if (output.outcome() == StageOutput.Outcome.CONSULTATION_COMPLETE) {
                 require(session.row.goal().equals(Goal.CONSULTATION.name()) && mapper.leased(f.runId()) == 0
                         && mapper.pending(f.runId()) == 0 && mapper.openDecisions(f.scope(), f.runId()) == 0, INVALID_INPUT);
@@ -237,7 +261,22 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             checked(mapper.finishStep(f.scope(), f.runId(), f.stepId(), json.encode(completed), f.attemptId(), receipt, command.artifactId()));
             checked(mapper.finishAttempt(f.attemptId(), "COMPLETED"));
             if (output.outcome() == StageOutput.Outcome.CONSULTATION_COMPLETE) session.run = session.run.completeConsultation();
+            if (output.outcome() == StageOutput.Outcome.PRESENT_CANDIDATE) session.run = session.run.waitForAcceptance(eligibleCandidate);
             reconcile(session); visible(f.scope(), f.runId(), f.stepId(), "STAGE_COMPLETED"); return Result.COMMITTED;
+        });
+    }
+
+    /** {@inheritDoc} 接受失败后的可靠重校验登记与外层接受请求事务共同提交。 */
+    @Override public void revalidateCandidate(TaskScope scope, UUID runId, UUID cause, StagePlan next) {
+        tx(() -> {
+            Session session = lock(scope, runId);
+            require(session.run.state() == ExecutionRun.State.WAITING_ACCEPTANCE && runId.equals(currentRun(scope))
+                    && session.run.generation() == session.task.executionGeneration()
+                    && session.run.constraintRevision() == session.task.constraintRevision()
+                    && next.key().type() == StageType.VALIDATE, INVALID_INPUT);
+            session.run = exhausted(session) ? session.run.pauseBudget() : session.run.revalidateCandidate();
+            enqueue(session.run, cause, next); save(session);
+            visible(scope, runId, next.id(), "CANDIDATE_REVALIDATION_QUEUED"); return true;
         });
     }
 

@@ -146,6 +146,8 @@ public interface ExecutionEngineStore extends StageCommitPort {
      * @return 原预算恢复，不隐式创建新预算
      */
     ExecutionRun resumeQuota(TaskScope scope, UUID runId, boolean confirmed);
+    /** @param scope 归属 @param runId 原运行 @param cause 接受请求身份 @param next 重校验阶段；沿用原预算，不复用旧接受意图 */
+    void revalidateCandidate(TaskScope scope, UUID runId, UUID cause, StagePlan next);
     /**
      * @param limit 恢复批量上限
      * @return 本次实际撤销的失联租约数；通过相同领取流程重试

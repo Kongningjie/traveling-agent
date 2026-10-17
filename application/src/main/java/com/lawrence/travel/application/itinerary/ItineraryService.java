@@ -1,0 +1,50 @@
+package com.lawrence.travel.application.itinerary;
+
+import com.lawrence.travel.application.execution.StagePlan;
+import com.lawrence.travel.application.port.BusinessTransactions;
+import com.lawrence.travel.application.port.CandidateStore;
+import com.lawrence.travel.application.port.ExecutionEngineStore;
+import com.lawrence.travel.domain.execution.ExecutionStep;
+import com.lawrence.travel.domain.execution.StageType;
+import com.lawrence.travel.domain.identity.UserIdentity;
+import com.lawrence.travel.domain.travel.TaskScope;
+import java.util.UUID;
+
+/** 用户显式接受用例；过期报告只排队重校验，不在请求事务调用模型或自动沿用接受意图。 */
+public final class ItineraryService {
+    private final CandidateStore store;
+    private final ExecutionEngineStore engine;
+    private final BusinessTransactions transactions;
+    /**
+     * @param store 候选权威
+     * @param engine 同源执行登记
+     * @param transactions 同一业务事务
+     */
+    public ItineraryService(CandidateStore store, ExecutionEngineStore engine, BusinessTransactions transactions) { this.store = store; this.engine = engine; this.transactions = transactions; }
+    /**
+     * @param actor 服务端认证身份
+     * @param taskId 任务
+     * @param requestId 幂等请求
+     * @param candidateId 候选
+     * @param expectedCurrent 当前指针
+     * @param revision 需求
+     * @param generation 代次
+     * @param hash 快照摘要
+     * @return 接受或需要重新校验
+     */
+    public CandidateStore.Acceptance accept(UserIdentity actor, UUID taskId, UUID requestId, UUID candidateId, UUID expectedCurrent, long revision, long generation, String hash) {
+        if (actor == null) throw new com.lawrence.travel.application.travel.TravelStorageFailure(com.lawrence.travel.application.travel.TravelStorageFailure.Code.NOT_FOUND);
+        var scope = new TaskScope(actor.id(), taskId);
+        var command = new CandidateAcceptanceCommand(scope, requestId, candidateId, expectedCurrent, revision, generation, hash);
+        return transactions.required(() -> {
+            var attempt = store.accept(command);
+            if (attempt.enqueueRevalidation()) {
+                UUID snapshot = store.snapshotId(scope, candidateId);
+                var next = new StagePlan(UUID.randomUUID(), new ExecutionStep.Key(StageType.VALIDATE, 0, "revalidate_" + requestId), null,
+                        "{\"candidateId\":\"" + candidateId + "\",\"snapshotId\":\"" + snapshot + "\"}", java.util.List.of());
+                engine.revalidateCandidate(scope, attempt.result().runId(), requestId, next);
+            }
+            return attempt.result();
+        });
+    }
+}

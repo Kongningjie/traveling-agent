@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -50,7 +50,8 @@ try {
     $selectedTest = if ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
         elseif ($Scope -eq 'Travel') { '-Dtest=TravelStorageIntegrationTest' }
         elseif ($Scope -eq 'Engine') { '-Dtest=ExecutionEngineIntegrationTest' }
-        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest' }
+        elseif ($Scope -eq 'Candidate') { '-Dtest=CandidateAcceptanceIntegrationTest' }
+        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest' }
     if ($TestMethod) { $selectedTest += "#$TestMethod" }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
         $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test

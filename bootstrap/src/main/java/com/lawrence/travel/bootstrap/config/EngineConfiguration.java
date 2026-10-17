@@ -32,12 +32,14 @@ public class EngineConfiguration {
      * @param json JSON
      * @param manager 事务
      * @param controls 已确认预算
+     * @param projection 同事务候选报告投影
      * @return 唯一业务执行仓储
      */
     @Bean ExecutionEngineStore executionEngineStore(EngineMapper mapper, TravelMapper tasks, BudgetMapper budgets,
-            TravelJson json, org.springframework.transaction.PlatformTransactionManager manager, ExecutionControlProperties controls) {
+            TravelJson json, org.springframework.transaction.PlatformTransactionManager manager, ExecutionControlProperties controls,
+            com.lawrence.travel.application.port.StageProjection projection) {
         return new PostgresExecutionEngine(mapper, tasks, budgets, json, manager, controls.limits().runLimits(),
-                controls.limits().activeRuns(), controls.limits().researchConcurrencyPerRun(), Duration.ofSeconds(60), 3);
+                controls.limits().activeRuns(), controls.limits().researchConcurrencyPerRun(), Duration.ofSeconds(60), 3, projection);
     }
     /**
      * @param store 执行权威
