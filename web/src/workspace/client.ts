@@ -47,11 +47,19 @@ export class Api {
   }
   /** @param path 业务POST @param body 固定命令，调用方负责幂等键 @returns 首次或同请求重放结果；绝不自动重试 */
   async post<T>(path: string, body: unknown): Promise<T> {
+    return this.write<T>("POST", path, body);
+  }
+  /** @param method 显式业务写方法 @param path 同源私有接口 @param body 固定幂等命令 @returns 权威结果；网络不自动重试 */
+  async write<T>(
+    method: "POST" | "PATCH" | "DELETE",
+    path: string,
+    body: unknown,
+  ): Promise<T> {
     const csrf = await this.get<{ headerName: string; token: string }>(
       "/api/v1/auth/csrf",
     );
     return this.request<T>(path, {
-      method: "POST",
+      method,
       headers: {
         "Content-Type": "application/json",
         [csrf.headerName]: csrf.token,

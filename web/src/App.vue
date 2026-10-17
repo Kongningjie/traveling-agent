@@ -1,6 +1,7 @@
 <!-- 私有旅行工作台：会话、协商、版本、证据和确认均以服务端状态为权威。 -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import PreferencePanel from "./components/PreferencePanel.vue";
 import CreateTrip from "./components/CreateTrip.vue";
 import DecisionCard from "./components/DecisionCard.vue";
 import ItineraryPanel from "./components/ItineraryPanel.vue";
@@ -266,6 +267,11 @@ onMounted(initialize);
         </div>
       </aside>
       <section class="workspace-main">
+        <PreferencePanel
+          :key="user.id"
+          :requirements="requirements"
+          @changed="refresh"
+        />
         <div v-if="error" class="error banner" role="alert">
           {{ error }}
           <button v-if="retryable" :disabled="busy" @click="retryCommand">

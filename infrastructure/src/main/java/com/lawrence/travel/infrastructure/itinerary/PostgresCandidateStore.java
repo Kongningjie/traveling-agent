@@ -48,6 +48,8 @@ public final class PostgresCandidateStore implements CandidateStore {
     private final String reviewConfiguration;
     private final Duration validity;
     private final com.lawrence.travel.application.port.ResearchStore evidence;
+    private com.lawrence.travel.application.port.PreferenceStore preferences;
+    private com.lawrence.travel.application.port.BusinessTransactions transactions;
     private final ItineraryValidator validator = new ItineraryValidator();
     private final ReviewGate gate = new ReviewGate();
 
@@ -73,11 +75,22 @@ public final class PostgresCandidateStore implements CandidateStore {
         this.rules = rules; this.reviewConfiguration = reviewConfiguration; this.validity = validity;
         this.evidence = evidence;
     }
+    /** @param mapper SQL @param tasks 任务 @param engine 执行 @param budgets 预算 @param json JSON @param rules 规则 @param reviewConfiguration 审核指纹 @param validity 有效时长 @param evidence 证据 @param preferences 偏好权威端口 @param transactions 读取快照短事务 */
+    public PostgresCandidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets, TravelJson json, String rules, String reviewConfiguration, Duration validity, com.lawrence.travel.application.port.ResearchStore evidence, com.lawrence.travel.application.port.PreferenceStore preferences, com.lawrence.travel.application.port.BusinessTransactions transactions) {
+        this(mapper, tasks, engine, budgets, json, rules, reviewConfiguration, validity, evidence); this.preferences = preferences; this.transactions = transactions;
+    }
     /** {@inheritDoc} 修订必须与领取一致；不信任客户端指定的生效指针和证据。 */
     @Override public com.lawrence.travel.application.itinerary.Planning.Context context(ExecutionFence fence) {
         var task = tasks.task(fence.scope()); require(task != null, NOT_FOUND);
         require(task.constraintRevision() == fence.constraintRevision() && task.executionGeneration() == fence.generation() && fence.runId().toString().equals(engine.currentRun(fence.scope())), STALE_VERSION);
-        return new com.lawrence.travel.application.itinerary.Planning.Context(fence.scope(), json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), task.currentVersionId(), evidence == null ? List.of() : evidence.evidence(fence.scope()), mapper.now());
+        var revision = json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class);
+        var selected = preferences == null ? null : transactions.required(() -> {
+            var stored = preferences.read(fence.scope().userId());
+            var cities = revision.requirements().stream().filter(r -> r.field().equals("cities")).flatMap(r -> java.util.Arrays.stream(r.value().split("[,，]"))).map(String::trim).collect(java.util.stream.Collectors.toSet());
+            var overridden = revision.requirements().stream().filter(r -> r.source() != ConstraintRevision.Source.ASSUMPTION).map(ConstraintRevision.Requirement::field).collect(java.util.stream.Collectors.toSet());
+            return com.lawrence.travel.domain.memory.Preference.recall(stored, cities, overridden);
+        });
+        return new com.lawrence.travel.application.itinerary.Planning.Context(fence.scope(), revision, task.currentVersionId(), evidence == null ? List.of() : evidence.evidence(fence.scope()), mapper.now(), null, selected);
     }
     /** {@inheritDoc} 三项都从同一私有任务读取；历史需求与快照不可变。 */
     @Override public com.lawrence.travel.application.itinerary.Planning.Base base(TaskScope scope, UUID id) {
@@ -116,9 +129,23 @@ public final class PostgresCandidateStore implements CandidateStore {
         transaction(); String operation = operation(output);
         if (operation == null) return null;
         var body = object(output.checkpoint()); UUID id = uuid(body.get("candidateId"));
+        Long currentPreference = mapper.preferenceRevision(fence.scope()); require(currentPreference != null, NOT_FOUND);
+        if (body.containsKey("preferenceRevision")) require(body.get("preferenceRevision") instanceof Number && body.get("preferenceRevision").toString().matches("[0-9]+"), INVALID_INPUT);
+        if (body.containsKey("preferenceRevision") && ((Number) body.get("preferenceRevision")).longValue() != currentPreference
+                || !body.containsKey("preferenceRevision") && currentPreference != null && currentPreference > 0) throw new com.lawrence.travel.application.memory.PreferenceChangedException();
         var task = tasks.task(fence.scope()); require(task != null && json.pendingInputs(task.pendingInputs()).isEmpty(), STALE_VERSION);
         require(fence.runId().toString().equals(engine.currentRun(fence.scope())) && task.executionGeneration() == fence.generation()
                 && task.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
+        if (operation.equals("PREFERENCE_REPLAN")) {
+            require(java.util.Set.of(StageType.VALIDATE, StageType.REVIEW, StageType.PRESENT).contains(type) && output.next().size() == 1 && output.next().getFirst().key().type() == StageType.PLAN, INVALID_INPUT);
+            var source = candidate(fence.scope(), id);
+            require(source.runId().equals(fence.runId()) && source.generation() == fence.generation(), STALE_VERSION);
+            var next = json.decode(output.next().getFirst().input(), com.lawrence.travel.application.itinerary.Planning.Input.class);
+            require(id.equals(next.candidateId()) && next.repair() && output.next().getFirst().key().round() > 0, INVALID_INPUT);
+            var old = version(fence.scope(), source.snapshotId());
+            require(!preferenceCurrent(fence.scope(), old), STALE_VERSION);
+            return null;
+        }
         if (operation.equals("REPLAN_CONTROL")) {
             require(type == StageType.PLAN && task.currentVersionId() != null && (output.outcome() == StageOutput.Outcome.CONTINUE || output.outcome() == StageOutput.Outcome.WAIT_USER), INVALID_INPUT);
             var definition = json.decode(engine.step(fence.scope(), fence.runId(), fence.stepId()).definition(), com.lawrence.travel.application.execution.StagePlan.class);
@@ -157,7 +184,7 @@ public final class PostgresCandidateStore implements CandidateStore {
                     var merged = new com.lawrence.travel.domain.itinerary.PatchService().apply(original.snapshot(), task.currentVersionId(), original.hash(), task.constraintRevision(), scope, patch);
                     require(merged.equals(trip), INVALID_INPUT);
                 } else require(!body.containsKey("patch"), INVALID_INPUT);
-                var metadata = new ItineraryVersion(snapshotId, fence.scope(), trip.schemaVersion(), json.hash(payload), trip.constraintRevision(), trip.baseVersionId(), trip.evidenceRefs(), null);
+                var metadata = new ItineraryVersion(snapshotId, fence.scope(), trip.schemaVersion(), json.hash(payload), trip.constraintRevision(), trip.baseVersionId(), trip.evidenceRefs(), body.containsKey("preferenceRevision") ? new com.lawrence.travel.domain.memory.PreferenceVersion(fence.scope().userId(), ((Number) body.get("preferenceRevision")).longValue()) : null);
                 require(trip.taskId().equals(fence.scope().taskId()) && trip.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
                 if (!trip.evidenceRefs().isEmpty()) { require(evidence != null, INVALID_INPUT); evidence.resolve(fence.scope(), trip.evidenceRefs()); }
                 checked(tasks.insertSnapshot(metadata, json.encode(metadata), json.snapshot(metadata, payload)));
@@ -281,6 +308,7 @@ public final class PostgresCandidateStore implements CandidateStore {
             var content = json.decode(tasks.revision(scope, version.constraintRevision()), ConstraintRevision.class);
             var facts = evidence == null ? List.<com.lawrence.travel.domain.knowledge.FieldEvidence>of() : evidence.resolve(scope, version.evidenceRefs()).stream().filter(v -> v.effectiveStatus() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.KNOWN).map(com.lawrence.travel.application.knowledge.Research.View::evidence).toList();
             var issues = new ArrayList<>(validator.validate(snapshot, content, facts, mapper.now(), com.lawrence.travel.application.itinerary.TravelEvidenceParser.parse(facts, value -> json.decode(value, Object.class))));
+            if (!preferenceCurrent(scope, version)) issues.add(new ItineraryReport.Issue("PREFERENCE_STALE", null, true, false));
             if (!dependencies(scope, version.evidenceRefs(), mapper.now(), mapper.now().plus(validity)).allCurrent()) issues.add(new ItineraryReport.Issue("EVIDENCE_STALE_OR_UNKNOWN", null, true, true));
             if (evidence != null && evidence.resolve(scope, version.evidenceRefs()).stream().anyMatch(v -> v.evidence().fieldPath().equals("weather") && v.evidence().status() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.UNKNOWN)) issues.add(new ItineraryReport.Issue("WEATHER_UNKNOWN", null, false, true));
             if (!snapshot.evidenceRefs().equals(version.evidenceRefs()) || !Objects.equals(snapshot.baseVersionId(), version.baseVersionId())) issues.add(new ItineraryReport.Issue("SCHEMA_BINDING", null, true, false));
@@ -304,7 +332,7 @@ public final class PostgresCandidateStore implements CandidateStore {
             var row = mapper.report(scope, review.id());
             if (!Objects.equals(row.validationId(), candidate.validationId())) return ReviewGate.Result.REVALIDATE;
         }
-        boolean dependencies = version.preferenceVersion() == null && dependencies(scope, version.evidenceRefs(), mapper.now(), mapper.now().plus(validity)).allCurrent();
+        boolean dependencies = preferenceCurrent(scope, version) && dependencies(scope, version.evidenceRefs(), mapper.now(), mapper.now().plus(validity)).allCurrent();
         return gate.evaluate(binding(version), validation, review, mapper.now(), dependencies);
     }
     /**
@@ -360,6 +388,11 @@ public final class PostgresCandidateStore implements CandidateStore {
     private ItineraryReport.Binding binding(ItineraryVersion version) {
         return new ItineraryReport.Binding(version.snapshotId(), version.schemaVersion(), version.payloadHash(), version.constraintRevision(),
                 version.evidenceRefs(), version.preferenceVersion(), rules, reviewConfiguration);
+    }
+    /** @param scope 私有范围 @param version 实际使用版本 @return 空旧绑定仅在用户从未有偏好时有效；保守失效不重写已接受行程 */
+    private boolean preferenceCurrent(TaskScope scope, ItineraryVersion version) {
+        Long current = mapper.preferenceRevision(scope);
+        return current != null && (version.preferenceVersion() == null ? current == 0 : version.preferenceVersion().revision() == current);
     }
     /**
      * @param scope 归属

@@ -20,6 +20,8 @@ let sequence = 1,
     state = "WAITING_ACCEPTANCE",
     stale = false,
     cardVisible = true;
+let preferenceRevision = 0;
+const preferenceEntries = new Map(), preferenceReceipts = new Map();
 const calls = [],
     streams = new Set();
 /** @param n 正整数 @returns 固定测试日期，避免依赖真实天气或日历服务。 */
@@ -129,6 +131,20 @@ const server = createServer(async (request, response) => {
                         : { code: "UNAUTHORIZED" },
                     authenticated ? 200 : 401,
                 );
+            if (path.startsWith("/api/v1/preferences")) {
+                if (!authenticated) return json(response, {code:"UNAUTHORIZED"}, 401);
+                const view = () => ({version:{userId:"synthetic-user",revision:preferenceRevision}, entries:[...preferenceEntries.values()].filter(p=>p.state!=="DELETED")});
+                if (request.method === "GET") return json(response, view());
+                let text=""; for await (const part of request) text += part;
+                const body=JSON.parse(text); calls.push({path, method:request.method, body});
+                if (preferenceReceipts.has(body.requestId)) return json(response, view());
+                if(body.revision!==preferenceRevision) return json(response,{code:"STALE_VERSION"},409);
+                const id=body.id ?? path.split("/")[4], old=preferenceEntries.get(id);
+                if(request.method==="DELETE") preferenceEntries.set(id,{...old,value:"",state:"DELETED"});
+                else if(path.endsWith("/confirm")) preferenceEntries.set(id,{...old,state:"CONFIRMED"});
+                else preferenceEntries.set(id,{id,category:body.category,value:body.value,city:body.city??"",source:body.suggestion?"SUGGESTION":"USER",state:body.suggestion?"PENDING":"CONFIRMED",updatedAt:"2026-10-17T12:00:00Z"});
+                preferenceRevision++; preferenceReceipts.set(body.requestId,true); return json(response,view());
+            }
             if (request.method === "POST") {
                 let text = "";
                 for await (const part of request) text += part;
@@ -206,6 +222,7 @@ const server = createServer(async (request, response) => {
                     cursor: `${isSecond ? second : task}:${sequence}`,
                     requirements: {
                         requirements: [
+                            {id:"synthetic-pace",field:"pace",value:"合成建议：轻松",kind:"SOFT",source:"USER",targetIds:[]},
                             {
                                 id: "req",
                                 field: "cities",

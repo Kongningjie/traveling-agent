@@ -28,12 +28,13 @@ public class CandidateConfiguration {
      * @param json 规范 JSON
      * @param controls 角色配置
      * @param evidence 字段证据权威端口
+     * @param preferences 结构化偏好端口 @param transactions 短事务
      * @return 唯一业务报告投影
      */
     @Bean CandidateStore candidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets,
-                                       TravelJson json, ExecutionControlProperties controls, com.lawrence.travel.application.port.ResearchStore evidence) {
-        return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v3",
-                json.hash(json.encode(List.of("review-prompt-v2", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence);
+                                       TravelJson json, ExecutionControlProperties controls, com.lawrence.travel.application.port.ResearchStore evidence, com.lawrence.travel.application.port.PreferenceStore preferences, BusinessTransactions transactions) {
+        return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v4",
+                json.hash(json.encode(List.of("review-prompt-v3", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence, preferences, transactions);
     }
     /**
      * @param store 候选权威

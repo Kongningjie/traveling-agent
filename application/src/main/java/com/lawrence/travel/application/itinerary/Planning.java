@@ -14,8 +14,10 @@ import java.util.UUID;
 public final class Planning {
     /** 命名空间。 */
     private Planning() { }
-    /** @param scope 私有归属 @param revision 当前需求 @param baseVersionId 当前生效指针 @param evidence 可用及未知资料 @param now 数据库时间 @param restorationTarget 历史恢复目标，普通规划为空 */
-    public record Context(TaskScope scope, ConstraintRevision revision, UUID baseVersionId, List<Research.View> evidence, Instant now, TripSnapshot restorationTarget) {
+    /** @param scope 私有归属 @param revision 当前需求 @param baseVersionId 当前生效指针 @param evidence 可用及未知资料 @param now 数据库时间 @param restorationTarget 历史恢复目标，普通规划为空 @param preferences 权威筛选的长期软偏好与读取版本，不从历史摘要恢复 */
+    public record Context(TaskScope scope, ConstraintRevision revision, UUID baseVersionId, List<Research.View> evidence, Instant now, TripSnapshot restorationTarget, com.lawrence.travel.domain.memory.Preference.View preferences) {
+        /** @param scope 归属 @param revision 需求 @param baseVersionId 指针 @param evidence 证据 @param now 时间 @param restorationTarget 恢复目标；兼容不使用偏好的本地调用 */
+        public Context(TaskScope scope, ConstraintRevision revision, UUID baseVersionId, List<Research.View> evidence, Instant now, TripSnapshot restorationTarget) { this(scope, revision, baseVersionId, evidence, now, restorationTarget, null); }
         /** @param scope 归属 @param revision 当前需求 @param baseVersionId 当前指针 @param evidence 资料 @param now 时间 */
         public Context(TaskScope scope, ConstraintRevision revision, UUID baseVersionId, List<Research.View> evidence, Instant now) { this(scope, revision, baseVersionId, evidence, now, null); }
     }

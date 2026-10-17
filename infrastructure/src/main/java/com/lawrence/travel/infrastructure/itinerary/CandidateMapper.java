@@ -46,6 +46,8 @@ public interface CandidateMapper {
      */
     @Select("SELECT preference_revision FROM app_user WHERE id=#{scope.userId} AND account_status='ACTIVE' FOR UPDATE")
     Long lockUser(@Param("scope") TaskScope scope);
+    /** @param scope 私有归属 @return 权威偏好版本；最终写入方已先锁用户行 */
+    @Select("SELECT preference_revision FROM app_user WHERE id=#{scope.userId} AND account_status='ACTIVE'") Long preferenceRevision(@Param("scope") TaskScope scope);
     /**
      * @return 数据库真实时钟，不能由客户端提供
      */

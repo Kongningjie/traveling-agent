@@ -43,6 +43,29 @@ public class HarnessContractTest {
         }
     }
 
+    /** 旧工作区记忆及指令文件不能绕过结构化删除过滤；模型只看到本次受控输入。 */
+    @Test
+    void oldWorkspaceMemoryCannotRestoreDeletedPreference() throws Exception {
+        String deleted = "DELETED_PREFERENCE_SENTINEL";
+        java.nio.file.Files.writeString(workspace.resolve("MEMORY.md"), deleted);
+        java.nio.file.Files.writeString(workspace.resolve("AGENTS.md"), deleted);
+        java.nio.file.Files.createDirectories(workspace.resolve("memory"));
+        java.nio.file.Files.writeString(workspace.resolve("memory/MEMORY.md"), deleted);
+        var toolkit = new Toolkit(); toolkit.registerTool(new ProbeTool());
+        var model = new ScriptedModel() {
+            /** {@inheritDoc} 直接断言真实Harness发给模型的消息；无任何外部请求。 */
+            @Override public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                String body = new com.lawrence.travel.infrastructure.travel.TravelJson().encode(messages);
+                assertThat(body).contains("ONLY_CURRENT_INPUT").doesNotContain(deleted);
+                return super.stream(messages, tools, options);
+            }
+        };
+        try (var agent = RestrictedHarnessFactory.create(model, toolkit, workspace, "planner")) {
+            var result = agent.call(List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text("ONLY_CURRENT_INPUT").build()).build()), RestrictedHarnessFactory.StructuredReply.class).block(Duration.ofSeconds(10));
+            assertThat(result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer()).isEqualTo("7");
+        }
+    }
+
     /** 模型失败不会触发默认 SDK／Harness 多次重试。 */
     @Test
     void modelFailureIsNotRetried() {

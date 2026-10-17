@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -47,7 +47,8 @@ try {
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
-    $selectedTest = if ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
+    $selectedTest = if ($Scope -eq 'Preference') { '-Dtest=PreferenceIntegrationTest' }
+        elseif ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
         elseif ($Scope -eq 'Travel') { '-Dtest=TravelStorageIntegrationTest' }
         elseif ($Scope -eq 'Engine') { '-Dtest=ExecutionEngineIntegrationTest' }
         elseif ($Scope -eq 'Candidate') { '-Dtest=CandidateAcceptanceIntegrationTest' }
@@ -56,8 +57,8 @@ try {
         elseif ($Scope -eq 'Research') { '-Dtest=ResearchIntegrationTest' }
         elseif ($Scope -eq 'Planning') { '-Dtest=PlanningIntegrationTest' }
         elseif ($Scope -eq 'M1') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest' }
-        elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest' }
-        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest' }
+        elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest' }
+        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest' }
     if ($TestMethod) { $selectedTest += "#$TestMethod" }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
         $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test
@@ -65,6 +66,11 @@ try {
 } finally {
     Set-Location -LiteralPath $originalLocation
     foreach ($key in $previousValues.Keys) {
-        [Environment]::SetEnvironmentVariable($key, $previousValues[$key], 'Process')
+        # 新运行时中 SetEnvironmentVariable(null) 可能留下空值；缺失与空字符串会影响 Spring 默认值，必须保留原始存在性。
+        if ($null -eq $previousValues[$key]) {
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($key, $previousValues[$key], 'Process')
+        }
     }
 }

@@ -434,4 +434,78 @@ class PlanningIntegrationTest {
         through(f, StageType.PRESENT); assertThat(itineraries.latest(f.actor(), f.scope().taskId()).acceptable()).isTrue(); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNull(); assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
     }
 
+    @Autowired private com.lawrence.travel.application.memory.PreferenceService preferences;
+    /** @param f 随机测试任务 @param category 类别 @param value 内容 @return 新偏好身份 */
+    private UUID preference(Fixture f, String category, String value) {
+        UUID id = UUID.randomUUID(); preferences.change(f.actor(), UUID.randomUUID(), preferences.read(f.actor()).version().revision(), id, "SAVE", category, value, ""); return id;
+    }
+    /** 已确认偏好进入独立规划及审核上下文，待确认建议从不参与；候选绑定真实用户版本。 */
+    @Test void confirmedPreferencesAreUsedAndBoundToCandidate() {
+        var f = fixture(); preference(f, "pace", "轻松"); preferences.change(f.actor(), UUID.randomUUID(), 1, UUID.randomUUID(), "SUGGEST", "diet", "清淡", "");
+        through(f, StageType.PRESENT); var captured = org.mockito.ArgumentCaptor.forClass(Planning.Context.class); verify(advisor).draft(any(), captured.capture(), any(), any());
+        assertThat(captured.getValue().preferences().entries()).extracting(com.lawrence.travel.domain.memory.Preference::category).containsExactly("pace");
+        var review = org.mockito.ArgumentCaptor.forClass(Planning.Context.class); verify(advisor).review(any(), review.capture(), any()); assertThat(review.getValue().preferences()).isEqualTo(captured.getValue().preferences());
+        assertThat(itineraries.latest(f.actor(), f.scope().taskId()).candidate().version().preferenceVersion().revision()).isEqualTo(2); assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
+    }
+    /** 本次用户明确要求覆盖历史同类偏好，不会把旧偏好写回旅行需求。 */
+    @Test void currentRequirementsOverrideLongTermPreferences() {
+        var original = fixture(); preference(original, "pace", "轻松"); var receipt = negotiation.send(original.actor(), original.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("pace", "紧凑", null))); var f = new Fixture(original.actor(), original.scope(), receipt.runId());
+        through(f, StageType.PRESENT); var captured = org.mockito.ArgumentCaptor.forClass(Planning.Context.class); verify(advisor).draft(any(), captured.capture(), any(), any()); assertThat(captured.getValue().preferences().entries()).isEmpty();
+        assertThat(captured.getValue().revision().requirements()).anyMatch(r -> r.field().equals("pace") && r.value().equals("紧凑"));
+        assertThat(preferences.read(f.actor()).entries().getFirst().value()).isEqualTo("轻松");
+    }
+    /** 模型返回前发生删除，C事务拒绝旧结果和后继；同一次领取可重新装配有效上下文，不新增预算。 */
+    @Test void deletedPreferenceRejectsLateModelResultAtCommit() {
+        var f = fixture(); UUID id = preference(f, "pace", "轻松"); through(f, StageType.RESEARCH); var claim = claim(f);
+        for (int i = 0; claim.step().key().type() != StageType.PLAN && i < 20; i++) { assertThat(engine.commit(engine.prepare(claim, research.execute(claim)))).isEqualTo(StageCommitPort.Result.COMMITTED); claim = claim(f); }
+        assertThat(claim.step().key().type()).isEqualTo(StageType.PLAN); var output = planning.execute(claim); var prepared = engine.prepare(claim, output);
+        preferences.change(f.actor(), UUID.randomUUID(), 1, id, "DELETE", null, null, null);
+        assertThatThrownBy(() -> engine.commit(prepared)).isInstanceOf(com.lawrence.travel.application.memory.PreferenceChangedException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE run_id=?", Integer.class, f.run())).isZero();
+        var fresh = planning.execute(claim); assertThat(engine.commit(engine.prepare(claim, fresh))).isEqualTo(StageCommitPort.Result.COMMITTED);
+        assertThat(itineraries.latest(f.actor(), f.scope().taskId()).candidate().version().preferenceVersion().revision()).isEqualTo(2);
+        var captured = org.mockito.ArgumentCaptor.forClass(Planning.Context.class); verify(advisor, times(2)).draft(any(), captured.capture(), any(), any()); assertThat(captured.getAllValues().getLast().preferences().entries()).isEmpty();
+    }
+    /** 已展示草案遇到偏好删除后不能接受，原预算重新规划与审核完成后仍需另行接受。 */
+    @Test void changedPreferencesInvalidateReportsAndReplanInSameRun() {
+        var f = fixture(); UUID id = preference(f, "pace", "轻松"); through(f, StageType.PRESENT); var old = itineraries.latest(f.actor(), f.scope().taskId()).candidate();
+        preferences.change(f.actor(), UUID.randomUUID(), 1, id, "DELETE", null, null, null); assertThat(itineraries.latest(f.actor(), f.scope().taskId()).acceptable()).isFalse();
+        assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.REVALIDATION_REQUIRED); through(f, StageType.PRESENT); var fresh = itineraries.latest(f.actor(), f.scope().taskId());
+        assertThat(fresh.candidate().version().snapshotId()).isNotEqualTo(old.version().snapshotId()); assertThat(fresh.candidate().version().preferenceVersion().revision()).isEqualTo(2); assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(1);
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNull(); assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
+    }
+    /** 删除偏好保留已接受指针和独立确认的同类旅行要求。 */
+    @Test void deletingPreferenceDoesNotRewriteAcceptedItineraryOrUserConstraints() {
+        var original = fixture(); UUID id = preference(original, "pace", "轻松"); var receipt = negotiation.send(original.actor(), original.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("pace", "轻松", null))); var f = new Fixture(original.actor(), original.scope(), receipt.runId());
+        through(f, StageType.PRESENT); accept(f); var before = travel.task(f.actor(), f.scope().taskId()); preferences.change(f.actor(), UUID.randomUUID(), 1, id, "DELETE", null, null, null); var after = travel.task(f.actor(), f.scope().taskId());
+        assertThat(after.task().currentVersionId()).isEqualTo(before.task().currentVersionId()); assertThat(after.task().constraintRevision()).isEqualTo(before.task().constraintRevision());
+        assertThat(candidates.base(f.scope(), after.task().currentVersionId()).revision().requirements()).anyMatch(r -> r.field().equals("pace") && r.value().equals("轻松"));
+    }
+
+    /** 旧审核迟到时不能保存，重新调用必须读到当前偏好，不能替旧报告重新绑定版本。 */
+    @Test void preferenceChangeDuringReviewRejectsOldReport() {
+        var f = fixture(); UUID id = preference(f, "pace", "轻松"); through(f, StageType.VALIDATE); var claim = claim(f); assertThat(claim.step().key().type()).isEqualTo(StageType.REVIEW);
+        var prepared = engine.prepare(claim, planning.execute(claim)); preferences.change(f.actor(), UUID.randomUUID(), 1, id, "DELETE", null, null, null);
+        assertThatThrownBy(() -> engine.commit(prepared)).isInstanceOf(com.lawrence.travel.application.memory.PreferenceChangedException.class);
+        assertThat(itineraries.latest(f.actor(), f.scope().taskId()).candidate().review()).isNull();
+        assertThat(engine.commit(engine.prepare(claim, planning.execute(claim)))).isEqualTo(StageCommitPort.Result.COMMITTED);
+        assertThat(claim(f).step().key().type()).isEqualTo(StageType.PLAN);
+    }
+    /** 偏好重规划同样受原修订上限保护，达到两轮时暂停预算，不创建新运行绕过上限。 */
+    @Test void preferenceReplanningHonorsOriginalRepairBudget() {
+        var f = fixture(); UUID id = preference(f, "pace", "轻松"); through(f, StageType.PRESENT); preferences.change(f.actor(), UUID.randomUUID(), 1, id, "DELETE", null, null, null);
+        assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.REVALIDATION_REQUIRED); jdbc.update("UPDATE execution_budget SET repair_rounds=2 WHERE run_id=?", f.run()); var claim = claim(f);
+        var control = new com.lawrence.travel.application.execution.StageExecutor.Control() {
+            /** @return 本地执行允许进入 */
+            @Override public boolean enter() { return true; }
+            /** 本地无异步取消，无副作用。 */
+            @Override public void leave() { }
+            /** @return 本地不请求取消 */
+            @Override public boolean cancelled() { return false; }
+        };
+        new com.lawrence.travel.application.execution.StageExecutor(engine, List.of(planning)).execute(claim, control);
+        assertThat(engine.run(f.scope(), f.run()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.PAUSED_BUDGET);
+        assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(2); assertThat(jdbc.queryForObject("SELECT current_run_id FROM travel_task WHERE user_id=? AND id=?", UUID.class, f.actor().id(), f.scope().taskId())).isEqualTo(f.run());
+    }
+
 }

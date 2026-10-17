@@ -31,8 +31,16 @@ public final class PlanningHandler implements StageHandler {
     @Override public boolean supports(StageType type) { return Set.of(StageType.PLAN, StageType.VALIDATE, StageType.REVIEW, StageType.PRESENT).contains(type); }
     /** {@inheritDoc} 预测分支必须与C事务重新计算相符；未知不伪造通过。 */
     @Override public StageOutput execute(ExecutionEngineStore.Claim claim) {
-        var context = store.context(claim.fence()); var input = input(claim.input());
-        if (input.restoreSnapshotId() != null) context = new Planning.Context(context.scope(), context.revision(), context.baseVersionId(), context.evidence(), context.now(), store.base(context.scope(), input.restoreSnapshotId()).snapshot());
+        var context = store.context(claim.fence());
+        var result = executeAt(claim, context);
+        var body = new java.util.LinkedHashMap<String, Object>(json.decode(result.checkpoint(), Map.class));
+        if (context.preferences() != null) body.put("preferenceRevision", context.preferences().version().revision());
+        return new StageOutput(result.text(), json.encode(body), result.next(), result.outcome(), result.decision());
+    }
+    /** @param claim 领取 @param context 本次调用前重装的权威偏好和需求 @return 输出必须在C事务再次比较该偏好版本 */
+    private StageOutput executeAt(ExecutionEngineStore.Claim claim, Planning.Context context) {
+        var input = input(claim.input());
+        if (input.restoreSnapshotId() != null) context = new Planning.Context(context.scope(), context.revision(), context.baseVersionId(), context.evidence(), context.now(), store.base(context.scope(), input.restoreSnapshotId()).snapshot(), context.preferences());
         var type = claim.step().key().type();
         if (type == StageType.PLAN) {
             if (context.baseVersionId() != null) return replan(claim, context, input);
@@ -45,6 +53,11 @@ public final class PlanningHandler implements StageHandler {
             return output("SAVE_CANDIDATE", candidate, Map.of("snapshotId", snapshot, "snapshot", draft.snapshot(), "repair", input.repair()), stage(StageType.VALIDATE, new Planning.Input(candidate, false, List.of())), null);
         }
         var candidate = store.read(claim.fence().scope(), input.candidateId());
+        if (context.preferences() != null && !context.preferences().version().equals(candidate.version().preferenceVersion())) {
+            // 旧草案不能贴上最新偏好标签；重新规划复用产物、原运行和原修订预算。
+            if (budgets.read(claim.fence().runId()).repairRounds() >= 2) throw new com.lawrence.travel.domain.execution.control.CallRejectedException(com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
+            return output("PREFERENCE_REPLAN", candidate.candidateId(), Map.of(), stage(StageType.PLAN, continued(claim, candidate.candidateId(), true, List.of(new ItineraryReport.Issue("PREFERENCE_STALE", null, true, false)))), null);
+        }
         if (type == StageType.VALIDATE) {
             var issues = store.validate(claim.fence(), candidate.candidateId());
             return afterCheck(claim, "VALIDATE_ITINERARY", candidate, issues, Map.of("expectedIssues", issues));
