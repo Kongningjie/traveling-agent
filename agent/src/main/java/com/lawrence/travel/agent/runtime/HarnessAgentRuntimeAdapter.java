@@ -91,7 +91,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
         }
-        if (prompt == null || prompt.isBlank() || prompt.length() > 8192) {
+        if (prompt == null || prompt.isBlank() || prompt.length() > (role.equals("planner") || role.equals("reviewer") ? 24000 : 8192)) {
             throw new IllegalArgumentException("MODEL_INPUT_INVALID");
         }
         String key = keySupplier.get();
@@ -100,7 +100,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
                 .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
                 .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
-                .defaultOptions(GenerateOptions.builder().maxTokens(1024)
+                .defaultOptions(GenerateOptions.builder().maxTokens(role.equals("planner") ? 12288 : role.equals("reviewer") ? 4096 : 1024)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
         var harness = RestrictedHarnessFactory.create(model, allowTools ? toolkits.apply(runId, role) : new Toolkit(),
                 workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);

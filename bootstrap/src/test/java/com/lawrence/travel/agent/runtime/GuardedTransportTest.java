@@ -88,6 +88,16 @@ class GuardedTransportTest {
             verify(call, never()).execute();
         }
     }
+    /** 规划输出上限扩展仍进入原配额与计量；超出角色上限在连接前拒绝。 */
+    @Test void plannerOutputLimitStillReservesConservativeTokens() throws Exception {
+        try (var transport = transport(true)) {
+            when(call.execute()).thenReturn(response(200, "{\"usage\":{\"input_tokens\":10,\"output_tokens\":12}}"));
+            var request = HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body("{\"model\":\"test-model\",\"parameters\":{\"max_tokens\":12288},\"input\":{\"messages\":[]}}").build();
+            assertThat(transport.execute(request).isSuccessful()).isTrue();
+            var bound = org.mockito.ArgumentCaptor.forClass(Long.class); verify(ledger).reserve(any(), any(), any(), any(), bound.capture(), any()); assertThat(bound.getValue()).isGreaterThan(12288L);
+        }
+        try (var transport = transport(true)) { var bad = HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body("{\"model\":\"test-model\",\"parameters\":{\"max_tokens\":12289},\"input\":{\"messages\":[]}}").build(); assertThatThrownBy(() -> transport.execute(bad)).hasMessage("MODEL_OPTIONS_REJECTED"); }
+    }
 
     /** 成功读取供应商用量且将预算剩余超时传给实际连接。 */
     @Test

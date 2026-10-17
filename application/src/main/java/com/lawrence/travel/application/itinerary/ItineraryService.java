@@ -21,6 +21,8 @@ public final class ItineraryService {
      * @param transactions 同一业务事务
      */
     public ItineraryService(CandidateStore store, ExecutionEngineStore engine, BusinessTransactions transactions) { this.store = store; this.engine = engine; this.transactions = transactions; }
+    /** @param actor 认证主体 @param taskId 任务 @return 当前运行最近草案及Java总价；不以列表读取代替接受门禁 */
+    public Planning.View latest(UserIdentity actor, UUID taskId) { return store.latest(new TaskScope(actor.id(), taskId)); }
     /**
      * @param actor 服务端认证身份
      * @param taskId 任务

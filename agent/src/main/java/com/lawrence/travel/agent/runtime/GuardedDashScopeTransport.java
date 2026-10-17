@@ -135,7 +135,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         if (!(json.get("model") instanceof String)) throw new HttpTransportException("MODEL_INPUT_INVALID");
         Map<?, ?> parameters = json.get("parameters") instanceof Map<?, ?> values ? values : null;
         if (parameters == null || !(parameters.get("max_tokens") instanceof Number max)
-                || max.intValue() < 1 || max.intValue() > 2048
+                || max.intValue() < 1 || max.intValue() > (role.equals("planner") ? 12288 : role.equals("reviewer") ? 4096 : 2048)
                 || Boolean.TRUE.equals(parameters.get("enable_thinking"))
                 || Boolean.TRUE.equals(parameters.get("enable_search"))) {
             throw new HttpTransportException("MODEL_OPTIONS_REJECTED");

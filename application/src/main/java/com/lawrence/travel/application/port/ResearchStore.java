@@ -16,6 +16,8 @@ public interface ResearchStore extends StageProjection {
     Research.Context context(ExecutionFence fence);
     /** @param scope 私有任务 @return 历史及追加状态；不回传原始网页正文 */
     List<Research.View> evidence(TaskScope scope);
+    /** @param scope 私有归属 @param references 精确引用集合 @return 按精确ID读取，包含失效状态；不存在或哈希不符拒绝，不受展示分页影响 */
+    List<Research.View> resolve(TaskScope scope, Set<EvidenceRecord.Reference> references);
     /** @param scope 归属 @param key 精确参数 @param dependencyHash 需求依赖 @param date 适用日期 @return 仍有效且未冲突的完整查询结果，否则为空 */
     List<FieldEvidence> cached(TaskScope scope, String key, String dependencyHash, LocalDate date);
     /** @param scope 归属 @param references 精确引用 @param now 数据库时间 @param upperBound 报告最大期限 @return 依赖当前性和最早失效时间；不把未知视为有效事实 */

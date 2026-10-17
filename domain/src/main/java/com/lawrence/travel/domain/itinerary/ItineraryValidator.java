@@ -23,6 +23,14 @@ public final class ItineraryValidator {
      * @return 问题列表；真实候选还必须通过独立审核
      */
     public List<ItineraryReport.Issue> validate(TripSnapshot snapshot, ConstraintRevision requirements) {
+        return validate(snapshot, requirements, List.of(), java.time.Instant.EPOCH);
+    }
+    /** @param snapshot 完整草案 @param requirements 已确认需求 @param facts 精确引用且当前有效的事实 @param now 权威时间 @return 确定性问题；模型不能提供通过标记 */
+    public List<ItineraryReport.Issue> validate(TripSnapshot snapshot, ConstraintRevision requirements, List<com.lawrence.travel.domain.knowledge.FieldEvidence> facts, java.time.Instant now) {
+        return validate(snapshot, requirements, facts, now, new EvidenceRules.TravelFacts(List.of(), List.of()));
+    }
+    /** @param snapshot 完整内容 @param requirements 当前需求 @param facts 精确有效字段 @param now 权威时间 @param travelFacts 供应商结构解析结果 @return 确定性问题；交通必须证明端点、地点身份、日期与单位 */
+    public List<ItineraryReport.Issue> validate(TripSnapshot snapshot, ConstraintRevision requirements, List<com.lawrence.travel.domain.knowledge.FieldEvidence> facts, java.time.Instant now, EvidenceRules.TravelFacts travelFacts) {
         var issues = new ArrayList<ItineraryReport.Issue>();
         if (snapshot.schemaVersion() != 1 || !snapshot.taskId().equals(requirements.scope().taskId()) || snapshot.constraintRevision() != requirements.revision()) bad(issues, "SCHEMA_BINDING", null);
         var ids = new HashSet<UUID>();
@@ -45,8 +53,9 @@ public final class ItineraryValidator {
                     || item.startsAt().toLocalDate().isBefore(snapshot.window().startsOn()) || item.endsAt().minusNanos(1).toLocalDate().isAfter(snapshot.window().endsOn())) bad(issues, "ITEM_OUTSIDE_TRIP", item.id());
             if (item.type() == TripSnapshot.ItemType.ACTIVITY) {
                 var fixed = requirements.fixedArrangements().stream().filter(value -> value.id().equals(item.fixedArrangementId())).findFirst();
-                if (fixed.isEmpty()) unknown(issues, "OPENING_UNVERIFIED", item.id());
-                else if (!fixed.get().startsAt().toInstant().equals(item.startsAt().toInstant()) || !fixed.get().endsAt().toInstant().equals(item.endsAt().toInstant())) bad(issues, "FIXED_TIME_CHANGED", item.id());
+                if (fixed.isEmpty() && !EvidenceRules.opening(snapshot, facts, now, item)) unknown(issues, "OPENING_UNVERIFIED", item.id());
+                else if (fixed.isPresent() && (!fixed.get().startsAt().toInstant().equals(item.startsAt().toInstant()) || !fixed.get().endsAt().toInstant().equals(item.endsAt().toInstant()))) bad(issues, "FIXED_TIME_CHANGED", item.id());
+                if (fixed.isEmpty() && EvidenceRules.matching(snapshot, facts, now, item.id(), "reservation", item.locationKey(), item.startsAt().toLocalDate()).stream().noneMatch(f -> f.sourceType() == com.lawrence.travel.domain.knowledge.FieldEvidence.SourceType.OFFICIAL && f.value().equals("无需预约"))) unknown(issues, "RESERVATION_UNVERIFIED", item.id());
             }
         }
         if (items.isEmpty()) bad(issues, "ITEM_MISSING", null);
@@ -54,7 +63,7 @@ public final class ItineraryValidator {
         for (int i = 1; i < ordered.size(); i++) {
             var before = ordered.get(i - 1); var after = ordered.get(i);
             if (before.endsAt().toInstant().isAfter(after.startsAt().toInstant())) bad(issues, "TIME_OVERLAP", after.id());
-            if (!Objects.equals(before.locationKey(), after.locationKey()) || before.locationKey() == null) {
+            if (!Objects.equals(before.locationKey(), after.locationKey()) || before.locationKey() == null || !Objects.equals(before.cityStayId(), after.cityStayId())) {
                 if (snapshot.transportLegs().stream().noneMatch(leg -> before.id().equals(leg.fromItemId()) && after.id().equals(leg.toItemId()))) unknown(issues, "TRANSPORT_MISSING", after.id());
             }
         }
@@ -64,7 +73,10 @@ public final class ItineraryValidator {
             if (!range(from.startsAt(), from.endsAt()) || !range(to.startsAt(), to.endsAt()) || leg.startsAt().toInstant().isBefore(from.endsAt().toInstant()) || leg.endsAt().toInstant().isAfter(to.startsAt().toInstant())) bad(issues, "TRANSPORT_CONNECTION", leg.id());
             if (leg.durationMinutes() == null) unknown(issues, "TRANSPORT_DURATION_UNKNOWN", leg.id());
             else if (leg.durationMinutes() < 0 || Duration.between(leg.startsAt(), leg.endsAt()).toMinutes() < leg.durationMinutes()) bad(issues, "TRANSPORT_DURATION", leg.id());
-            if (leg.durationMinutes() != null && !confirmedField(requirements, "transportMinutes:" + leg.id(), Long.toString(leg.durationMinutes()))) unknown(issues, "TRANSPORT_UNVERIFIED", leg.id());
+            if (leg.durationMinutes() != null && !confirmedField(requirements, "transportMinutes:" + leg.id(), Long.toString(leg.durationMinutes()))) {
+                if (!EvidenceRules.route(snapshot, travelFacts, now, leg)) unknown(issues, "TRANSPORT_UNVERIFIED", leg.id());
+                else issues.add(new ItineraryReport.Issue("ROUTE_ESTIMATE", leg.id(), false, false));
+            }
         }
         var accommodations = new HashMap<UUID, TripSnapshot.Accommodation>();
         for (var stay : snapshot.accommodationStays()) {
@@ -85,9 +97,9 @@ public final class ItineraryValidator {
             if (cost.upper() != null && cost.upper().compareTo(cost.lower()) < 0) { bad(issues, "COST_RANGE", cost.id()); continue; }
             // 先验证费用范围授权，再处理未知价格，避免提前 continue 让已付款或排除项绕过确认。
             if (cost.paid() && !confirmedField(requirements, "paidIncluded:" + cost.id(), Boolean.toString(cost.includedInBudget()))) unknown(issues, "PAID_SCOPE_UNCONFIRMED", cost.id());
-            if (!cost.paid() && !cost.includedInBudget() && !confirmedField(requirements, "budgetIncluded:" + cost.id(), "false")) unknown(issues, "BUDGET_EXCLUSION_UNCONFIRMED", cost.id());
+            if (!cost.paid() && !cost.includedInBudget() && !confirmedField(requirements, "budgetIncluded:" + cost.id(), "false") && !excludedByScope(requirements, cost.category())) unknown(issues, "BUDGET_EXCLUSION_UNCONFIRMED", cost.id());
             if (cost.upper() == null) { costUnknown = true; unknown(issues, "COST_UNKNOWN", cost.id()); continue; }
-            if (!confirmedField(requirements, "costCny:" + cost.id(), costConfirmation(cost))) {
+            if (!confirmedField(requirements, "costCny:" + cost.id(), costConfirmation(cost)) && !EvidenceRules.price(snapshot, facts, now, cost)) {
                 costUnknown = true; unknown(issues, "COST_UNVERIFIED", cost.id());
             }
             BigDecimal quantity = cost.quantity();
@@ -108,13 +120,33 @@ public final class ItineraryValidator {
             if (!requirement.targetIds().isEmpty()) { unknown(issues, "HARD_SCOPE_UNSUPPORTED", requirement.id()); continue; }
             try {
                 switch (requirement.field()) {
-                    case "budgetCny" -> { if (upper.compareTo(new BigDecimal(requirement.value())) > 0) bad(issues, "HARD_BUDGET_EXCEEDED", requirement.id()); else if (costUnknown) unknown(issues, "HARD_BUDGET_UNKNOWN", requirement.id()); }
+                    case "budgetCny" -> { var cap = new BigDecimal(requirement.value()); if (requirements.requirements().stream().anyMatch(r -> r.field().equals("budgetRule") && r.value().equals("PER_PERSON"))) cap = cap.multiply(BigDecimal.valueOf(snapshot.window().travelers())); if (upper.compareTo(cap) > 0) bad(issues, "HARD_BUDGET_EXCEEDED", requirement.id()); else if (costUnknown) unknown(issues, "HARD_BUDGET_UNKNOWN", requirement.id()); }
                     case "travelers" -> { if (snapshot.window().travelers() != Integer.parseInt(requirement.value())) bad(issues, "TRAVELERS_MISMATCH", requirement.id()); }
+                    case "cities" -> { if (!snapshot.window().cityIds().equals(Set.of(requirement.value().split(",")))) bad(issues, "CITIES_MISMATCH", requirement.id()); }
+                    case "startDate" -> { if (!snapshot.window().startsOn().toString().equals(requirement.value())) bad(issues, "START_DATE_MISMATCH", requirement.id()); }
+                    case "endDate" -> { if (!snapshot.window().endsOn().toString().equals(requirement.value())) bad(issues, "END_DATE_MISMATCH", requirement.id()); }
+                    case "budgetRule" -> { if (!Set.of("NONE", "PER_PERSON", "PER_GROUP").contains(requirement.value())) unknown(issues, "BUDGET_RULE_INVALID", requirement.id()); }
+                    case "budgetScope" -> { if (!Set.of("ACTIVITIES", "MEALS", "LODGING", "INTERCITY", "ROUNDTRIP", "LOCAL_TRANSPORT").containsAll(List.of(requirement.value().split(",")))) unknown(issues, "BUDGET_SCOPE_INVALID", requirement.id()); }
+                    case "fixedStatus" -> { if (!Set.of("NONE", "UNKNOWN", "PROVIDED").contains(requirement.value()) || (requirement.value().equals("PROVIDED") && requirements.fixedArrangements().isEmpty())) unknown(issues, "FIXED_INFORMATION_MISSING", requirement.id()); if (requirement.value().equals("NONE") && !requirements.fixedArrangements().isEmpty()) bad(issues, "FIXED_STATUS_CONFLICT", requirement.id()); }
+                    case "fixedArrangements" -> { if (requirements.fixedArrangements().isEmpty()) unknown(issues, "FIXED_INFORMATION_MISSING", requirement.id()); }
                     default -> { if (!recognizedConfirmation(snapshot, requirement)) unknown(issues, "HARD_CONSTRAINT_UNSUPPORTED", requirement.id()); }
                 }
             } catch (NumberFormatException invalid) { unknown(issues, "HARD_CONSTRAINT_UNPARSABLE", requirement.id()); }
         }
+        for (var use : snapshot.evidenceUses()) if (!ids.contains(use.objectId()) || !snapshot.evidenceRefs().contains(use.reference())) bad(issues, "EVIDENCE_OBJECT_BINDING", use.objectId());
+        for (var item : snapshot.items()) if (item.startsAt() != null && !item.startsAt().getOffset().equals(java.time.ZoneOffset.ofHours(8))) bad(issues, "TRIP_TIME_ZONE", item.id());
+        for (var leg : snapshot.transportLegs()) if (leg.startsAt() != null && !leg.startsAt().getOffset().equals(java.time.ZoneOffset.ofHours(8))) bad(issues, "TRIP_TIME_ZONE", leg.id());
+        for (var date : snapshot.window().startsOn().datesUntil(snapshot.window().endsOn()).toList()) if (snapshot.accommodationStays().stream().noneMatch(s -> range(s.checkIn(), s.checkOut()) && !s.checkIn().toLocalDate().isAfter(date) && s.checkOut().toLocalDate().isAfter(date))) unknown(issues, "LODGING_MISSING", null);
+        for (var requirement : requirements.requirements()) if (requirement.field().equals("budgetScope")) for (String category : requirement.value().split(",")) {
+            boolean required = category.equals("ROUNDTRIP") || category.equals("MEALS") || category.equals("LODGING") && snapshot.window().endsOn().isAfter(snapshot.window().startsOn()) || category.equals("INTERCITY") && snapshot.window().cityIds().size() > 1 || category.equals("LOCAL_TRANSPORT") && !snapshot.transportLegs().isEmpty();
+            if (required && snapshot.costEntries().stream().noneMatch(cost -> category.equals(cost.category()))) unknown(issues, "BUDGET_CATEGORY_MISSING", requirement.id());
+        }
         return List.copyOf(issues);
+    }
+    /** @param requirements 已确认费用口径 @param category 费用类别 @return 用户明确的范围排除；任意自造类别不能排除预算 */
+    private static boolean excludedByScope(ConstraintRevision requirements, String category) {
+        return Set.of("ACTIVITIES", "MEALS", "LODGING", "INTERCITY", "ROUNDTRIP", "LOCAL_TRANSPORT").contains(category)
+                && requirements.requirements().stream().anyMatch(r -> r.field().equals("budgetScope") && confirmed(r) && !Set.of(r.value().split(",")).contains(category));
     }
     /**
      * @param snapshot 完整草案

@@ -6,6 +6,14 @@ import java.util.UUID;
 
 /** 候选、报告及接受持久化端口；报告只从对应阶段事务投影，不暴露任意保存 PASS 的方法。 */
 public interface CandidateStore extends StageProjection {
+    /** @param fence 权威领取 @return 当前需求及证据，不提供写入权限 */
+    com.lawrence.travel.application.itinerary.Planning.Context context(com.lawrence.travel.domain.execution.ExecutionFence fence);
+    /** @param scope 私有任务 @param id 候选身份 @return 草案及精确报告；不返回其他归属 */
+    com.lawrence.travel.application.itinerary.Planning.Candidate read(TaskScope scope, UUID id);
+    /** @param scope 私有任务 @return 当前运行的最近候选和Java费用，无草案为空；不等于已接受 */
+    com.lawrence.travel.application.itinerary.Planning.View latest(TaskScope scope);
+    /** @param fence 当前领取 @param id 候选 @return 与C事务同一规则计算的问题，不保存模型提供的结论 */
+    java.util.List<com.lawrence.travel.domain.itinerary.ItineraryReport.Issue> validate(com.lawrence.travel.domain.execution.ExecutionFence fence, UUID id);
     /** 用户可见结果，REVALIDATION_REQUIRED 不是接受成功。 */
     enum Status { /** 接受事实已记录。 */ ACCEPTED, /** 报告过期，需重校验及重新确认。 */ REVALIDATION_REQUIRED }
     /**

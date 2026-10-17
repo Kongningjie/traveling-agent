@@ -92,8 +92,9 @@ public final class TravelJson {
         for (String field : List.of("cityStays", "days", "items", "transportLegs", "accommodationStays", "costEntries", "alternatives", "evidenceRefs")) {
             require(payload.get(field) instanceof List<?>);
         }
-        // 字段级证据尚在后续阶段：当前禁止引用，不能把任意 UUID 当作已核实证据入库。
-        require(((List<?>) payload.get("evidenceRefs")).isEmpty() && version.evidenceRefs().isEmpty());
+        var references = new java.util.HashSet<com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference>();
+        for (Object value : (List<?>) payload.get("evidenceRefs")) require(references.add(decode(encode(value), com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference.class)));
+        require(references.equals(version.evidenceRefs()));
         String canonical = encode(decoded);
         require(hash(canonical).equals(version.payloadHash()));
         return canonical;
@@ -109,8 +110,8 @@ public final class TravelJson {
             object.forEach((key, element) -> {
                 // targetIds 是集合语义；重试时不应受 Set 的 JVM 迭代顺序影响。
                 Object normalized = normalize(element);
-                if ("targetIds".equals(key) && normalized instanceof List<?> ids) {
-                    normalized = ids.stream().map(Object::toString).sorted().toList();
+                if (setKey(key) && normalized instanceof List<?> ids) {
+                    normalized = ids.stream().sorted(java.util.Comparator.comparing(Object::toString)).toList();
                 }
                 sorted.put(key.toString(), normalized);
             });
@@ -119,6 +120,8 @@ public final class TravelJson {
         if (value instanceof List<?> list) return list.stream().map(this::normalize).toList();
         return value;
     }
+    /** @param key JSON集合语义字段 @return 是否固定排序，防止同一证据集合因 JVM 迭代顺序造成假冲突 */
+    private static boolean setKey(Object key) { return "targetIds".equals(key) || "evidenceRefs".equals(key); }
 
     /**
      * @param condition 格式条件；失败只输出固定分类

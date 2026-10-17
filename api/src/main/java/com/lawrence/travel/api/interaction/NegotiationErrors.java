@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** 固定拒绝类型；不回显用户原文、SQL 或模型产物。 */
-@RestControllerAdvice(assignableTypes = {NegotiationController.class, com.lawrence.travel.api.knowledge.EvidenceController.class})
+@RestControllerAdvice(assignableTypes = {NegotiationController.class, com.lawrence.travel.api.knowledge.EvidenceController.class, com.lawrence.travel.api.itinerary.ItineraryController.class})
 public final class NegotiationErrors {
     /**
      * @param failure 固定分类

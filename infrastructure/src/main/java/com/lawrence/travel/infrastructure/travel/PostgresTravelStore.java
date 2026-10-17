@@ -31,6 +31,7 @@ public final class PostgresTravelStore implements TravelStore {
     private final TravelMapper mapper;
     private final TravelJson json;
     private final TransactionTemplate transaction;
+    private final com.lawrence.travel.application.port.ResearchStore evidence;
 
     /**
      * @param mapper 显式私有资源 SQL
@@ -38,7 +39,12 @@ public final class PostgresTravelStore implements TravelStore {
      * @param json 固定 JSONB 格式
      */
     public PostgresTravelStore(TravelMapper mapper, PlatformTransactionManager manager, TravelJson json) {
+        this(mapper, manager, json, null);
+    }
+    /** @param mapper 私有SQL @param manager 事务 @param json JSON @param evidence 字段证据端口，可空表示保守兼容旧接线 */
+    public PostgresTravelStore(TravelMapper mapper, PlatformTransactionManager manager, TravelJson json, com.lawrence.travel.application.port.ResearchStore evidence) {
         this.mapper = mapper; this.json = json; this.transaction = new TransactionTemplate(manager);
+        this.evidence = evidence;
     }
 
     /**
@@ -125,7 +131,11 @@ public final class PostgresTravelStore implements TravelStore {
      */
     @Override public StoredSnapshot appendSnapshot(ItineraryVersion version, String payload) {
         require(version != null, INVALID_INPUT);
-        require(version.evidenceRefs().isEmpty(), UNSUPPORTED_REFERENCE);
+        if (!version.evidenceRefs().isEmpty()) {
+            require(evidence != null, UNSUPPORTED_REFERENCE);
+            try { evidence.resolve(version.scope(), version.evidenceRefs()); }
+            catch (TravelStorageFailure failure) { throw new TravelStorageFailure(UNSUPPORTED_REFERENCE); }
+        }
         require(version.preferenceVersion() == null, UNSUPPORTED_REFERENCE);
         String canonical = json.snapshot(version, payload);
         return transact(() -> {

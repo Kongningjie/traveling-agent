@@ -23,9 +23,10 @@ public class TravelPersistenceConfiguration {
      * @param mapper 旅行 SQL
      * @param manager PostgreSQL 事务
      * @param json 编解码
+     * @param evidence 字段归属检查端口
      * @return 原子存储端口
      */
-    @Bean TravelStore travelStore(TravelMapper mapper, PlatformTransactionManager manager, TravelJson json) {
-        return new PostgresTravelStore(mapper, manager, json);
+    @Bean TravelStore travelStore(TravelMapper mapper, PlatformTransactionManager manager, TravelJson json, com.lawrence.travel.application.port.ResearchStore evidence) {
+        return new PostgresTravelStore(mapper, manager, json, evidence);
     }
 }

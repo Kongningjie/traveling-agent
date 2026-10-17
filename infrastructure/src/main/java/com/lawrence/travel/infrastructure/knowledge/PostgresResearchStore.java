@@ -41,6 +41,14 @@ public final class PostgresResearchStore implements ResearchStore {
         check(tasks.task(scope) != null); Instant now = mapper.now();
         return mapper.list(scope).stream().map(row -> view(row, now)).toList();
     }
+    /** {@inheritDoc} 查询所有指定引用，不能因为列表分页而把旧事实误认为不存在。 */
+    @Override public List<Research.View> resolve(TaskScope scope, Set<EvidenceRecord.Reference> references) {
+        check(tasks.task(scope) != null); if (references.size() > 200) throw new IllegalArgumentException("EVIDENCE_REFERENCE_LIMIT");
+        var result = new java.util.ArrayList<Research.View>(); Instant now = mapper.now();
+        for (var reference : references) { var row = mapper.read(scope, reference.id()); check(row != null); var value = view(row, now);
+            if (!value.evidence().reference().equals(reference) || row.artifactId() == null) throw new TravelStorageFailure(TravelStorageFailure.Code.STALE_VERSION); result.add(value); }
+        return List.copyOf(result);
+    }
     /** {@inheritDoc} 查询键、依赖、日期、状态和时间必须同时匹配；缓存命中不申请外部调用预算。 */
     @Override public List<FieldEvidence> cached(TaskScope scope, String key, String dependencyHash, LocalDate date) {
         check(tasks.task(scope) != null); var rows = mapper.cache(scope, key, dependencyHash); Instant now = mapper.now();

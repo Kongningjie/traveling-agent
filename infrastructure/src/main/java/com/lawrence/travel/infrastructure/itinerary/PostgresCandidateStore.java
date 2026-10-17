@@ -47,6 +47,7 @@ public final class PostgresCandidateStore implements CandidateStore {
     private final String rules;
     private final String reviewConfiguration;
     private final Duration validity;
+    private final com.lawrence.travel.application.port.ResearchStore evidence;
     private final ItineraryValidator validator = new ItineraryValidator();
     private final ReviewGate gate = new ReviewGate();
 
@@ -62,11 +63,40 @@ public final class PostgresCandidateStore implements CandidateStore {
      */
     public PostgresCandidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets,
                                   TravelJson json, String rules, String reviewConfiguration, Duration validity) {
+        this(mapper, tasks, engine, budgets, json, rules, reviewConfiguration, validity, null);
+    }
+    /** @param mapper 候选SQL @param tasks 任务SQL @param engine 执行SQL @param budgets 原预算 @param json JSON @param rules 规则指纹 @param reviewConfiguration 审核指纹 @param validity 报告上限 @param evidence 字段证据端口 */
+    public PostgresCandidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets, TravelJson json, String rules, String reviewConfiguration, Duration validity, com.lawrence.travel.application.port.ResearchStore evidence) {
         require(rules != null && !rules.isBlank() && reviewConfiguration != null && !reviewConfiguration.isBlank()
                 && validity != null && validity.toMillis() > 0, INVALID_INPUT);
         this.mapper = mapper; this.tasks = tasks; this.engine = engine; this.budgets = budgets; this.json = json;
         this.rules = rules; this.reviewConfiguration = reviewConfiguration; this.validity = validity;
+        this.evidence = evidence;
     }
+    /** {@inheritDoc} 修订必须与领取一致；不信任客户端指定的生效指针和证据。 */
+    @Override public com.lawrence.travel.application.itinerary.Planning.Context context(ExecutionFence fence) {
+        var task = tasks.task(fence.scope()); require(task != null, NOT_FOUND);
+        require(task.constraintRevision() == fence.constraintRevision() && task.executionGeneration() == fence.generation() && fence.runId().toString().equals(engine.currentRun(fence.scope())), STALE_VERSION);
+        return new com.lawrence.travel.application.itinerary.Planning.Context(fence.scope(), json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), task.currentVersionId(), evidence == null ? List.of() : evidence.evidence(fence.scope()), mapper.now());
+    }
+    /** {@inheritDoc} 读取草案不授予接受资格；历史不覆盖当前。 */
+    @Override public com.lawrence.travel.application.itinerary.Planning.Candidate read(TaskScope scope, UUID id) {
+        var candidate = candidate(scope, id); var version = version(scope, candidate.snapshotId());
+        return new com.lawrence.travel.application.itinerary.Planning.Candidate(id, version, json.decode(tasks.snapshot(scope, version.snapshotId()).payload(), TripSnapshot.class), report(scope, candidate.validationId()), report(scope, candidate.reviewId()), candidate.state());
+    }
+    /** {@inheritDoc} 展示草案和错误不授予接受资格，旧运行草案不替代当前。 */
+    @Override public com.lawrence.travel.application.itinerary.Planning.View latest(TaskScope scope) {
+        var task = tasks.task(scope); require(task != null, NOT_FOUND); String latest = mapper.latest(scope); if (latest == null) return null; UUID id = UUID.fromString(latest);
+        var candidate = candidate(scope, id); var result = read(scope, id); var row = engine.run(scope, candidate.runId());
+        com.lawrence.travel.domain.itinerary.CostSummary costs;
+        try { costs = com.lawrence.travel.domain.itinerary.CostSummary.calculate(result.snapshot()); } catch (IllegalArgumentException | NullPointerException invalid) { costs = null; }
+        boolean current = row != null && json.decode(row.body(), ExecutionRun.class).state() == ExecutionRun.State.WAITING_ACCEPTANCE
+                && candidate.state().equals("PRESENTED") && task.constraintRevision() == result.version().constraintRevision() && task.executionGeneration() == candidate.generation()
+                && json.pendingInputs(task.pendingInputs()).isEmpty() && eligibility(scope, candidate, result.version()) == ReviewGate.Result.ELIGIBLE;
+        return new com.lawrence.travel.application.itinerary.Planning.View(result, costs, current);
+    }
+    /** {@inheritDoc} 与提交同一确定性函数；过期或失效事实不会进入已知资料。 */
+    @Override public List<ItineraryReport.Issue> validate(ExecutionFence fence, UUID id) { context(fence); var candidate = candidate(fence.scope(), id); require(candidate.runId().equals(fence.runId()), STALE_VERSION); return validate(fence.scope(), version(fence.scope(), candidate.snapshotId())); }
     /**
      * {@inheritDoc} 无业务操作的历史检查点无需锁用户；不得把任意检查点当作候选。
      */
@@ -86,7 +116,15 @@ public final class PostgresCandidateStore implements CandidateStore {
                 && task.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
         if (operation.equals("SAVE_CANDIDATE")) {
             require(type == StageType.PLAN && output.outcome() == StageOutput.Outcome.CONTINUE, INVALID_INPUT);
-            UUID snapshotId = uuid(body.get("snapshotId")); var version = version(fence.scope(), snapshotId);
+            UUID snapshotId = uuid(body.get("snapshotId"));
+            if (body.containsKey("snapshot")) {
+                var trip = json.decode(json.encode(body.get("snapshot")), TripSnapshot.class); String payload = json.encode(trip);
+                var metadata = new ItineraryVersion(snapshotId, fence.scope(), trip.schemaVersion(), json.hash(payload), trip.constraintRevision(), trip.baseVersionId(), trip.evidenceRefs(), null);
+                require(trip.taskId().equals(fence.scope().taskId()) && trip.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
+                if (!trip.evidenceRefs().isEmpty()) { require(evidence != null, INVALID_INPUT); evidence.resolve(fence.scope(), trip.evidenceRefs()); }
+                checked(tasks.insertSnapshot(metadata, json.encode(metadata), json.snapshot(metadata, payload)));
+            }
+            var version = version(fence.scope(), snapshotId);
             require(version.constraintRevision() == fence.constraintRevision() && Objects.equals(version.baseVersionId(), task.currentVersionId()), STALE_VERSION);
             checked(mapper.insertCandidate(fence.scope(), new CandidateMapper.CandidateRow(id, snapshotId, fence.runId(), fence.generation(),
                     fence.stepId(), fence.attemptId(), "NEW", null, null))); return null;
@@ -102,6 +140,7 @@ public final class PostgresCandidateStore implements CandidateStore {
             case "VALIDATE_ITINERARY" -> {
                 require(type == StageType.VALIDATE && output.outcome() != StageOutput.Outcome.PRESENT_CANDIDATE, INVALID_INPUT);
                 var issues = validate(fence.scope(), version);
+                if (body.containsKey("expectedIssues")) require(json.encode(issues).equals(json.encode(body.get("expectedIssues"))), STALE_VERSION);
                 saveReport(fence, candidate, binding, ItineraryReport.Kind.VALIDATION, issues, null);
             }
             case "REVIEW_ITINERARY" -> {
@@ -124,6 +163,11 @@ public final class PostgresCandidateStore implements CandidateStore {
                 checked(mapper.update(fence.scope(), id, "PRESENTED", candidate.validationId(), candidate.reviewId())); return new Result(id, null, null);
             }
             default -> throw new TravelStorageFailure(INVALID_INPUT);
+        }
+        if (output.decision() != null) {
+            require(body.containsKey("decisionSpecs"), INVALID_INPUT);
+            checked(engine.insertDecision(fence.scope(), fence.runId(), output.decision().id(), json.encode(output.decision())));
+            checked(mapper.insertDecisionSpecs(fence.scope(), output.decision().id(), output.decision().revision(), json.encode(body.get("decisionSpecs"))));
         }
         return null;
     }
@@ -155,7 +199,8 @@ public final class PostgresCandidateStore implements CandidateStore {
         var eligibility = eligibility(scope, candidate, version);
         require(eligibility != ReviewGate.Result.BLOCKED, INVALID_INPUT);
         if (eligibility == ReviewGate.Result.REVALIDATE || candidate.state().equals("STALE")) {
-            boolean enqueue = candidate.state().equals("PRESENTED");
+            // 证据通知也可先把候选标为STALE；是否已经排队必须依据运行状态，不能只看候选标签。
+            boolean enqueue = run.state() == ExecutionRun.State.WAITING_ACCEPTANCE;
             checked(mapper.update(scope, candidate.id(), "STALE", candidate.validationId(), candidate.reviewId()));
             return receipt(command, hash, new Acceptance(Status.REVALIDATION_REQUIRED, null, candidate.snapshotId(), candidate.runId()), enqueue);
         }
@@ -186,7 +231,10 @@ public final class PostgresCandidateStore implements CandidateStore {
         try {
             var snapshot = json.decode(tasks.snapshot(scope, version.snapshotId()).payload(), TripSnapshot.class);
             var content = json.decode(tasks.revision(scope, version.constraintRevision()), ConstraintRevision.class);
-            var issues = new ArrayList<>(validator.validate(snapshot, content));
+            var facts = evidence == null ? List.<com.lawrence.travel.domain.knowledge.FieldEvidence>of() : evidence.resolve(scope, version.evidenceRefs()).stream().filter(v -> v.effectiveStatus() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.KNOWN).map(com.lawrence.travel.application.knowledge.Research.View::evidence).toList();
+            var issues = new ArrayList<>(validator.validate(snapshot, content, facts, mapper.now(), com.lawrence.travel.application.itinerary.TravelEvidenceParser.parse(facts, value -> json.decode(value, Object.class))));
+            if (!dependencies(scope, version.evidenceRefs(), mapper.now(), mapper.now().plus(validity)).allCurrent()) issues.add(new ItineraryReport.Issue("EVIDENCE_STALE_OR_UNKNOWN", null, true, true));
+            if (evidence != null && evidence.resolve(scope, version.evidenceRefs()).stream().anyMatch(v -> v.evidence().fieldPath().equals("weather") && v.evidence().status() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.UNKNOWN)) issues.add(new ItineraryReport.Issue("WEATHER_UNKNOWN", null, false, true));
             if (!snapshot.evidenceRefs().equals(version.evidenceRefs()) || !Objects.equals(snapshot.baseVersionId(), version.baseVersionId())) issues.add(new ItineraryReport.Issue("SCHEMA_BINDING", null, true, false));
             return issues;
         } catch (TravelStorageFailure | IllegalArgumentException | NullPointerException malformed) {
@@ -208,7 +256,7 @@ public final class PostgresCandidateStore implements CandidateStore {
             var row = mapper.report(scope, review.id());
             if (!Objects.equals(row.validationId(), candidate.validationId())) return ReviewGate.Result.REVALIDATE;
         }
-        boolean dependencies = version.evidenceRefs().isEmpty() && version.preferenceVersion() == null;
+        boolean dependencies = version.preferenceVersion() == null && dependencies(scope, version.evidenceRefs(), mapper.now(), mapper.now().plus(validity)).allCurrent();
         return gate.evaluate(binding(version), validation, review, mapper.now(), dependencies);
     }
     /**
@@ -222,10 +270,28 @@ public final class PostgresCandidateStore implements CandidateStore {
     private void saveReport(ExecutionFence fence, CandidateMapper.CandidateRow candidate, ItineraryReport.Binding binding,
                             ItineraryReport.Kind kind, List<ItineraryReport.Issue> issues, UUID validation) {
         Instant now = mapper.now();
-        var report = new ItineraryReport(UUID.randomUUID(), binding, kind, issues, now, now.plus(validity), fence.stepId(), fence.attemptId());
+        Instant until = now.plus(validity);
+        until = dependencies(fence.scope(), binding.evidenceRefs(), now, until).validUntil();
+        if (validation != null) { var prior = report(fence.scope(), validation); if (prior != null && prior.validUntil().isBefore(until)) until = prior.validUntil(); }
+        if (!until.isAfter(now)) until = now.plusMillis(1);
+        var report = new ItineraryReport(UUID.randomUUID(), binding, kind, issues, now, until, fence.stepId(), fence.attemptId());
         checked(mapper.insertReport(fence.scope(), candidate, report, json.encode(report), validation));
         checked(mapper.update(fence.scope(), candidate.id(), "NEW", kind == ItineraryReport.Kind.VALIDATION ? report.id() : validation,
                 kind == ItineraryReport.Kind.REVIEW ? report.id() : null));
+    }
+    /** @param scope 私有范围 @param refs 实际引用 @param now DB时间 @param upper 报告上限 @return 原始未知天气仅作可见风险；撤回、冲突和其他未知不豁免，硬天气约束仍由校验器阻断 */
+    private com.lawrence.travel.application.knowledge.Research.Dependencies dependencies(TaskScope scope, java.util.Set<com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference> refs, Instant now, Instant upper) {
+        if (refs.isEmpty()) return new com.lawrence.travel.application.knowledge.Research.Dependencies(true, upper);
+        if (evidence == null) return new com.lawrence.travel.application.knowledge.Research.Dependencies(false, upper);
+        boolean current = true; Instant until = upper;
+        for (var view : evidence.resolve(scope, refs)) {
+            var value = view.evidence();
+            boolean known = view.effectiveStatus() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.KNOWN;
+            boolean unknownWeather = value.fieldPath().equals("weather") && value.status() == com.lawrence.travel.domain.knowledge.EvidenceRecord.Status.UNKNOWN && view.reason().equals("ORIGINAL");
+            current &= (known || unknownWeather) && !now.isBefore(value.retrievedAt()) && now.isBefore(value.expiresAt());
+            if (value.expiresAt().isBefore(until)) until = value.expiresAt();
+        }
+        return new com.lawrence.travel.application.knowledge.Research.Dependencies(current, until);
     }
     /**
      * @param scope 归属

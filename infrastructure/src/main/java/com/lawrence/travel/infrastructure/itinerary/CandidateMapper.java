@@ -11,6 +11,12 @@ import org.apache.ibatis.annotations.Update;
 
 /** 候选报告的显式私有 SQL；调用方统一先锁用户、任务、运行、阶段及事件。 */
 public interface CandidateMapper {
+    /** @param scope 归属 @return 当前运行最近草案，不把历史候选冒充当前 */
+    @Select("SELECT c.id::text FROM itinerary_candidate c JOIN travel_task t ON t.user_id=c.user_id AND t.id=c.task_id AND t.current_run_id=c.run_id WHERE c.user_id=#{scope.userId} AND c.task_id=#{scope.taskId} ORDER BY c.created_at DESC,c.id DESC LIMIT 1")
+    String latest(@Param("scope") TaskScope scope);
+    /** @param scope 私有归属 @param id 问题 @param revision 卡片版本 @param specs 明确字段定义，不能伪造采纳 @return 插入数 */
+    @Insert("INSERT INTO negotiation_card(decision_id,revision,user_id,task_id,specs) VALUES(#{id},#{revision},#{scope.userId},#{scope.taskId},CAST(#{specs} AS jsonb))")
+    int insertDecisionSpecs(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("revision") long revision, @Param("specs") String specs);
     /**
      * @param id 候选
      * @param snapshotId 快照

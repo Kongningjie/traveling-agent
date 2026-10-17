@@ -181,7 +181,7 @@ class CandidateAcceptanceIntegrationTest {
      */
     private CandidateStore store(Fixture f, CandidateMapper mapperOverride) {
         var report = mapper.report(f.scope(), mapper.candidate(f.scope(), f.candidate()).validationId());
-        return new PostgresCandidateStore(mapperOverride, tasks, engines, budgets, json, "itinerary-rules-v1",
+        return new PostgresCandidateStore(mapperOverride, tasks, engines, budgets, json, json.decode(report.body(), ItineraryReport.class).binding().ruleVersion(),
                 json.decode(report.body(), ItineraryReport.class).binding().reviewConfiguration(), Duration.ofMinutes(10));
     }
     /**
