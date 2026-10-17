@@ -65,6 +65,7 @@ class PlanningIntegrationTest {
     @Autowired private ResearchHandler research;
     @Autowired private PlanningHandler planning;
     @Autowired private ItineraryService itineraries;
+    @Autowired private com.lawrence.travel.application.itinerary.VersionService versionService;
     @Autowired private CandidateStore candidates;
     @Autowired private EvidenceService evidence;
     @Autowired private BudgetLedger budgets;
@@ -205,6 +206,11 @@ class PlanningIntegrationTest {
         var http = java.net.http.HttpClient.newHttpClient(); String root = "http://127.0.0.1:" + port; var uri = URI.create(root + "/api/v1/tasks/" + f.scope().taskId() + "/accept");
         var denied = java.net.http.HttpRequest.newBuilder(uri).header("Cookie", cookie).header("Content-Type", "application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(denied, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(403);
         var csrf = http.send(java.net.http.HttpRequest.newBuilder(URI.create(root + "/api/v1/auth/csrf")).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()); var token = json.decode(csrf.body(), Map.class);
+        var recheckUri = URI.create(root + "/api/v1/tasks/" + f.scope().taskId() + "/candidate/revalidate");
+        var recheckDenied = java.net.http.HttpRequest.newBuilder(recheckUri).header("Cookie", cookie).header("Content-Type", "application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(recheckDenied, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(403);
+        var recheck = java.net.http.HttpRequest.newBuilder(recheckUri).header("Cookie", cookie).header("Content-Type", "application/json").header((String) token.get("headerName"), (String) token.get("token")).POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(recheck, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(202);
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNull(); through(f, StageType.PRESENT);
+        body = new com.lawrence.travel.api.itinerary.ItineraryController.Accept(UUID.randomUUID(), body.candidateId(), body.expectedCurrentVersionId(), body.constraintRevision(), body.generation(), body.snapshotHash());
         var allowed = java.net.http.HttpRequest.newBuilder(uri).header("Cookie", cookie).header("Content-Type", "application/json").header((String) token.get("headerName"), (String) token.get("token")).POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(allowed, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(200);
     }
     /** @param f 原运行 @param facts 明确修改 @return 已接受旧版本后的新运行；空调查计划复用已有字段事实 */
@@ -297,6 +303,135 @@ class PlanningIntegrationTest {
         var body = new java.util.LinkedHashMap<>(json.decode(out.checkpoint(), Map.class)); var scope = new java.util.LinkedHashMap<>(json.decode(json.encode(body.get("impactScope")), Map.class));
         var ids = new java.util.ArrayList<>((List<?>) scope.get("allowedIds")); java.util.Collections.reverse(ids); scope.put("allowedIds", ids); body.put("impactScope", scope);
         assertThat(engine.commit(engine.prepare(c, new StageOutput(out.text(), json.encode(body), out.next(), out.outcome(), null)))).isEqualTo(StageCommitPort.Result.COMMITTED);
+    }
+
+    /** 历史恢复产生新候选和新报告，重复请求仅一个运行，确认前保留当前生效指针。 */
+    @Test void historicalRestoreRequiresFreshReviewAndAcceptance() {
+        var f = replan(fixture(), Map.of("interests", "更新说明")); var first = travel.task(f.actor(), f.scope().taskId()).task().currentVersionId(); through(f, StageType.PRESENT); accept(f);
+        var current = travel.task(f.actor(), f.scope().taskId()).task(); UUID request = UUID.randomUUID();
+        var restored = versionService.restore(f.actor(), f.scope().taskId(), request, first, current.currentVersionId(), current.constraintRevision(), current.executionGeneration());
+        assertThat(versionService.restore(f.actor(), f.scope().taskId(), request, first, current.currentVersionId(), current.constraintRevision(), current.executionGeneration()).id()).isEqualTo(restored.id());
+        assertThat(versionService.list(f.actor(), f.scope().taskId(), 0, 20)).hasSize(2).allMatch(v -> v.accepted());
+        assertThat(versionService.detail(f.actor(), f.scope().taskId(), first).sourceMessages()).isNotEmpty();
+        assertThat(versionService.diff(f.actor(), f.scope().taskId(), current.currentVersionId(), first)).anyMatch(v -> v.kind().equals("Item") && v.action().equals("CHANGED"));
+        assertThatThrownBy(() -> versionService.restore(f.actor(), f.scope().taskId(), request, current.currentVersionId(), current.currentVersionId(), current.constraintRevision(), current.executionGeneration())).hasMessage("IDEMPOTENCY_CONFLICT");
+        var r = new Fixture(f.actor(), f.scope(), restored.id()); through(r, StageType.PRESENT); var candidate = itineraries.latest(r.actor(), r.scope().taskId()).candidate();
+        assertThat(candidate.snapshot().items()).isEqualTo(candidates.base(f.scope(), first).snapshot().items()); assertThat(candidate.version().snapshotId()).isNotEqualTo(first);
+        assertThat(versionService.detail(f.actor(), f.scope().taskId(), candidate.version().snapshotId()).sourceCode()).isEqualTo("HISTORY_RESTORE");
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(current.currentVersionId());
+        assertThat(candidate.validation().conclusion()).isEqualTo(ItineraryReport.Conclusion.PASS); assertThat(candidate.review().conclusion()).isEqualTo(ItineraryReport.Conclusion.PASS);
+        assertThat(accept(r).status()).isEqualTo(CandidateStore.Status.ACCEPTED); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(candidate.version().snapshotId());
+    }
+    /** 历史预算和旧报告不能覆盖最新硬约束；不满足的新恢复候选保持阻断。 */
+    @Test void restoreUsesCurrentRequirementsRatherThanHistoricalOnes() {
+        var f = replan(fixture(), Map.of("budgetCny", "10")); through(f, StageType.UNDERSTAND); var current = travel.task(f.actor(), f.scope().taskId()).task();
+        var run = versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), current.currentVersionId(), current.currentVersionId(), current.constraintRevision(), current.executionGeneration());
+        var restored = new Fixture(f.actor(), f.scope(), run.id()); through(restored, StageType.VALIDATE);
+        var view = itineraries.latest(f.actor(), f.scope().taskId()); assertThat(view.acceptable()).isFalse(); assertThat(view.candidate().validation().issues()).anyMatch(i -> i.code().equals("HARD_BUDGET_EXCEEDED"));
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().constraintRevision()).isEqualTo(current.constraintRevision()); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(current.currentVersionId());
+    }
+    /** 跨用户历史不可见，未接受草案不可恢复，过期预期不能启动替代运行。 */
+    @Test void versionOwnershipDraftAndStaleRestoreAreRejected() {
+        var f = fixture(); through(f, StageType.PRESENT); var candidate = itineraries.latest(f.actor(), f.scope().taskId()).candidate(); var other = fixture();
+        assertThatThrownBy(() -> versionService.detail(other.actor(), f.scope().taskId(), candidate.version().snapshotId())).hasMessage("NOT_FOUND");
+        assertThatThrownBy(() -> versionService.list(other.actor(), f.scope().taskId(), 0, 20)).hasMessage("NOT_FOUND");
+        assertThatThrownBy(() -> versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), candidate.version().snapshotId(), candidate.version().snapshotId(), candidate.version().constraintRevision(), 1)).hasMessage("INVALID_INPUT");
+        accept(f); var task = travel.task(f.actor(), f.scope().taskId()).task();
+        assertThatThrownBy(() -> versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), task.currentVersionId(), task.currentVersionId(), task.constraintRevision() + 1, task.executionGeneration())).hasMessage("STALE_VERSION");
+    }
+    /** 两个恢复命令同一预期竞争时只启动一个运行；另一个不会悄悄取代用户第一次请求。 */
+    @Test void concurrentRestoreHasOneWinner() throws Exception {
+        var f = fixture(); through(f, StageType.PRESENT); accept(f); var current = travel.task(f.actor(), f.scope().taskId()).task();
+        var gate = new java.util.concurrent.CountDownLatch(1);
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var work = (java.util.concurrent.Callable<String>) () -> { gate.await(); try { versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), current.currentVersionId(), current.currentVersionId(), current.constraintRevision(), current.executionGeneration()); return "QUEUED"; } catch (com.lawrence.travel.application.travel.TravelStorageFailure failure) { return failure.code().name(); } };
+            var a = pool.submit(work); var b = pool.submit(work); gate.countDown(); assertThat(List.of(a.get(), b.get())).containsExactlyInAnyOrder("QUEUED", "STALE_VERSION");
+        }
+    }
+    /** 新需求取代历史恢复时，已经生成的恢复Patch失去提交资格。 */
+    @Test void supersededRestoreCannotCommit() {
+        var f = fixture(); through(f, StageType.PRESENT); accept(f); var current = travel.task(f.actor(), f.scope().taskId()).task();
+        var run = versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), current.currentVersionId(), current.currentVersionId(), current.constraintRevision(), current.executionGeneration()); var restored = new Fixture(f.actor(), f.scope(), run.id()); var c = claim(restored); var out = planning.execute(c);
+        negotiation.send(f.actor(), f.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("interests", "新的要求", null)));
+        assertThat(engine.commit(engine.prepare(c, out))).isEqualTo(StageCommitPort.Result.STALE);
+    }
+
+    /** 恢复目标会跨校验修订阶段保存，不会在第一次受阻后退回无目标普通规划。 */
+    @Test void restoreGoalSurvivesValidationRepair() {
+        var f = replan(fixture(), Map.of("budgetCny", "10")); through(f, StageType.UNDERSTAND); var task = travel.task(f.actor(), f.scope().taskId()).task();
+        var run = versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), task.currentVersionId(), task.currentVersionId(), task.constraintRevision(), task.executionGeneration()); var r = new Fixture(f.actor(), f.scope(), run.id()); through(r, StageType.VALIDATE);
+        org.mockito.Mockito.doAnswer(invocation -> { Planning.Context context = invocation.getArgument(1); Planning.Base base = invocation.getArgument(2); assertThat(context.restorationTarget()).isNotNull(); return new Planning.PatchReply(new com.lawrence.travel.domain.itinerary.ItineraryPatch(base.hash(), List.of(), null), null); }).when(advisor).patch(any(), any(), any(), any(), any(), any());
+        var c = claim(r); assertThat(c.input()).contains("restoreSnapshotId"); assertThat(engine.commit(engine.prepare(c, planning.execute(c)))).isEqualTo(StageCommitPort.Result.COMMITTED);
+    }
+    /** 历史与当前锁定冲突直接等待用户，不把恢复变成没有目标的普通模型修改。 */
+    @Test void restoreLockConflictWaitsWithoutModelRewrite() {
+        var f = replan(fixture(), Map.of("interests", "新说明")); var first = travel.task(f.actor(), f.scope().taskId()).task().currentVersionId(); through(f, StageType.PRESENT); accept(f); var item = candidates.base(f.scope(), travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).snapshot().items().getFirst().id();
+        var receipt = negotiation.send(f.actor(), f.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("lockedIds", item.toString(), null))); through(new Fixture(f.actor(), f.scope(), receipt.runId()), StageType.UNDERSTAND);
+        var task = travel.task(f.actor(), f.scope().taskId()).task(); var run = versionService.restore(f.actor(), f.scope().taskId(), UUID.randomUUID(), first, task.currentVersionId(), task.constraintRevision(), task.executionGeneration()); var r = new Fixture(f.actor(), f.scope(), run.id()); advance(r);
+        assertThat(engine.run(f.scope(), run.id()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.WAITING_USER); verify(advisor, times(1)).patch(any(), any(), any(), any(), any(), any());
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(task.currentVersionId());
+    }
+    /** 三城市代表任务走完真实阶段事务；路线和票价是明确合成资料，不能解释为真实旅行评测。 */
+    @Test void threeCityRepresentativeWorkflowReachesExplicitAcceptance() {
+        var original = fixture();
+        var receipt = negotiation.send(original.actor(), original.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("cities", "北京,天津,上海", null), new Negotiation.Fact("budgetRule", "NONE", null), new Negotiation.Fact("travelers", "4", null)));
+        var f = new Fixture(original.actor(), original.scope(), receipt.runId());
+        String[] cities = {"北京", "天津", "上海"}, coordinates = {"116.4,39.9", "117.2,39.1", "121.4,31.2"}; var queries = new ArrayList<Research.Query>();
+        for (int i = 0; i < 3; i++) queries.add(new Research.Query("poi:" + i, "poi", TravelToolPort.Operation.PLACE, Map.of("city", cities[i], "keywords", "测试地点"), date));
+        for (int i = 0; i < 2; i++) {
+            String target = "poi:" + i + "->poi:" + (i + 1);
+            queries.add(new Research.Query(target, "route", TravelToolPort.Operation.ROUTE, Map.of("origin", coordinates[i], "destination", coordinates[i + 1], "mode", "driving", "date", date.toString()), date));
+            queries.add(new Research.Query(target, "price", TravelToolPort.Operation.EXTRACT, Map.of("url", "https://official.example/fare" + i), date));
+        }
+        org.mockito.Mockito.doReturn(new Research.Plan(queries)).when(researcher).plan(any(), any());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            TravelToolPort.Operation operation = invocation.getArgument(1); @SuppressWarnings("unchecked") Map<String, String> args = invocation.getArgument(2); Map<String, Object> data;
+            if (operation == TravelToolPort.Operation.PLACE) { int i = List.of(cities).indexOf(args.get("city")); data = Map.of("pois", List.of(Map.of("id", Integer.toString(i), "cityname", cities[i], "location", coordinates[i]))); }
+            else if (operation == TravelToolPort.Operation.ROUTE) data = Map.of("route", Map.of("origin", args.get("origin"), "destination", args.get("destination"), "paths", List.of(Map.of("duration", args.get("origin").equals(coordinates[0]) ? "5400" : "21600"))));
+            else { String url = args.get("url"); data = Map.of("results", List.of(Map.of("url", url, "raw_content", date + " " + (url.endsWith("0") ? "100元/人" : "500元/人")))); }
+            return new TravelToolPort.Evidence(URI.create(operation == TravelToolPort.Operation.EXTRACT ? args.get("url") : "https://restapi.amap.com/v3/test"), Instant.now(), json.encode(Map.of("operation", operation.name(), "status", "AVAILABLE", "targetDate", date.toString(), "data", data)));
+        }).when(tools).query(any(), any(), any());
+        org.mockito.Mockito.doAnswer(invocation -> { Research.Query query = invocation.getArgument(1); String value = query.arguments().get("url").endsWith("0") ? "100元/人" : "500元/人"; return new Research.Extraction(value, date + " " + value, null, date); }).when(researcher).extract(any(), any(), any());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Planning.Context context = invocation.getArgument(1); var start = date.atStartOfDay(ZoneId.of("Asia/Shanghai"));
+            var stays = new ArrayList<TripSnapshot.CityStay>(); var items = new ArrayList<TripSnapshot.Item>(); var legs = new ArrayList<TripSnapshot.Transport>(); var costs = new ArrayList<TripSnapshot.Cost>(); var uses = new ArrayList<TripSnapshot.EvidenceUse>();
+            int[] boundaries = {0, 11, 19, 24}, hours = {8, 12, 20};
+            for (int i = 0; i < 3; i++) {
+                UUID stay = UUID.randomUUID(); stays.add(new TripSnapshot.CityStay(stay, cities[i], start.plusHours(boundaries[i]), start.plusHours(boundaries[i + 1])));
+                var item = new TripSnapshot.Item(UUID.randomUUID(), stay, TripSnapshot.ItemType.REST, "合成测试休息点", "poi:" + i, start.plusHours(hours[i]), start.plusHours(hours[i] + 1), null); items.add(item); int index = i;
+                var fact = context.evidence().stream().filter(v -> v.evidence().fieldPath().equals("poi") && v.evidence().targetId().equals("poi:" + index)).findFirst().orElseThrow(); uses.add(new TripSnapshot.EvidenceUse(item.id(), "poi", fact.evidence().reference()));
+            }
+            for (int i = 0; i < 2; i++) {
+                UUID id = UUID.randomUUID(), cost = UUID.randomUUID(); int departure = i == 0 ? 10 : 13; long minutes = i == 0 ? 90 : 360;
+                legs.add(new TripSnapshot.Transport(id, items.get(i).id(), items.get(i + 1).id(), start.plusHours(departure), start.plusHours(departure).plusMinutes(minutes), minutes, true)); BigDecimal amount = new BigDecimal(i == 0 ? "100" : "500");
+                costs.add(new TripSnapshot.Cost(cost, id, "INTERCITY", TripSnapshot.CostUnit.PER_PERSON, BigDecimal.ONE, amount, amount, false, true, "CNY")); String target = "poi:" + i + "->poi:" + (i + 1);
+                for (var fact : context.evidence()) if (fact.evidence().targetId().equals(target)) uses.add(new TripSnapshot.EvidenceUse(fact.evidence().fieldPath().equals("price") ? cost : id, fact.evidence().fieldPath(), fact.evidence().reference()));
+            }
+            return new Planning.Draft(new TripSnapshot(1, context.scope().taskId(), context.revision().revision(), null, new TripWindow(Set.of(cities), date, date, 4), stays, List.of(new TripSnapshot.Day(UUID.randomUUID(), date)), items, legs, List.of(), costs, List.of(), uses.stream().map(TripSnapshot.EvidenceUse::reference).collect(java.util.stream.Collectors.toSet()), uses));
+        }).when(advisor).draft(any(), any(), any(), any());
+        through(f, StageType.PRESENT); var candidate = itineraries.latest(f.actor(), f.scope().taskId());
+        assertThat(candidate.acceptable()).isTrue(); assertThat(candidate.candidate().snapshot().cityStays()).hasSize(3); assertThat(candidate.costs().upperCny()).isEqualByComparingTo("2400"); assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
+    }
+    /** 新工作台与历史入口保留真实HTTP身份、CSRF及归属门禁，查看不会触发生效。 */
+    @Test void httpWorkspaceAndRestoreRequireOwnerAndCsrf() throws Exception {
+        var f = fixture(); through(f, StageType.PRESENT); accept(f); var task = travel.task(f.actor(), f.scope().taskId()).task(); String cookie = session(f.actor(), sessions); var http = java.net.http.HttpClient.newHttpClient(); String root = "http://127.0.0.1:" + port;
+        assertThat(http.send(java.net.http.HttpRequest.newBuilder(URI.create(root + "/api/v1/tasks")).GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(401);
+        var list = http.send(java.net.http.HttpRequest.newBuilder(URI.create(root + "/api/v1/tasks")).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()); assertThat(list.statusCode()).isEqualTo(200); assertThat(list.headers().firstValue("Cache-Control")).contains("no-store"); assertThat(list.body()).contains(f.scope().taskId().toString());
+        String path = root + "/api/v1/tasks/" + f.scope().taskId() + "/versions/" + task.currentVersionId(); var detail = http.send(java.net.http.HttpRequest.newBuilder(URI.create(path)).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding()); assertThat(detail.statusCode()).isEqualTo(200);
+        var body = new com.lawrence.travel.api.itinerary.VersionController.Restore(UUID.randomUUID(), task.currentVersionId(), task.constraintRevision(), task.executionGeneration()); var denied = java.net.http.HttpRequest.newBuilder(URI.create(path + "/restore")).header("Cookie", cookie).header("Content-Type", "application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(denied, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(403);
+        var csrf = http.send(java.net.http.HttpRequest.newBuilder(URI.create(root + "/api/v1/auth/csrf")).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()); var token = json.decode(csrf.body(), Map.class);
+        var allowed = java.net.http.HttpRequest.newBuilder(URI.create(path + "/restore")).header("Cookie", cookie).header("Content-Type", "application/json").header((String) token.get("headerName"), (String) token.get("token")).POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(allowed, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(202);
+        var other = fixture(); String otherCookie = session(other.actor(), sessions); assertThat(http.send(java.net.http.HttpRequest.newBuilder(URI.create(path)).header("Cookie", otherCookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(404);
+    }
+
+    /** 单独重校验意图永不接受，即使当前报告新鲜；重复请求不登记第二阶段，完成后仍待明确接受。 */
+    @Test void explicitRecheckNeverAcceptsFreshCandidate() {
+        var f = fixture(); through(f, StageType.PRESENT); var c = itineraries.latest(f.actor(), f.scope().taskId()).candidate(); var version = c.version(); UUID request = UUID.randomUUID(); long generation = engine.run(f.scope(), f.run()).generation();
+        var result = itineraries.recheck(f.actor(), f.scope().taskId(), request, c.candidateId(), version.baseVersionId(), version.constraintRevision(), generation, version.payloadHash());
+        assertThat(result.status()).isEqualTo(CandidateStore.Status.REVALIDATION_REQUIRED); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNull();
+        assertThat(itineraries.recheck(f.actor(), f.scope().taskId(), request, c.candidateId(), version.baseVersionId(), version.constraintRevision(), generation, version.payloadHash())).isEqualTo(result);
+        assertThatThrownBy(() -> itineraries.accept(f.actor(), f.scope().taskId(), request, c.candidateId(), version.baseVersionId(), version.constraintRevision(), generation, version.payloadHash())).hasMessage("IDEMPOTENCY_CONFLICT");
+        through(f, StageType.PRESENT); assertThat(itineraries.latest(f.actor(), f.scope().taskId()).acceptable()).isTrue(); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNull(); assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
     }
 
 }

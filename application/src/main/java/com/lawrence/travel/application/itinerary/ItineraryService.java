@@ -35,11 +35,19 @@ public final class ItineraryService {
      * @return 接受或需要重新校验
      */
     public CandidateStore.Acceptance accept(UserIdentity actor, UUID taskId, UUID requestId, UUID candidateId, UUID expectedCurrent, long revision, long generation, String hash) {
+        return submit(actor, taskId, requestId, candidateId, expectedCurrent, revision, generation, hash, false);
+    }
+    /** @param actor 认证 @param taskId 任务 @param requestId 请求 @param candidateId 候选 @param expectedCurrent 当前指针 @param revision 需求 @param generation 代次 @param hash 内容 @return 只排队重新校验，之后仍需另行明确接受 */
+    public CandidateStore.Acceptance recheck(UserIdentity actor, UUID taskId, UUID requestId, UUID candidateId, UUID expectedCurrent, long revision, long generation, String hash) {
+        return submit(actor, taskId, requestId, candidateId, expectedCurrent, revision, generation, hash, true);
+    }
+    /** @param actor 认证 @param taskId 任务 @param requestId 请求 @param candidateId 候选 @param expectedCurrent 基础 @param revision 需求 @param generation 代次 @param hash 摘要 @param forceRecheck 仅校验意图 @return 同事务结果及可靠后继 */
+    private CandidateStore.Acceptance submit(UserIdentity actor, UUID taskId, UUID requestId, UUID candidateId, UUID expectedCurrent, long revision, long generation, String hash, boolean forceRecheck) {
         if (actor == null) throw new com.lawrence.travel.application.travel.TravelStorageFailure(com.lawrence.travel.application.travel.TravelStorageFailure.Code.NOT_FOUND);
         var scope = new TaskScope(actor.id(), taskId);
         var command = new CandidateAcceptanceCommand(scope, requestId, candidateId, expectedCurrent, revision, generation, hash);
         return transactions.required(() -> {
-            var attempt = store.accept(command);
+            var attempt = forceRecheck ? store.recheck(command) : store.accept(command);
             if (attempt.enqueueRevalidation()) {
                 UUID snapshot = store.snapshotId(scope, candidateId);
                 var next = new StagePlan(UUID.randomUUID(), new ExecutionStep.Key(StageType.VALIDATE, 0, "revalidate_" + requestId), null,

@@ -35,6 +35,8 @@ public interface CandidateStore extends StageProjection {
      * @return 同事务结果；调用方须在同一外层事务登记重校验请求
      */
     Attempt accept(CandidateAcceptanceCommand command);
+    /** @param command 当前候选的精确前置条件 @return 仅登记重校验，报告已新鲜也绝不接受；调用方同事务排队 */
+    Attempt recheck(CandidateAcceptanceCommand command);
     /**
      * @param scope 私有归属
      * @param candidateId 候选

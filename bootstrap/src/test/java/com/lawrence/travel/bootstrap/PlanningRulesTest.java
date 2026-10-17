@@ -111,6 +111,24 @@ class PlanningRulesTest {
         var issues = new ItineraryValidator().validate(base, requirements); assertThat(issues).anyMatch(i -> i.code().equals("BUDGET_CATEGORY_MISSING") && i.unknown());
         assertThatThrownBy(() -> new ConstraintRevision.Requirement(UUID.randomUUID(), "travelers", "2", ConstraintRevision.Kind.HARD, ConstraintRevision.Source.ASSUMPTION, Set.of())).hasMessage("INVALID_INPUT");
     }
+    /** 交通价格必须精确绑定线路、日期、官方来源和单位，不能把地图或过期价格当作已核实。 */
+    @Test void transportPriceNeedsExactOfficialRouteDateAndUnit() {
+        var base = ItineraryRulesTest.minimal(scope.taskId(), null); var from = base.items().getFirst();
+        var to = new TripSnapshot.Item(UUID.randomUUID(), from.cityStayId(), from.type(), "目的地点", "to", from.startsAt().plusHours(3), from.endsAt().plusHours(3), null);
+        var leg = new TripSnapshot.Transport(UUID.randomUUID(), from.id(), to.id(), from.endsAt(), to.startsAt(), 60L, true);
+        var cost = new TripSnapshot.Cost(UUID.randomUUID(), leg.id(), "INTERCITY", TripSnapshot.CostUnit.PER_PERSON, BigDecimal.ONE, new BigDecimal("100"), new BigDecimal("100"), false, true, "CNY");
+        var seed = fact("100元/人", "price");
+        var proof = new FieldEvidence(seed.reference(), "same->to", "price", seed.value(), seed.sourceType(), seed.sourceUrl(), null, seed.retrievedAt(), null, seed.validForDate(), seed.expiresAt(), seed.quote(), seed.artifactId(), seed.status());
+        var trip = new TripSnapshot(1, base.taskId(), 1, null, base.window(), base.cityStays(), base.days(), List.of(from, to), List.of(leg), List.of(), List.of(cost), List.of(), Set.of(proof.reference()), List.of(new TripSnapshot.EvidenceUse(cost.id(), "price", proof.reference())));
+        assertThat(EvidenceRules.price(trip, List.of(proof), now, cost)).isTrue();
+        assertThat(EvidenceRules.price(trip, List.of(proof), proof.expiresAt(), cost)).isFalse();
+        var wrongUnit = new TripSnapshot.Cost(cost.id(), leg.id(), "INTERCITY", TripSnapshot.CostUnit.PER_GROUP, BigDecimal.ONE, cost.lower(), cost.upper(), false, true, "CNY");
+        assertThat(EvidenceRules.price(trip, List.of(proof), now, wrongUnit)).isFalse();
+        for (int i = 0; i < 3; i++) {
+            var wrong = new FieldEvidence(proof.reference(), i == 0 ? "to->same" : proof.targetId(), "price", proof.value(), i == 1 ? FieldEvidence.SourceType.MAP_PROVIDER : proof.sourceType(), proof.sourceUrl(), null, proof.retrievedAt(), null, i == 2 ? proof.validForDate().plusDays(1) : proof.validForDate(), proof.expiresAt(), proof.quote(), proof.artifactId(), proof.status());
+            assertThat(EvidenceRules.price(trip, List.of(wrong), now, cost)).isFalse();
+        }
+    }
     /** 每人上限按实际人数转换成全组上限，不能误用每组口径或将人数乘两次。 */
     @Test void perPersonBudgetUsesExactlyOneTravelerMultiplier() {
         var base = ItineraryRulesTest.minimal(scope.taskId(), null); var cost = new TripSnapshot.Cost(UUID.randomUUID(), base.items().getFirst().id(), "ACTIVITIES", TripSnapshot.CostUnit.PER_PERSON, BigDecimal.ONE, new BigDecimal("20"), new BigDecimal("20"), false, true, "CNY"); var proof = fact("20元/人", "price");

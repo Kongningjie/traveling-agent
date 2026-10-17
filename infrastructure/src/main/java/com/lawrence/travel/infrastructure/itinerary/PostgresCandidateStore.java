@@ -218,15 +218,19 @@ public final class PostgresCandidateStore implements CandidateStore {
     /**
      * {@inheritDoc} 永久接受重放先于当前状态检查，避免旧重试恢复已经被后继版本替换的指针。
      */
-    @Override public Attempt accept(CandidateAcceptanceCommand command) {
+    @Override public Attempt accept(CandidateAcceptanceCommand command) { return submit(command, false); }
+    /** {@inheritDoc} 独立幂等语义，不能让只请求重校验的用户意图变成接受。 */
+    @Override public Attempt recheck(CandidateAcceptanceCommand command) { return submit(command, true); }
+    /** @param command 精确预期 @param forceRecheck 只重校验 @return 永久幂等结果；与排队参加同一事务 */
+    private Attempt submit(CandidateAcceptanceCommand command, boolean forceRecheck) {
         transaction(); var scope = command.scope(); require(mapper.lockUser(scope) != null, NOT_FOUND);
         var task = tasks.lockTask(scope); require(task != null, NOT_FOUND);
-        String hash = commandHash(command);
+        String hash = forceRecheck ? json.hash(json.encode(List.of("RECHECK", commandHash(command)))) : commandHash(command);
         var replay = mapper.request(scope, command.acceptanceRequestId());
         if (replay != null) return new Attempt(replay(replay, hash), false);
         var candidate = candidate(scope, command.candidateId());
         var accepted = mapper.accepted(scope, candidate.id());
-        if (accepted != null) return receipt(command, hash, replay(accepted, hash), false);
+        if (accepted != null && !forceRecheck) return receipt(command, hash, replay(accepted, hash), false);
         // 任务锁已串行化同任务写入；仍按引擎统一顺序锁住所有权威行，禁止无锁自判完成。
         var row = engine.lockRun(scope, candidate.runId()); require(row != null, NOT_FOUND);
         engine.lockSteps(scope, candidate.runId()); engine.lockEvents(scope, candidate.runId());
@@ -241,8 +245,8 @@ public final class PostgresCandidateStore implements CandidateStore {
                 && Objects.equals(version.baseVersionId(), task.currentVersionId()), STALE_VERSION);
         require(candidate.state().equals("PRESENTED") || candidate.state().equals("STALE"), STALE_VERSION);
         var eligibility = eligibility(scope, candidate, version);
-        require(eligibility != ReviewGate.Result.BLOCKED, INVALID_INPUT);
-        if (eligibility == ReviewGate.Result.REVALIDATE || candidate.state().equals("STALE")) {
+        require(forceRecheck || eligibility != ReviewGate.Result.BLOCKED, INVALID_INPUT);
+        if (forceRecheck || eligibility == ReviewGate.Result.REVALIDATE || candidate.state().equals("STALE")) {
             // 证据通知也可先把候选标为STALE；是否已经排队必须依据运行状态，不能只看候选标签。
             boolean enqueue = run.state() == ExecutionRun.State.WAITING_ACCEPTANCE;
             checked(mapper.update(scope, candidate.id(), "STALE", candidate.validationId(), candidate.reviewId()));

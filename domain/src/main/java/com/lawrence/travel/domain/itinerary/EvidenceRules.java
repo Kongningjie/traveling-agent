@@ -38,6 +38,13 @@ public final class EvidenceRules {
         if (cost.upper() == null || cost.lower() == null || cost.unit() == null || cost.quantity() == null || cost.quantity().compareTo(java.math.BigDecimal.ONE) != 0 || cost.lower().compareTo(cost.upper()) != 0) return false;
         String expected = cost.lower().stripTrailingZeros().toPlainString() + "元/" + switch (cost.unit()) { case PER_PERSON -> "人"; case PER_GROUP -> "组"; case PER_ROOM_NIGHT -> "房晚"; };
         if (item != null) return matching(trip, facts, now, cost.id(), "price", item.locationKey(), item.startsAt().toLocalDate()).stream().anyMatch(f -> priceValue(f, expected));
+        var leg = trip.transportLegs().stream().filter(l -> l.id().equals(cost.relatedId())).findFirst().orElse(null);
+        if (leg != null) {
+            var from = trip.items().stream().filter(i -> i.id().equals(leg.fromItemId())).findFirst().orElse(null); var to = trip.items().stream().filter(i -> i.id().equals(leg.toItemId())).findFirst().orElse(null);
+            if (from == null || to == null || from.locationKey() == null || to.locationKey() == null || leg.startsAt() == null) return false;
+            // 交通价格必须有明确日期、线路与计价单位的官方证据；地图时长估算和模型猜测不能当票价。
+            return matching(trip, facts, now, cost.id(), "price", from.locationKey() + "->" + to.locationKey(), leg.startsAt().toLocalDate()).stream().anyMatch(f -> priceValue(f, expected));
+        }
         var hotel = trip.accommodationStays().stream().filter(s -> s.id().equals(cost.relatedId())).findFirst().orElse(null);
         if (hotel == null || hotel.locationKey() == null || hotel.checkIn() == null || hotel.checkOut() == null || !hotel.checkOut().toLocalDate().isAfter(hotel.checkIn().toLocalDate()) || cost.unit() != TripSnapshot.CostUnit.PER_ROOM_NIGHT || !cost.category().equals("LODGING")) return false;
         return hotel.checkIn().toLocalDate().datesUntil(hotel.checkOut().toLocalDate()).allMatch(date -> matching(trip, facts, now, cost.id(), "price", hotel.locationKey(), date).stream().anyMatch(f -> priceValue(f, expected)));

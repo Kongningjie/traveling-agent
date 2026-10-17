@@ -32,7 +32,7 @@ public class CandidateConfiguration {
      */
     @Bean CandidateStore candidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets,
                                        TravelJson json, ExecutionControlProperties controls, com.lawrence.travel.application.port.ResearchStore evidence) {
-        return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v2",
+        return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v3",
                 json.hash(json.encode(List.of("review-prompt-v2", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence);
     }
     /**

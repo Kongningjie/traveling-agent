@@ -1,7 +1,8 @@
+/* 工作台布局与键盘可访问样式；窄屏按任务、协商、版本顺序自然排列。 */
 :root {
-  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  color: #203d36;
-  background: #f5f6f1;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #233c35;
+  background: #f3f5f1;
   font-synthesis: none;
 }
 * {
@@ -10,134 +11,413 @@
 body {
   margin: 0;
 }
-main {
-  max-width: 1120px;
-  margin: auto;
-  padding: 32px 32px 24px;
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
-header, .panel-heading {
+button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #245d4b;
+  color: white;
+  padding: 10px 15px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #d49a46;
+  outline-offset: 3px;
+}
+.secondary {
+  background: #edf3ed;
+  color: #245d4b;
+  border-color: #c9d9cd;
+}
+.quiet {
+  background: transparent;
+  color: #245d4b;
+  border-color: #d9e1d7;
+  padding: 7px 10px;
+}
+.topbar {
+  padding: 19px 32px;
+  background: #fff;
+  border-bottom: 1px solid #dfe5dc;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 .brand {
-  font-weight: 750;
-  font-size: 22px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #245d4b;
+  text-decoration: none;
 }
-.badge, .modules span {
-  font-size: 12px;
-  border: 1px solid #d1dfd6;
-  border-radius: 20px;
-  padding: 6px 12px;
-}
-.intro {
-  padding: 72px 0 34px;
-}
-.eyebrow {
-  color: #587a61;
+.brand span {
   font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 10px;
 }
-h1 {
-  font-size: clamp(30px, 5vw, 50px);
-  line-height: 1.3;
-  margin: 14px 0;
-  letter-spacing: -1px;
+.workbench {
+  display: grid;
+  grid-template-columns: 245px minmax(380px, 1.35fr) minmax(340px, 1fr);
+  gap: 20px;
+  padding: 24px;
+  max-width: 1800px;
+  margin: auto;
+  align-items: start;
 }
-p {
-  color: #60736b;
-  line-height: 1.8;
+.panel,
+.decision {
+  background: white;
+  border: 1px solid #dfe5dc;
+  border-radius: 15px;
+  padding: 23px;
+  margin-bottom: 18px;
+  min-width: 0;
+}
+.sidebar {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 18px;
+}
+.row,
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.row {
+  justify-content: space-between;
+}
+.row > label {
+  flex: 1;
+  min-width: 100px;
+}
+.actions {
+  margin-top: 12px;
+}
+h1,
+h2,
+h3,
+h4 {
+  margin-top: 0;
 }
 h2 {
-  font-size: 18px;
+  font-size: 19px;
 }
-.panel {
-  padding: 24px 28px;
-  background: #fff;
-  border: 1px solid #dee5dc;
-  border-radius: 16px;
+h3 {
+  font-size: 17px;
 }
-button {
-  background: #174c41;
-  color: white;
-  border: 0;
-  border-radius: 8px;
-  padding: 10px 18px;
-  cursor: pointer;
-  font: inherit;
+h4 {
+  margin-bottom: 10px;
 }
-button:disabled {
-  opacity: .5;
-  cursor: wait;
+p {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
-button:focus-visible {
-  outline: 3px solid #d49a39;
-  outline-offset: 3px;
-}
-.connected {
-  color: #236346;
-}
-.error {
-  color: #a13e32;
-}
-dl {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-dt {
-  color: #6f7f77;
+small,
+.muted {
+  color: #65756d;
   font-size: 13px;
-}
-dd {
-  margin: 10px 0 0;
   line-height: 1.6;
 }
-.modules {
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #4f7a65;
+}
+.task-title {
+  font-size: 26px;
+  margin: 8px 0;
+}
+label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 13px 0 7px;
+}
+.inline {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  padding-top: 12px;
+  font-weight: 400;
 }
-.next {
+input:not([type="checkbox"]),
+textarea,
+select {
+  display: block;
+  width: 100%;
+  background: #fcfdfb;
+  border: 1px solid #c9d3c9;
+  border-radius: 8px;
+  padding: 10px;
+  color: #233c35;
+  margin-top: 7px;
+}
+textarea {
+  resize: vertical;
+}
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.welcome {
+  max-width: 1100px;
+  min-height: 70vh;
+  margin: 50px auto;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  margin-top: 30px;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 70px;
+  padding: 32px;
+  align-items: center;
 }
-article {
-  padding: 20px 8px;
+.welcome h1 {
+  font-size: 44px;
+  line-height: 1.4;
 }
-article > span {
-  color: #8b9b87;
+.auth {
+  padding: 32px;
+}
+.auth button {
+  width: 100%;
+}
+.task-button {
+  display: block;
+  width: 100%;
+  background: transparent;
+  color: #233c35;
+  text-align: left;
+  margin-top: 10px;
+  padding: 14px 11px;
+  border: 1px solid #e0e5dc;
+}
+.task-button small,
+.version-list small {
+  display: block;
+  margin-top: 7px;
+}
+.task-button.active {
+  background: #eaf2e8;
+  border-color: #8bae94;
+}
+.create {
+  padding: 12px 0;
+  border-bottom: 1px solid #e1e7dd;
+}
+.requirements {
+  margin: 0;
+}
+.requirements > div {
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0ea;
+}
+.requirements dt {
   font-size: 13px;
+  font-weight: 650;
 }
-article p {
+.requirements dt small {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 5px;
+}
+.requirements dd {
+  margin: 6px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 14px;
 }
-small, footer {
-  color: #778579;
+.conversation {
+  max-height: 350px;
+  overflow: auto;
+}
+.message {
+  background: #f3f6ef;
+  padding: 11px 15px;
+  border-radius: 10px;
+  margin: 10px 0;
+  white-space: pre-wrap;
+}
+.message p {
+  margin: 0 0 5px;
+}
+.decision {
+  border-color: #afc6ae;
+  background: #f9fcf4;
+}
+.question {
+  border-bottom: 1px solid #dae5d6;
+  padding: 4px 0 12px;
+}
+.question p {
+  margin: 5px 0;
+  font-size: 13px;
+}
+.tag {
+  background: #edf2e9;
+  border-radius: 5px;
+  padding: 3px 7px;
   font-size: 12px;
+  display: inline-block;
+}
+.day {
+  border-left: 2px solid #c4d4bf;
+  padding-left: 16px;
+  margin: 22px 0;
+}
+.activity {
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0e8;
+}
+.activity p {
+  font-size: 13px;
+  margin: 6px 0;
+}
+.activity .quiet {
+  margin-top: 5px;
+}
+.itinerary details {
+  margin: 14px 0;
+}
+.itinerary > p {
+  font-size: 13px;
+}
+.version-list {
+  padding: 0;
+  list-style: none;
+}
+.version-list li {
+  padding: 9px 0;
+  border-bottom: 1px solid #edf0e8;
+}
+.change {
+  font-size: 12px;
+  border-left: 3px solid #b4c5ad;
+  padding: 10px;
+  margin: 12px 0;
+  background: #f8faf5;
+}
+.change dd {
+  margin: 4px 0 10px;
+  overflow-wrap: anywhere;
+}
+.change del {
+  color: #82645d;
+}
+.confirm,
+.warning {
+  background: #fff4dd;
+  padding: 14px;
+  border-radius: 8px;
+}
+.error {
+  color: #963f32;
+  background: #fff0eb;
+}
+.banner {
+  padding: 13px 18px;
+  border: 1px solid #dfe5dc;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.issues {
+  font-size: 12px;
+  line-height: 1.7;
+  padding-left: 18px;
+}
+.empty {
+  padding: 60px 35px;
+}
+.empty h1 {
+  font-size: 28px;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.6;
+}
+details > p {
+  font-size: 13px;
 }
 footer {
-  border-top: 1px solid #dce3d8;
-  padding-top: 24px;
-  margin-top: 32px;
+  text-align: center;
+  color: #778579;
+  font-size: 12px;
+  padding: 25px;
 }
-@media (max-width: 680px) {
-  main {
-    padding: 24px 18px;
+a {
+  color: #245d4b;
+}
+.versions-column {
+  min-width: 0;
+}
+.versions-column .panel {
+  padding: 20px;
+}
+@media (max-width: 1200px) {
+  .workbench {
+    grid-template-columns: 215px minmax(330px, 1fr);
   }
-  .intro {
-    padding-top: 44px;
+  .versions-column {
+    grid-column: 2;
   }
-  dl, .next {
-    grid-template-columns: 1fr;
+  .sidebar {
+    grid-row: 1/3;
   }
-  .next {
-    gap: 0;
+}
+@media (max-width: 760px) {
+  .workbench {
+    display: block;
+    padding: 14px;
   }
-  .panel {
+  .sidebar {
+    position: static;
+    max-height: none;
+  }
+  .topbar {
+    padding: 15px;
+    flex-wrap: wrap;
+  }
+  .topbar > .muted {
+    display: none;
+  }
+  .welcome {
+    display: block;
+    margin: 20px auto;
     padding: 20px;
+  }
+  .welcome h1 {
+    font-size: 32px;
+  }
+  .panel,
+  .decision {
+    padding: 18px;
+  }
+  .auth {
+    margin-top: 25px;
+  }
+  .versions-column .panel {
+    padding: 18px;
   }
 }

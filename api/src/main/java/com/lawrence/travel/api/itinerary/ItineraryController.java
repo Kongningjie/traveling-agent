@@ -32,4 +32,10 @@ public final class ItineraryController {
         response.setHeader("Cache-Control", "no-store"); var result = service.accept(actor, taskId, body.requestId(), body.candidateId(), body.expectedCurrentVersionId(), body.constraintRevision(), body.generation(), body.snapshotHash());
         return ResponseEntity.status(result.status() == CandidateStore.Status.ACCEPTED ? 200 : 202).body(result);
     }
+    /** @param actor 认证 @param taskId 任务 @param body 精确候选前置条件 @param response 禁止缓存 @return 只重校验，不复用接受意图 */
+    @PostMapping("/api/v1/tasks/{taskId}/candidate/revalidate")
+    public ResponseEntity<CandidateStore.Acceptance> recheck(@AuthenticationPrincipal UserIdentity actor, @PathVariable UUID taskId, @RequestBody Accept body, jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store"); return ResponseEntity.accepted().body(service.recheck(actor, taskId, body.requestId(), body.candidateId(), body.expectedCurrentVersionId(), body.constraintRevision(), body.generation(), body.snapshotHash()));
+    }
+
 }
