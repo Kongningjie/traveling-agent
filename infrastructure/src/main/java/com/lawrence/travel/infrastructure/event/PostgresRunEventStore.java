@@ -51,6 +51,7 @@ public final class PostgresRunEventStore implements RunEventStore {
         if ("WAITING_ACCEPTANCE".equals(row.state())) return "CANDIDATE_READY";
         if (row.type().contains("PAUSED")) return "BUDGET_UPDATE";
         if (row.type().contains("FAILED")) return "RUN_ERROR";
+        if ("WAITING_USER".equals(row.state())) return "DECISION_REQUIRED";
         if (row.type().startsWith("STAGE")) return "STAGE_PROGRESS";
         if (row.type().contains("WAITING_USER")) return "DECISION_REQUIRED";
         return "RUN_STATUS";

@@ -79,7 +79,7 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
                     /** 无候选仓储的测试引擎不投影业务产物。 */
                     @Override public void beforeTaskLock(ExecutionFence fence, StageOutput output) { }
                     /** @return 空；禁止无候选仓储时进入等待接受 */
-                    @Override public UUID project(ExecutionFence fence, StageType type, StageOutput output) { return null; }
+                    @Override public StageProjection.Result project(ExecutionFence fence, StageType type, StageOutput output) { return null; }
                 });
     }
     /** @param mapper 执行 SQL @param tasks 任务 SQL @param budgets 权威预算 @param json JSON @param manager 事务 @param limits 上限 @param maximumRuns 并行数 @param maximumResearch 调查数 @param leaseTime 租约 @param maximumAttempts 尝试数 @param projection 同事务业务投影 */
@@ -239,7 +239,15 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             // SQL 执行时再次比较数据库时钟，封住校验与写入之间到期的窗口。
             // 此时只是同一事务内占定完成资格；后续任一失败都会连 DONE 状态一起回滚。
             if (mapper.completeEvent(f) != 1) return Result.STALE;
-            UUID eligibleCandidate = projection.project(f, step(session, f.stepId()).key().type(), output);
+            var projected = projection.project(f, step(session, f.stepId()).key().type(), output);
+            UUID eligibleCandidate = projected == null ? null : projected.candidateId();
+            if (projected != null && projected.constraintRevision() != null) {
+                var updated = tasks.task(f.scope());
+                require(updated.constraintRevision() == projected.constraintRevision()
+                        && updated.executionGeneration() == session.task.executionGeneration()
+                        && mapper.leased(f.runId()) == 0 && mapper.pending(f.runId()) == 0, INVALID_INPUT);
+                session.run = session.run.advanceConstraints(session.task.constraintRevision(), updated.constraintRevision()); session.task = updated;
+            }
             if (output.outcome() == StageOutput.Outcome.PRESENT_CANDIDATE) {
                 require(eligibleCandidate != null && session.row.goal().equals(Goal.PLANNING.name())
                         && mapper.leased(f.runId()) == 0 && mapper.pending(f.runId()) == 0
@@ -252,14 +260,19 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             if (output.decision() != null) {
                 DecisionRequest decision = output.decision();
                 require(decision.scope().equals(f.scope()) && decision.runId().equals(f.runId()) && decision.generation() == f.generation()
-                        && decision.constraintRevision() == f.constraintRevision() && decision.state() == DecisionRequest.State.OPEN, INVALID_INPUT);
-                checked(mapper.insertDecision(f.scope(), f.runId(), decision.id(), json.encode(decision)));
+                        && decision.constraintRevision() == session.run.constraintRevision() && decision.state() == DecisionRequest.State.OPEN, INVALID_INPUT);
+                String existingDecision = mapper.decision(f.scope(), f.runId(), decision.id());
+                if (existingDecision == null) checked(mapper.insertDecision(f.scope(), f.runId(), decision.id(), json.encode(decision)));
+                else require(json.decode(existingDecision, DecisionRequest.class).equals(decision), IDEMPOTENCY_CONFLICT);
             }
             // 新阶段及因果事件全部成功才允许完成当前事件；任一唯一键冲突回滚当前完成及进度。
-            for (StagePlan next : output.next()) enqueue(session.run, f.stepId(), next);
+            boolean replace = projected != null && projected.replacementInput() != null;
+            if (replace) require(output.outcome() == StageOutput.Outcome.CONTINUE && output.next().size() == 1, INVALID_INPUT);
+            else for (StagePlan next : output.next()) enqueue(session.run, f.stepId(), next);
             ExecutionStep completed = step(session, f.stepId()).finish(f.attemptId(), ExecutionStep.State.COMPLETED);
             checked(mapper.finishStep(f.scope(), f.runId(), f.stepId(), json.encode(completed), f.attemptId(), receipt, command.artifactId()));
             checked(mapper.finishAttempt(f.attemptId(), "COMPLETED"));
+            if (replace) { save(session); start(f.scope(), projected.replacementInput(), output.next().getFirst()); return Result.COMMITTED; }
             if (output.outcome() == StageOutput.Outcome.CONSULTATION_COMPLETE) session.run = session.run.completeConsultation();
             if (output.outcome() == StageOutput.Outcome.PRESENT_CANDIDATE) session.run = session.run.waitForAcceptance(eligibleCandidate);
             reconcile(session); visible(f.scope(), f.runId(), f.stepId(), "STAGE_COMPLETED"); return Result.COMMITTED;
@@ -277,6 +290,16 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             session.run = exhausted(session) ? session.run.pauseBudget() : session.run.revalidateCandidate();
             enqueue(session.run, cause, next); save(session);
             visible(scope, runId, next.id(), "CANDIDATE_REVALIDATION_QUEUED"); return true;
+        });
+    }
+    /** 原问题回答沿用运行与预算，只排队解释，未在接收时采纳。 */
+    @Override public void interpretAnswer(TaskScope scope, UUID runId, UUID input, StagePlan next) {
+        tx(() -> {
+            Session session = lock(scope, runId);
+            require(runId.equals(currentRun(scope)) && session.run.generation() == session.task.executionGeneration()
+                    && session.run.constraintRevision() == session.task.constraintRevision() && next.key().type() == StageType.UNDERSTAND, INVALID_INPUT);
+            session.run = session.run.resumeAfterAnswer(session.task.constraintRevision()); enqueue(session.run, input, next); save(session);
+            visible(scope, runId, null, "ANSWER_RECEIVED"); return true;
         });
     }
 

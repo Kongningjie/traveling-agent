@@ -77,7 +77,7 @@ public final class PostgresCandidateStore implements CandidateStore {
     /**
      * {@inheritDoc} 只在完成事件已取得资格的同一事务投影；任何失败回滚阶段及报告。
      */
-    @Override public UUID project(ExecutionFence fence, StageType type, StageOutput output) {
+    @Override public Result project(ExecutionFence fence, StageType type, StageOutput output) {
         transaction(); String operation = operation(output);
         if (operation == null) return null;
         var body = object(output.checkpoint()); UUID id = uuid(body.get("candidateId"));
@@ -121,7 +121,7 @@ public final class PostgresCandidateStore implements CandidateStore {
             case "PRESENT_ITINERARY" -> {
                 require(type == StageType.PRESENT && output.outcome() == StageOutput.Outcome.PRESENT_CANDIDATE, INVALID_INPUT);
                 require(eligibility(fence.scope(), candidate, version) == ReviewGate.Result.ELIGIBLE, INVALID_INPUT);
-                checked(mapper.update(fence.scope(), id, "PRESENTED", candidate.validationId(), candidate.reviewId())); return id;
+                checked(mapper.update(fence.scope(), id, "PRESENTED", candidate.validationId(), candidate.reviewId())); return new Result(id, null, null);
             }
             default -> throw new TravelStorageFailure(INVALID_INPUT);
         }
