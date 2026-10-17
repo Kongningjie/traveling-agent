@@ -19,8 +19,11 @@ public final class Research {
         /** 参数防御复制；各工具参数和值在应用边界继续校验。 */
         public Query { arguments = arguments == null ? Map.of() : Map.copyOf(arguments); }
     }
-    /** @param revision 已确认需求 @param evidence 已登记资料 @param now 当前业务时刻 */
-    public record Context(ConstraintRevision revision, List<View> evidence, Instant now) { }
+    /** @param revision 已确认需求 @param evidence 已登记资料 @param now 当前业务时刻 @param baseVersionId 当前生效版本，可空 */
+    public record Context(ConstraintRevision revision, List<View> evidence, Instant now, java.util.UUID baseVersionId) {
+        /** @param revision 需求 @param evidence 证据 @param now 时间；旧初始调查输入 */
+        public Context(ConstraintRevision revision, List<View> evidence, Instant now) { this(revision, evidence, now, null); }
+    }
     /** @param queries 有界查询计划；空计划保留未知，不编造结果 */
     public record Plan(List<Query> queries) { }
     /** @param value 原文支持的字段值 @param quote 连续原文摘录 @param publishedAt 明确发布时间 @param validForDate 原文明确的适用日期，可空 */

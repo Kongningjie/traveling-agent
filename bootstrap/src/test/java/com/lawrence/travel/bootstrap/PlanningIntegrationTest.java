@@ -207,4 +207,96 @@ class PlanningIntegrationTest {
         var csrf = http.send(java.net.http.HttpRequest.newBuilder(URI.create(root + "/api/v1/auth/csrf")).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString()); var token = json.decode(csrf.body(), Map.class);
         var allowed = java.net.http.HttpRequest.newBuilder(uri).header("Cookie", cookie).header("Content-Type", "application/json").header((String) token.get("headerName"), (String) token.get("token")).POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(body))).build(); assertThat(http.send(allowed, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(200);
     }
+    /** @param f 原运行 @param facts 明确修改 @return 已接受旧版本后的新运行；空调查计划复用已有字段事实 */
+    private Fixture replan(Fixture f, Map<String, String> facts) {
+        through(f, StageType.PRESENT); accept(f);
+        when(researcher.plan(any(), any())).thenReturn(new Research.Plan(List.of()));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Planning.Base base = invocation.getArgument(2); var item = base.snapshot().items().getFirst();
+            var replacement = new TripSnapshot.Item(item.id(), item.cityStayId(), item.type(), "修改后的景点说明", item.locationKey(), item.startsAt(), item.endsAt(), item.fixedArrangementId());
+            var uses = base.snapshot().evidenceUses().stream().filter(u -> u.objectId().equals(item.id())).toList();
+            var operation = new com.lawrence.travel.domain.itinerary.ItineraryPatch.Operation(com.lawrence.travel.domain.itinerary.ItineraryPatch.Kind.ITEM, com.lawrence.travel.domain.itinerary.ItineraryPatch.Action.REPLACE, item.id(), null, null, replacement, null, null, null, null, uses);
+            return new Planning.PatchReply(new com.lawrence.travel.domain.itinerary.ItineraryPatch(base.hash(), List.of(operation), null), null);
+        }).when(advisor).patch(any(), any(), any(), any(), any(), any());
+        var receipt = negotiation.send(f.actor(), f.scope().taskId(), UUID.randomUUID(), "", facts.entrySet().stream().map(e -> new Negotiation.Fact(e.getKey(), e.getValue().equals("@first") ? candidates.base(f.scope(), travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).snapshot().items().getFirst().id().toString() : e.getValue(), null)).toList());
+        return new Fixture(f.actor(), f.scope(), receipt.runId());
+    }
+    /** 已生效版本始终保留，Patch复用稳定ID和证据，全部重新校验审核并等待显式接受。 */
+    @Test void replanKeepsBaseUntilExplicitAcceptance() {
+        var f = replan(fixture(), Map.of("interests", "希望说明更清楚")); var old = travel.task(f.actor(), f.scope().taskId()).task().currentVersionId(); var original = candidates.base(f.scope(), old);
+        through(f, StageType.PLAN);
+        var current = itineraries.latest(f.actor(), f.scope().taskId()); assertThat(current.acceptable()).isFalse();
+        assertThat(current.candidate().snapshot().items().getFirst().id()).isEqualTo(original.snapshot().items().getFirst().id());
+        assertThat(current.candidate().snapshot().cityStays()).isEqualTo(original.snapshot().cityStays()); assertThat(current.candidate().snapshot().costEntries()).isEqualTo(original.snapshot().costEntries());
+        assertThat(current.candidate().snapshot().evidenceUses()).containsExactlyInAnyOrderElementsOf(original.snapshot().evidenceUses());
+        through(f, StageType.PRESENT); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(old);
+        assertThat(accept(f).status()).isEqualTo(CandidateStore.Status.ACCEPTED); assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isNotEqualTo(old);
+        verify(advisor, times(1)).draft(any(), any(), any(), any()); verify(advisor, times(2)).review(any(), any(), any());
+    }
+    /** C事务重新执行Patch合并，篡改已准备的完整快照不能登记候选或后继。 */
+    @Test void replanCommitRejectsTamperedMergedSnapshot() {
+        var f = replan(fixture(), Map.of("interests", "更新说明")); through(f, StageType.RESEARCH); var c = claim(f); assertThat(c.step().mode()).isEqualTo(com.lawrence.travel.domain.execution.PlanningMode.REPLAN); var out = planning.execute(c);
+        var body = new java.util.LinkedHashMap<>(json.decode(out.checkpoint(), Map.class)); var snapshot = json.decode(json.encode(body.get("snapshot")), TripSnapshot.class);
+        body.put("snapshot", new TripSnapshot(1, snapshot.taskId(), snapshot.constraintRevision(), snapshot.baseVersionId(), snapshot.window(), snapshot.cityStays(), snapshot.days(), List.of(), snapshot.transportLegs(), snapshot.accommodationStays(), snapshot.costEntries(), snapshot.alternatives(), snapshot.evidenceRefs(), snapshot.evidenceUses()));
+        var forged = new StageOutput(out.text(), json.encode(body), out.next(), out.outcome(), null);
+        assertThatThrownBy(() -> engine.commit(engine.prepare(c, forged))).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE run_id=?", Integer.class, f.run())).isZero();
+    }
+    /** 不合法Patch共享两轮修订预算，最终等待用户，不重置预算或调用初始整份规划。 */
+    @Test void invalidPatchStopsAfterSharedRepairLimit() {
+        var f = replan(fixture(), Map.of("interests", "调整"));
+        org.mockito.Mockito.doAnswer(invocation -> new Planning.PatchReply(new com.lawrence.travel.domain.itinerary.ItineraryPatch("0".repeat(64), List.of(), null), null)).when(advisor).patch(any(), any(), any(), any(), any(), any());
+        through(f, StageType.RESEARCH); advance(f); advance(f); advance(f);
+        assertThat(engine.run(f.scope(), f.run()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.WAITING_USER); assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE run_id=?", Integer.class, f.run())).isZero();
+    }
+    /** 新需求即刻废止旧领取，已经算好的Patch不能覆盖新运行或基础版本。 */
+    @Test void supersededReplanCannotCommit() {
+        var f = replan(fixture(), Map.of("interests", "调整")); through(f, StageType.RESEARCH); var c = claim(f); var out = planning.execute(c);
+        negotiation.send(f.actor(), f.scope().taskId(), UUID.randomUUID(), "", List.of(new Negotiation.Fact("pace", "慢一些", null)));
+        assertThat(engine.commit(engine.prepare(c, out))).isEqualTo(StageCommitPort.Result.STALE); assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE run_id=?", Integer.class, f.run())).isZero();
+    }
+    /** 无额外需求的扩大请求在已是全程范围时直接暂停，不授予解除锁定权限。 */
+    @Test void expansionAtWholeTripBoundaryWaitsForUser() {
+        var f = replan(fixture(), Map.of("interests", "调整")); org.mockito.Mockito.doReturn(new Planning.PatchReply(null, "需要解除固定安排")).when(advisor).patch(any(), any(), any(), any(), any(), any());
+        through(f, StageType.PLAN); assertThat(engine.run(f.scope(), f.run()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.WAITING_USER);
+        assertThat(budgets.read(f.run()).repairRounds()).isZero(); assertThat(negotiation.card(f.actor(), f.scope().taskId())).isNotNull();
+    }
+
+    /** 扩大理由和范围由同一阶段事务保存，下一阶段领取恢复后仍使用它并累计原修订预算。 */
+    @Test void localExpansionSurvivesDurableStageHandoff() {
+        var f = replan(fixture(), Map.of("changeTargets", "@first", "interests", "更新局部说明"));
+        var base = candidates.base(f.scope(), travel.task(f.actor(), f.scope().taskId()).task().currentVersionId());
+        org.mockito.Mockito.doReturn(new Planning.PatchReply(null, "需要同日缓冲联动"), new Planning.PatchReply(new com.lawrence.travel.domain.itinerary.ItineraryPatch(base.hash(), List.of(), null), null)).when(advisor).patch(any(), any(), any(), any(), any(), any());
+        through(f, StageType.RESEARCH); var firstClaim = claim(f);
+        var calculated = new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(base.snapshot(), base.revision(), candidates.context(firstClaim.fence()).revision(), List.of());
+        assertThat(calculated.level()).isZero(); var firstOutput = planning.execute(firstClaim); assertThat(firstOutput.outcome()).isEqualTo(StageOutput.Outcome.CONTINUE);
+        assertThat(engine.commit(engine.prepare(firstClaim, firstOutput))).isEqualTo(StageCommitPort.Result.COMMITTED); var c = claim(f); var body = json.decode(c.input(), Map.class);
+        assertThat((List<?>) body.get("expansionHistory")).hasSize(1); assertThat(c.step().mode()).isEqualTo(com.lawrence.travel.domain.execution.PlanningMode.REPLAN);
+        var out = planning.execute(c); assertThat(engine.commit(engine.prepare(c, out))).isEqualTo(StageCommitPort.Result.COMMITTED);
+        through(f, StageType.PRESENT); assertThat(itineraries.latest(f.actor(), f.scope().taskId()).acceptable()).isTrue(); assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(1);
+    }
+    /** 用户锁定的活动不能由规划模型改写，即使自动修订用完也不改变生效版本。 */
+    @Test void lockedItemCannotBeChangedByReplanning() {
+        var f = replan(fixture(), Map.of("changeTargets", "@first", "lockedIds", "@first", "interests", "更新说明")); var old = travel.task(f.actor(), f.scope().taskId()).task().currentVersionId();
+        through(f, StageType.RESEARCH); advance(f); advance(f); advance(f);
+        assertThat(engine.run(f.scope(), f.run()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.WAITING_USER);
+        assertThat(travel.task(f.actor(), f.scope().taskId()).task().currentVersionId()).isEqualTo(old); assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE run_id=?", Integer.class, f.run())).isZero();
+    }
+    /** 审核反馈修订继续以REPLAN累计Patch，不退回整份初始规划或重置运行预算。 */
+    @Test void reviewRepairRetainsReplanMode() {
+        var f = replan(fixture(), Map.of("interests", "更新说明")); org.mockito.Mockito.doReturn(new Planning.Review(List.of(new ItineraryReport.Issue("REVIEW_RHYTHM", null, true, false)))).when(advisor).review(any(), any(), any());
+        through(f, StageType.REVIEW); var c = claim(f); assertThat(c.step().mode()).isEqualTo(com.lawrence.travel.domain.execution.PlanningMode.REPLAN);
+        assertThat(engine.commit(engine.prepare(c, planning.execute(c)))).isEqualTo(StageCommitPort.Result.COMMITTED); assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(1);
+        verify(advisor, times(1)).draft(any(), any(), any(), any());
+    }
+
+    /** 集合序列化顺序可在进程间变化，范围按类型化集合比较，不把顺序差异误判为越界。 */
+    @Test void scopeSetOrderDoesNotChangeCommitEligibility() {
+        var f = replan(fixture(), Map.of("interests", "更新说明")); through(f, StageType.RESEARCH); var c = claim(f); var out = planning.execute(c);
+        var body = new java.util.LinkedHashMap<>(json.decode(out.checkpoint(), Map.class)); var scope = new java.util.LinkedHashMap<>(json.decode(json.encode(body.get("impactScope")), Map.class));
+        var ids = new java.util.ArrayList<>((List<?>) scope.get("allowedIds")); java.util.Collections.reverse(ids); scope.put("allowedIds", ids); body.put("impactScope", scope);
+        assertThat(engine.commit(engine.prepare(c, new StageOutput(out.text(), json.encode(body), out.next(), out.outcome(), null)))).isEqualTo(StageCommitPort.Result.COMMITTED);
+    }
+
 }

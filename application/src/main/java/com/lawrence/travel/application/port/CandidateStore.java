@@ -6,6 +6,8 @@ import java.util.UUID;
 
 /** 候选、报告及接受持久化端口；报告只从对应阶段事务投影，不暴露任意保存 PASS 的方法。 */
 public interface CandidateStore extends StageProjection {
+    /** @param scope 私有归属 @param id 生效基础版本 @return 只读快照、摘要与当时需求，不读取其他用户 */
+    com.lawrence.travel.application.itinerary.Planning.Base base(TaskScope scope, UUID id);
     /** @param fence 权威领取 @return 当前需求及证据，不提供写入权限 */
     com.lawrence.travel.application.itinerary.Planning.Context context(com.lawrence.travel.domain.execution.ExecutionFence fence);
     /** @param scope 私有任务 @param id 候选身份 @return 草案及精确报告；不返回其他归属 */

@@ -128,6 +128,7 @@ public final class ItineraryValidator {
                     case "budgetRule" -> { if (!Set.of("NONE", "PER_PERSON", "PER_GROUP").contains(requirement.value())) unknown(issues, "BUDGET_RULE_INVALID", requirement.id()); }
                     case "budgetScope" -> { if (!Set.of("ACTIVITIES", "MEALS", "LODGING", "INTERCITY", "ROUNDTRIP", "LOCAL_TRANSPORT").containsAll(List.of(requirement.value().split(",")))) unknown(issues, "BUDGET_SCOPE_INVALID", requirement.id()); }
                     case "fixedStatus" -> { if (!Set.of("NONE", "UNKNOWN", "PROVIDED").contains(requirement.value()) || (requirement.value().equals("PROVIDED") && requirements.fixedArrangements().isEmpty())) unknown(issues, "FIXED_INFORMATION_MISSING", requirement.id()); if (requirement.value().equals("NONE") && !requirements.fixedArrangements().isEmpty()) bad(issues, "FIXED_STATUS_CONFLICT", requirement.id()); }
+                    case "lockedIds" -> { if (!ids.containsAll(ImpactAnalyzer.ids(requirement.value()))) bad(issues, "LOCK_TARGET_UNKNOWN", requirement.id()); }
                     case "fixedArrangements" -> { if (requirements.fixedArrangements().isEmpty()) unknown(issues, "FIXED_INFORMATION_MISSING", requirement.id()); }
                     default -> { if (!recognizedConfirmation(snapshot, requirement)) unknown(issues, "HARD_CONSTRAINT_UNSUPPORTED", requirement.id()); }
                 }

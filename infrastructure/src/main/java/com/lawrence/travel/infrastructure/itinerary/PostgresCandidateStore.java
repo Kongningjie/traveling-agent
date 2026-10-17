@@ -79,6 +79,11 @@ public final class PostgresCandidateStore implements CandidateStore {
         require(task.constraintRevision() == fence.constraintRevision() && task.executionGeneration() == fence.generation() && fence.runId().toString().equals(engine.currentRun(fence.scope())), STALE_VERSION);
         return new com.lawrence.travel.application.itinerary.Planning.Context(fence.scope(), json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), task.currentVersionId(), evidence == null ? List.of() : evidence.evidence(fence.scope()), mapper.now());
     }
+    /** {@inheritDoc} 三项都从同一私有任务读取；历史需求与快照不可变。 */
+    @Override public com.lawrence.travel.application.itinerary.Planning.Base base(TaskScope scope, UUID id) {
+        var metadata = version(scope, id);
+        return new com.lawrence.travel.application.itinerary.Planning.Base(json.decode(tasks.snapshot(scope, id).payload(), TripSnapshot.class), metadata.payloadHash(), json.decode(tasks.revision(scope, metadata.constraintRevision()), ConstraintRevision.class));
+    }
     /** {@inheritDoc} 读取草案不授予接受资格；历史不覆盖当前。 */
     @Override public com.lawrence.travel.application.itinerary.Planning.Candidate read(TaskScope scope, UUID id) {
         var candidate = candidate(scope, id); var version = version(scope, candidate.snapshotId());
@@ -114,11 +119,44 @@ public final class PostgresCandidateStore implements CandidateStore {
         var task = tasks.task(fence.scope()); require(task != null && json.pendingInputs(task.pendingInputs()).isEmpty(), STALE_VERSION);
         require(fence.runId().toString().equals(engine.currentRun(fence.scope())) && task.executionGeneration() == fence.generation()
                 && task.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
+        if (operation.equals("REPLAN_CONTROL")) {
+            require(type == StageType.PLAN && task.currentVersionId() != null && (output.outcome() == StageOutput.Outcome.CONTINUE || output.outcome() == StageOutput.Outcome.WAIT_USER), INVALID_INPUT);
+            var definition = json.decode(engine.step(fence.scope(), fence.runId(), fence.stepId()).definition(), com.lawrence.travel.application.execution.StagePlan.class);
+            require(definition.mode() == com.lawrence.travel.domain.execution.PlanningMode.REPLAN, INVALID_INPUT);
+            var oldHistory = history(object(definition.input())); var newHistory = history(body);
+            if (output.outcome() == StageOutput.Outcome.CONTINUE) {
+                require(output.next().size() == 1, INVALID_INPUT); var next = output.next().getFirst();
+                require(next.key().type() == StageType.PLAN && next.key().round() > 0 && next.mode() == com.lawrence.travel.domain.execution.PlanningMode.REPLAN
+                        && history(object(next.input())).equals(newHistory), INVALID_INPUT);
+            }
+            require(newHistory.size() >= oldHistory.size() && newHistory.size() <= oldHistory.size() + 1 && newHistory.subList(0, oldHistory.size()).equals(oldHistory), INVALID_INPUT);
+            var original = base(fence.scope(), task.currentVersionId());
+            new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(original.snapshot(), original.revision(), context(fence).revision(), newHistory);
+            if (output.decision() != null) {
+                checked(engine.insertDecision(fence.scope(), fence.runId(), output.decision().id(), json.encode(output.decision())));
+                checked(mapper.insertDecisionSpecs(fence.scope(), output.decision().id(), output.decision().revision(), json.encode(body.get("decisionSpecs"))));
+            }
+            return null;
+        }
         if (operation.equals("SAVE_CANDIDATE")) {
             require(type == StageType.PLAN && output.outcome() == StageOutput.Outcome.CONTINUE, INVALID_INPUT);
+            var declared = json.decode(engine.step(fence.scope(), fence.runId(), fence.stepId()).definition(), com.lawrence.travel.application.execution.StagePlan.class);
+            require(declared.mode() == (task.currentVersionId() == null ? com.lawrence.travel.domain.execution.PlanningMode.INITIAL : com.lawrence.travel.domain.execution.PlanningMode.REPLAN), INVALID_INPUT);
             UUID snapshotId = uuid(body.get("snapshotId"));
+            require(task.currentVersionId() == null || body.containsKey("snapshot") && body.containsKey("patch") && body.containsKey("impactScope"), INVALID_INPUT);
             if (body.containsKey("snapshot")) {
                 var trip = json.decode(json.encode(body.get("snapshot")), TripSnapshot.class); String payload = json.encode(trip);
+                if (task.currentVersionId() != null) {
+                    // C事务重读基础版本和已持久化范围，不能只信任事务外Handler的检查或模型自报范围。
+                    require(body.containsKey("patch") && body.containsKey("impactScope"), INVALID_INPUT);
+                    var definition = json.decode(engine.step(fence.scope(), fence.runId(), fence.stepId()).definition(), com.lawrence.travel.application.execution.StagePlan.class);
+                    var original = base(fence.scope(), task.currentVersionId());
+                    var scope = new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(original.snapshot(), original.revision(), context(fence).revision(), history(object(definition.input())));
+                    require(scope.equals(json.decode(json.encode(body.get("impactScope")), com.lawrence.travel.domain.itinerary.ImpactScope.class)), STALE_VERSION);
+                    var patch = json.decode(json.encode(body.get("patch")), com.lawrence.travel.domain.itinerary.ItineraryPatch.class);
+                    var merged = new com.lawrence.travel.domain.itinerary.PatchService().apply(original.snapshot(), task.currentVersionId(), original.hash(), task.constraintRevision(), scope, patch);
+                    require(merged.equals(trip), INVALID_INPUT);
+                } else require(!body.containsKey("patch"), INVALID_INPUT);
                 var metadata = new ItineraryVersion(snapshotId, fence.scope(), trip.schemaVersion(), json.hash(payload), trip.constraintRevision(), trip.baseVersionId(), trip.evidenceRefs(), null);
                 require(trip.taskId().equals(fence.scope().taskId()) && trip.constraintRevision() == fence.constraintRevision(), STALE_VERSION);
                 if (!trip.evidenceRefs().isEmpty()) { require(evidence != null, INVALID_INPUT); evidence.resolve(fence.scope(), trip.evidenceRefs()); }
@@ -170,6 +208,12 @@ public final class PostgresCandidateStore implements CandidateStore {
             checked(mapper.insertDecisionSpecs(fence.scope(), output.decision().id(), output.decision().revision(), json.encode(body.get("decisionSpecs"))));
         }
         return null;
+    }
+    /** @param body 已持久化阶段输入或控制信封 @return 有界扩大历史，缺省为空 */
+    private List<String> history(Map<?, ?> body) {
+        if (!body.containsKey("expansionHistory")) return List.of();
+        require(body.get("expansionHistory") instanceof List<?>, INVALID_INPUT);
+        return ((List<?>) body.get("expansionHistory")).stream().map(String.class::cast).toList();
     }
     /**
      * {@inheritDoc} 永久接受重放先于当前状态检查，避免旧重试恢复已经被后继版本替换的指针。

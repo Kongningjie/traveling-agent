@@ -71,7 +71,7 @@ public final class NegotiationHandler implements StageHandler {
                     List.of(stage(replacement, StageType.UNDERSTAND)), StageOutput.Outcome.CONTINUE, null);
         }
         List<ConstraintRevision.Requirement> requirements;
-        try { requirements = RequirementFields.merge(context.revision().requirements(), updates, source(context)); }
+        try { requirements = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, source(context)); }
         catch (IllegalArgumentException conflict) { facts.clear(); requirements = context.revision().requirements(); clarification = "已保留原始要求，存在冲突或超出首版范围，请修改相关字段。"; }
         var resolved = new LinkedHashSet<UUID>();
         if (context.card() != null) for (var entry : context.card().specs().entrySet()) if (facts.stream().anyMatch(fact -> fact.field().equals(entry.getValue().field()))) resolved.add(entry.getKey());

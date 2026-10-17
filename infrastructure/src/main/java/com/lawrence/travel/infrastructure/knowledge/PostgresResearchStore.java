@@ -34,7 +34,7 @@ public final class PostgresResearchStore implements ResearchStore {
     @Override public Research.Context context(ExecutionFence fence) {
         var task = tasks.task(fence.scope()); check(task != null);
         if (task.constraintRevision() != fence.constraintRevision() || task.executionGeneration() != fence.generation()) throw new TravelStorageFailure(TravelStorageFailure.Code.STALE_VERSION);
-        return new Research.Context(json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), evidence(fence.scope()), mapper.now());
+        return new Research.Context(json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), evidence(fence.scope()), mapper.now(), task.currentVersionId());
     }
     /** {@inheritDoc} 缺失和越权统一 NOT_FOUND；旧值完整保留并显式显示未知／冲突／失效。 */
     @Override public List<Research.View> evidence(TaskScope scope) {

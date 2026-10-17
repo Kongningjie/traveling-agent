@@ -58,7 +58,7 @@ public final class ResearchHandler implements StageHandler {
                 initial.add(new FieldEvidence(new EvidenceRecord.Reference(java.util.UUID.randomUUID(), 1, EvidencePolicy.hash(value)), fixed.id().toString(), "fixedArrangement", value,
                         FieldEvidence.SourceType.USER, null, fixed.sourceMessageId(), context.now(), null, fixed.startsAt().toLocalDate(), context.now().plusSeconds(86400), value, null, EvidenceRecord.Status.KNOWN));
             }
-            return output(new Research.Prepared("seed", dependency, initial, Set.of(), null), new Research.Input(queries, 0, dependency));
+            return output(new Research.Prepared("seed", dependency, initial, Set.of(), null), new Research.Input(queries, 0, dependency), context.baseVersionId() != null);
         }
         var input = json.decode(claim.input(), Research.Input.class);
         if (!dependency.equals(input.dependencyHash()) || input.queries() == null || input.queries().size() > 12 || input.cursor() < 0 || input.cursor() >= input.queries().size()) throw new IllegalArgumentException("RESEARCH_INPUT_STALE");
@@ -80,14 +80,14 @@ public final class ResearchHandler implements StageHandler {
             Research.Extraction extraction = query.operation() == TravelToolPort.Operation.EXTRACT && !policy.extractedText(raw).isBlank() ? advisor.extract(claim.fence().runId(), query, raw) : null;
             prepared = new Research.Prepared(policy.key(query), dependency, List.of(policy.normalize(query, raw, extraction, java.time.Instant.now())), Set.of(), raw);
         }
-        return output(prepared, new Research.Input(input.queries(), input.cursor() + 1, dependency));
+        return output(prepared, new Research.Input(input.queries(), input.cursor() + 1, dependency), context.baseVersionId() != null);
     }
-    /** @param prepared 待 C 事务登记 @param next 已持久化计划游标 @return 后继同事务登记；查询结束后只排队 PLAN，不伪造规划完成 */
-    private StageOutput output(Research.Prepared prepared, Research.Input next) {
+    /** @param prepared 待 C 事务登记 @param next 已持久化计划游标 @param replan 是否已有生效版本 @return 后继同事务登记；查询结束后只排队 PLAN，不伪造规划完成 */
+    private StageOutput output(Research.Prepared prepared, Research.Input next, boolean replan) {
         boolean more = next.cursor() < next.queries().size();
         var stage = new com.lawrence.travel.application.execution.StagePlan(java.util.UUID.randomUUID(),
                 new com.lawrence.travel.domain.execution.ExecutionStep.Key(more ? StageType.RESEARCH : StageType.PLAN, 0, "research_" + java.util.UUID.randomUUID()),
-                more ? null : com.lawrence.travel.domain.execution.PlanningMode.INITIAL, more ? json.encode(next) : "{}", List.of());
+                more ? null : replan ? com.lawrence.travel.domain.execution.PlanningMode.REPLAN : com.lawrence.travel.domain.execution.PlanningMode.INITIAL, more ? json.encode(next) : "{}", List.of());
         return new StageOutput("调查结果已登记；未知和冲突须在规划中显式处理。", json.encode(Map.of("research", prepared)), List.of(stage), StageOutput.Outcome.CONTINUE, null);
     }
 }

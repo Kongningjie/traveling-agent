@@ -27,14 +27,15 @@ public final class PlanningHandler implements StageHandler {
     private final BudgetLedger budgets;
     /** @param store 候选及报告 @param advisor 无工具模型 @param json JSON @param budgets 原运行预算 */
     public PlanningHandler(CandidateStore store, PlanningAdvisor advisor, InteractionCodec json, BudgetLedger budgets) { this.store = store; this.advisor = advisor; this.json = json; this.budgets = budgets; }
-    /** {@inheritDoc} 仅初始闭环；受限局部 Patch 在后续阶段接入。 */
+    /** {@inheritDoc} 初始规划和局部重规划共享校验、审核与显式接受门禁。 */
     @Override public boolean supports(StageType type) { return Set.of(StageType.PLAN, StageType.VALIDATE, StageType.REVIEW, StageType.PRESENT).contains(type); }
     /** {@inheritDoc} 预测分支必须与C事务重新计算相符；未知不伪造通过。 */
     @Override public StageOutput execute(ExecutionEngineStore.Claim claim) {
         var context = store.context(claim.fence()); var input = input(claim.input());
         var type = claim.step().key().type();
         if (type == StageType.PLAN) {
-            if (claim.step().mode() != PlanningMode.INITIAL) throw new IllegalArgumentException("REPLAN_NOT_IMPLEMENTED");
+            if (context.baseVersionId() != null) return replan(claim, context, input);
+            if (claim.step().mode() != PlanningMode.INITIAL) throw new IllegalArgumentException("REPLAN_BASE_REQUIRED");
             var prior = input.candidateId() == null ? null : store.read(claim.fence().scope(), input.candidateId());
             var draft = advisor.draft(claim.fence().runId(), context, prior, input.issues() == null ? List.of() : input.issues());
             if (draft == null || draft.snapshot() == null || !draft.snapshot().taskId().equals(context.scope().taskId()) || draft.snapshot().constraintRevision() != context.revision().revision()
@@ -55,18 +56,55 @@ public final class PlanningHandler implements StageHandler {
         }
         return output("PRESENT_ITINERARY", candidate.candidateId(), Map.of(), null, null);
     }
+    /** @param claim 原阶段 @param id 上轮候选 @param repair 共享修订标记 @param issues 问题 @return 保留扩大历史和基础版本身份 */
+    private Planning.Input continued(ExecutionEngineStore.Claim claim, UUID id, boolean repair, List<ItineraryReport.Issue> issues) {
+        var context = store.context(claim.fence());
+        return new Planning.Input(id, repair, issues, context.baseVersionId(), input(claim.input()).expansionHistory());
+    }
+    /** @param claim 当前领取 @param context 当前需求 @param input 上轮产物 @return 仅受限累计Patch；无法解决时有限扩大或暂停 */
+    private StageOutput replan(ExecutionEngineStore.Claim claim, Planning.Context context, Planning.Input input) {
+        var base = store.base(context.scope(), context.baseVersionId());
+        var scope = new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(base.snapshot(), base.revision(), context.revision(), input.expansionHistory());
+        var prior = input.candidateId() == null ? null : store.read(context.scope(), input.candidateId());
+        var reply = advisor.patch(claim.fence().runId(), context, base, scope, prior, input.issues());
+        if (reply == null || (reply.patch() == null) == (reply.expansionReason() == null)) throw new IllegalArgumentException("PATCH_REPLY_INVALID");
+        if (reply.patch() == null) return replanControl(claim, context, input, "PATCH_SCOPE_EXPANSION", reply.expansionReason());
+        com.lawrence.travel.domain.itinerary.TripSnapshot snapshot;
+        try { snapshot = new com.lawrence.travel.domain.itinerary.PatchService().apply(base.snapshot(), context.baseVersionId(), base.hash(), context.revision().revision(), scope, reply.patch()); }
+        catch (IllegalArgumentException invalid) { return replanControl(claim, context, input, "PATCH_REJECTED", "补丁违反对象、范围、锁定或基础版本约束，请在原边界修订。"); }
+        UUID id = UUID.randomUUID();
+        var next = new Planning.Input(id, false, List.of(), context.baseVersionId(), input.expansionHistory());
+        return output("SAVE_CANDIDATE", id, Map.of("snapshotId", UUID.randomUUID(), "snapshot", snapshot, "patch", reply.patch(), "impactScope", scope, "repair", input.repair()), stage(StageType.VALIDATE, next), null);
+    }
+    /** @param claim 原运行 @param context 当前需求 @param input 原历史 @param code 固定原因 @param reason 有界扩大说明 @return 同一预算内继续；锁定冲突及预算用尽只产生用户问题 */
+    private StageOutput replanControl(ExecutionEngineStore.Claim claim, Planning.Context context, Planning.Input input, String code, String reason) {
+        if (reason == null || reason.isBlank() || reason.length() > 500) throw new IllegalArgumentException("PATCH_REASON_INVALID");
+        var history = new java.util.ArrayList<>(input.expansionHistory());
+        boolean expanding = code.equals("PATCH_SCOPE_EXPANSION");
+        boolean canContinue = budgets.read(claim.fence().runId()).repairRounds() < 2 && (!expanding || history.size() < 2 && new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(store.base(context.scope(), context.baseVersionId()).snapshot(), store.base(context.scope(), context.baseVersionId()).revision(), context.revision(), history).level() < 4);
+        if (canContinue) {
+            if (expanding) history.add(reason);
+            var next = new Planning.Input(input.candidateId(), true, List.of(new ItineraryReport.Issue(code, null, true, false)), context.baseVersionId(), List.copyOf(history));
+            return output("REPLAN_CONTROL", UUID.randomUUID(), Map.of("reasonCode", code, "expansionHistory", history), stage(StageType.PLAN, next), null);
+        }
+        UUID question = UUID.randomUUID();
+        var decision = new DecisionRequest(UUID.randomUUID(), context.scope(), claim.fence().runId(), claim.fence().generation(), 1, context.revision().revision(), Map.of(question, new DecisionRequest.Question(question, "局部修改无法在当前约束与预算内完成，请补充资料或明确提出新的调整要求；不会自动解除锁定或放宽硬约束。", Map.of(), null)), true, Set.of(question), DecisionRequest.State.OPEN);
+        return output("REPLAN_CONTROL", UUID.randomUUID(), Map.of("reasonCode", code, "expansionHistory", history, "decisionSpecs", Map.of("specs", Map.of(question, new Negotiation.QuestionSpec("hardRequirements", "保留当前生效版本和有效产物。", "明确补充后产生新的候选，仍需接受。", Map.of())))), null, decision);
+    }
     /** @param text 已持久化对象，兼容研究的空初始输入及旧重校验输入 @return 显式默认值，避免缺失primitive被严格JSON解码拒绝 */
     private Planning.Input input(String text) {
         var body = json.decode(text, Map.class); UUID id = body.get("candidateId") == null ? null : UUID.fromString((String) body.get("candidateId"));
         var issues = new java.util.ArrayList<ItineraryReport.Issue>();
         if (body.get("issues") instanceof List<?> values) for (Object value : values) issues.add(json.decode(json.encode(value), ItineraryReport.Issue.class));
-        return new Planning.Input(id, Boolean.TRUE.equals(body.get("repair")), issues);
+        var history = new java.util.ArrayList<String>();
+        if (body.get("expansionHistory") instanceof List<?> values) for (Object value : values) history.add((String) value);
+        return new Planning.Input(id, Boolean.TRUE.equals(body.get("repair")), issues, null, List.copyOf(history));
     }
     /** @param claim 原运行 @param operation 权威操作 @param candidate 草案 @param issues 程序／审核问题 @param extra 精确绑定 @return 通过后继续，否则最多两轮修订，最后等待明确补充 */
     private StageOutput afterCheck(ExecutionEngineStore.Claim claim, String operation, Planning.Candidate candidate, List<ItineraryReport.Issue> issues, Map<String, Object> extra) {
         boolean blocked = issues.stream().anyMatch(ItineraryReport.Issue::blocking);
-        if (!blocked) return output(operation, candidate.candidateId(), extra, stage(operation.equals("VALIDATE_ITINERARY") ? StageType.REVIEW : StageType.PRESENT, new Planning.Input(candidate.candidateId(), false, List.of())), null);
-        if (budgets.read(claim.fence().runId()).repairRounds() < 2) return output(operation, candidate.candidateId(), extra, stage(StageType.PLAN, new Planning.Input(candidate.candidateId(), true, issues)), null);
+        if (!blocked) return output(operation, candidate.candidateId(), extra, stage(operation.equals("VALIDATE_ITINERARY") ? StageType.REVIEW : StageType.PRESENT, continued(claim, candidate.candidateId(), false, List.of())), null);
+        if (budgets.read(claim.fence().runId()).repairRounds() < 2) return output(operation, candidate.candidateId(), extra, stage(StageType.PLAN, continued(claim, candidate.candidateId(), true, issues)), null);
         UUID question = UUID.randomUUID(); UUID decisionId = UUID.randomUUID();
         var decision = new DecisionRequest(decisionId, claim.fence().scope(), claim.fence().runId(), claim.fence().generation(), 1, claim.fence().constraintRevision(),
                 Map.of(question, new DecisionRequest.Question(question, "草案仍有阻断问题：" + issues.stream().filter(ItineraryReport.Issue::blocking).map(ItineraryReport.Issue::code).distinct().limit(8).toList() + "。请补充可核实资料或明确修改要求；不会自动放宽原约束。", Map.of(), null)), true, Set.of(question), DecisionRequest.State.OPEN);
@@ -79,6 +117,6 @@ public final class PlanningHandler implements StageHandler {
         return new StageOutput(decision == null ? "行程草案及校验进度已保存，接受前不会生效。" : "草案需要补充信息，已停止自动修订。", json.encode(body), next == null ? List.of() : List.of(next),
                 decision != null ? StageOutput.Outcome.WAIT_USER : next != null ? StageOutput.Outcome.CONTINUE : StageOutput.Outcome.PRESENT_CANDIDATE, decision);
     }
-    /** @param type 后继 @param input 可靠输入 @return 服务端生成阶段身份，修订仍属INITIAL而非局部Patch */
-    private StagePlan stage(StageType type, Planning.Input input) { return new StagePlan(UUID.randomUUID(), new ExecutionStep.Key(type, input.repair() ? 1 : 0, "planning_" + UUID.randomUUID()), type == StageType.PLAN ? PlanningMode.INITIAL : null, json.encode(input), List.of()); }
+    /** @param type 后继 @param input 可靠输入 @return 服务端生成阶段身份，保留REPLAN模式和扩大历史，重试不重置预算 */
+    private StagePlan stage(StageType type, Planning.Input input) { return new StagePlan(UUID.randomUUID(), new ExecutionStep.Key(type, input.repair() ? 1 : 0, "planning_" + UUID.randomUUID()), type == StageType.PLAN ? input.snapshotId() == null ? PlanningMode.INITIAL : PlanningMode.REPLAN : null, json.encode(input), List.of()); }
 }

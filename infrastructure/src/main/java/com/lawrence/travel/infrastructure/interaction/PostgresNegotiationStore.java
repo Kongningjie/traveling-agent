@@ -154,7 +154,7 @@ public final class PostgresNegotiationStore implements NegotiationStore {
             checked(mapper.inherit(fence.scope(), replacement, context.message().id(), context.response().action().equals("AUTHORIZE") ? "CHANGE_AUTHORIZED" : "CHANGE_ACCEPTED"));
             return new Result(null, null, replacement);
         }
-        var constraints = context.revision().requirements();
+        var constraints = RequirementFields.inputBase(context.revision().requirements(), prepared.facts().stream().map(Negotiation.Fact::field).collect(java.util.stream.Collectors.toSet()));
         for (var fact : prepared.facts()) constraints = RequirementFields.merge(constraints, Map.of(fact.field(), fact.value()), source(context, fact));
         long nextRevision = row.constraintRevision() + 1;
         if (context.response() != null) {

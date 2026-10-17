@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 初始规划应用契约；模型只能提供草案／问题，不能提交版本或自报校验通过。 */
+/** 初始及局部规划应用契约；模型只能提供草案／问题，不能提交版本或自报校验通过。 */
 public final class Planning {
     /** 命名空间。 */
     private Planning() { }
@@ -22,10 +22,14 @@ public final class Planning {
     public record Draft(TripSnapshot snapshot) { }
     /** @param issues 独立上下文审核问题 */
     public record Review(List<ItineraryReport.Issue> issues) { }
-    /** @param candidateId 当前候选，可空 @param repair 是否为有界修订 @param issues 程序或审核问题 @param snapshotId 兼容可靠重校验输入，内容仍由候选权威读取 */
-    public record Input(UUID candidateId, boolean repair, List<ItineraryReport.Issue> issues, UUID snapshotId) {
+    /** @param snapshot 原生效内容 @param hash 权威正文摘要 @param revision 原需求版本 */
+    public record Base(TripSnapshot snapshot, String hash, ConstraintRevision revision) { }
+    /** @param patch 累计补丁，与扩大请求互斥 @param expansionReason 无法在当前范围完成时的具体理由，可空 */
+    public record PatchReply(com.lawrence.travel.domain.itinerary.ItineraryPatch patch, String expansionReason) { }
+    /** @param candidateId 当前候选，可空 @param repair 是否为有界修订 @param issues 程序或审核问题 @param snapshotId 兼容可靠重校验输入，内容仍由候选权威读取 @param expansionHistory 已提交扩大理由 */
+    public record Input(UUID candidateId, boolean repair, List<ItineraryReport.Issue> issues, UUID snapshotId, List<String> expansionHistory) {
         /** @param candidateId 候选 @param repair 修订标记 @param issues 问题 */
-        public Input(UUID candidateId, boolean repair, List<ItineraryReport.Issue> issues) { this(candidateId, repair, issues, null); }
+        public Input(UUID candidateId, boolean repair, List<ItineraryReport.Issue> issues) { this(candidateId, repair, issues, null, List.of()); }
     }
     /** @param candidate 草案及精确报告 @param costs Java计算预算，可空表示坏格式或未知 @param acceptable 当前可供确认，接受时仍重新校验 */
     public record View(Candidate candidate, com.lawrence.travel.domain.itinerary.CostSummary costs, boolean acceptable) { }

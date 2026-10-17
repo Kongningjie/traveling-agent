@@ -114,16 +114,21 @@ class CandidateAcceptanceIntegrationTest {
      */
     private Fixture fixture(UserIdentity actor, TaskScope scope, UUID base, boolean malformed) {
         var snapshot = ItineraryRulesTest.minimal(scope.taskId(), base);
+        if (base != null) {
+            var original = candidates.base(scope, base); var revision = travel.revision(actor, scope.taskId(), 1);
+            var impact = new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(original.snapshot(), original.revision(), revision, List.of());
+            snapshot = new com.lawrence.travel.domain.itinerary.PatchService().apply(original.snapshot(), base, original.hash(), 1, impact, new com.lawrence.travel.domain.itinerary.ItineraryPatch(original.hash(), List.of(), null));
+        }
         String payload = json.encode(snapshot);
         if (malformed) {
             @SuppressWarnings("unchecked") var body = new java.util.LinkedHashMap<>((Map<String, Object>) json.decode(payload, Object.class));
             body.remove("window"); payload = json.encode(body);
         }
         var version = new ItineraryVersion(UUID.randomUUID(), scope, 1, json.hash(payload), 1, base, Set.of(), null);
-        travel.saveDraft(actor, version, payload);
+        if (base == null) travel.saveDraft(actor, version, payload);
         var plans = new ArrayList<StagePlan>(); UUID prior = null;
         for (StageType type : List.of(StageType.PLAN, StageType.VALIDATE, StageType.REVIEW, StageType.PRESENT)) {
-            UUID id = UUID.randomUUID(); plans.add(new StagePlan(id, new ExecutionStep.Key(type, 0, "main"), type == StageType.PLAN ? PlanningMode.INITIAL : null,
+            UUID id = UUID.randomUUID(); plans.add(new StagePlan(id, new ExecutionStep.Key(type, 0, "main"), type == StageType.PLAN ? base == null ? PlanningMode.INITIAL : PlanningMode.REPLAN : null,
                     "{}", prior == null ? List.of() : List.of(prior))); prior = id;
         }
         var run = engine.start(scope, UUID.randomUUID(), plans.getFirst());
@@ -141,7 +146,16 @@ class CandidateAcceptanceIntegrationTest {
         var claim = engine.claim(hint, "candidate-test").orElseThrow();
         var body = new java.util.LinkedHashMap<String, Object>(); body.put("candidateId", f.candidate());
         body.put("operation", List.of("SAVE_CANDIDATE", "VALIDATE_ITINERARY", "REVIEW_ITINERARY", "PRESENT_ITINERARY").get(index));
-        if (index == 0) body.put("snapshotId", f.version().snapshotId());
+        if (index == 0) {
+            body.put("snapshotId", f.version().snapshotId());
+            if (f.version().baseVersionId() != null) {
+                var original = candidates.base(f.scope(), f.version().baseVersionId());
+                var impact = new com.lawrence.travel.domain.itinerary.ImpactAnalyzer().analyze(original.snapshot(), original.revision(), candidates.context(claim.fence()).revision(), List.of());
+                var patch = new com.lawrence.travel.domain.itinerary.ItineraryPatch(original.hash(), List.of(), null);
+                body.put("patch", patch); body.put("impactScope", impact);
+                body.put("snapshot", new com.lawrence.travel.domain.itinerary.PatchService().apply(original.snapshot(), f.version().baseVersionId(), original.hash(), 1, impact, patch));
+            }
+        }
         if (index == 2) {
             body.put("issues", reviewIssues);
             var validation = json.decode(mapper.report(f.scope(), mapper.candidate(f.scope(), f.candidate()).validationId()).body(), ItineraryReport.class);

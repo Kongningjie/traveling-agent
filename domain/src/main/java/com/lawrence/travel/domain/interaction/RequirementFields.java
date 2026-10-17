@@ -12,7 +12,7 @@ import java.util.UUID;
 
 /** 初始协商字段及确定性冲突；不根据老人、儿童等标签推断人数或体力。 */
 public final class RequirementFields {
-    private static final Set<String> SUPPORTED = Set.of("cities", "startDate", "endDate", "travelers", "budgetRule", "budgetCny", "budgetScope", "fixedStatus", "fixedArrangements", "pace", "diet", "interests", "hardRequirements");
+    private static final Set<String> SUPPORTED = Set.of("cities", "startDate", "endDate", "travelers", "budgetRule", "budgetCny", "budgetScope", "fixedStatus", "fixedArrangements", "pace", "diet", "interests", "hardRequirements", "changeTargets", "lockedIds");
     /** 无状态规则。 */
     private RequirementFields() { }
     /**
@@ -37,7 +37,7 @@ public final class RequirementFields {
                 if (!value.contains(entry.getValue())) value = value + "；" + entry.getValue();
             }
             values.put(entry.getKey(), new ConstraintRevision.Requirement(old == null ? UUID.randomUUID() : old.id(), entry.getKey(), value,
-                    Set.of("pace", "diet", "interests").contains(entry.getKey()) ? ConstraintRevision.Kind.SOFT : ConstraintRevision.Kind.HARD, source, Set.of()));
+                    Set.of("pace", "diet", "interests", "changeTargets").contains(entry.getKey()) ? ConstraintRevision.Kind.SOFT : ConstraintRevision.Kind.HARD, source, Set.of()));
         }
         if (updates.containsKey("fixedArrangements")) {
             if ("NONE".equals(updates.get("fixedStatus"))) throw new IllegalArgumentException("FIXED_STATUS_CONFLICT");
@@ -49,6 +49,7 @@ public final class RequirementFields {
         Map<String, String> fields = fields(List.copyOf(values.values()));
         try {
             if (fields.containsKey("cities")) { var cities = fields.get("cities").split(",", -1); if (cities.length < 1 || cities.length > 3 || java.util.Arrays.stream(cities).anyMatch(String::isBlank) || Set.of(cities).size() != cities.length) throw new IllegalArgumentException(); }
+            for (String field : List.of("changeTargets", "lockedIds")) if (fields.containsKey(field)) com.lawrence.travel.domain.itinerary.ImpactAnalyzer.ids(fields.get(field));
             if (fields.containsKey("travelers") && Integer.parseInt(fields.get("travelers")) <= 0) throw new IllegalArgumentException();
             if (fields.containsKey("startDate")) LocalDate.parse(fields.get("startDate"));
             if (fields.containsKey("endDate")) LocalDate.parse(fields.get("endDate"));
@@ -60,6 +61,10 @@ public final class RequirementFields {
             if (fields.containsKey("fixedArrangements")) fixed(fields.get("fixedArrangements"), new UUID(0, 0));
         } catch (RuntimeException invalid) { throw new IllegalArgumentException("REQUIREMENT_CONFLICT"); }
         return List.copyOf(values.values());
+    }
+    /** @param current 已确认需求 @param fields 本次完整输入字段集合 @return 仅在输入边界清除上次目标，逐字段合并不能清除本次目标 */
+    public static List<ConstraintRevision.Requirement> inputBase(List<ConstraintRevision.Requirement> current, Set<String> fields) {
+        return fields.contains("changeTargets") ? current : current.stream().filter(r -> !r.field().equals("changeTargets")).toList();
     }
     /**
      * @param current 已确认内容
