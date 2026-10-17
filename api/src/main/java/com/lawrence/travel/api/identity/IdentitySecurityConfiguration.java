@@ -92,7 +92,13 @@ public class IdentitySecurityConfiguration {
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/api/v1/system/info").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/csrf").permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
+                        // 初次 REQUEST 仍必须认证；仅放行本入口的 Servlet 异步完成派发，避免会话撤销后完成流时再次被拒绝。
+                        // ASYNC 类型由容器产生，浏览器不能通过 HTTP 参数伪造；没有额外业务读取或写入权限。
+                        .requestMatchers(request -> request.getDispatcherType() == jakarta.servlet.DispatcherType.ASYNC
+                                && "GET".equals(request.getMethod())
+                                && request.getServletPath().matches("/api/v1/tasks/[0-9a-fA-F-]{36}/events/stream")).permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/auth/me").authenticated()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/tasks/*/view", "/api/v1/tasks/*/events", "/api/v1/tasks/*/events/stream").authenticated()
                         .anyRequest().denyAll())
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contexts))
                 .csrf(csrf -> csrf.csrfTokenRepository(tokens).csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))

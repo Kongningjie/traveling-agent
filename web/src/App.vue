@@ -1,6 +1,7 @@
 <!-- 工程接线验证页：展示只读骨架状态；需求、行程与版本卡片均为功能占位。 -->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import TaskEventPanel from './components/TaskEventPanel.vue'
 
 /** 系统信息 API 的响应契约；标识表示接线进度，不保证对应业务能力已验收。 */
 interface SystemInfo {
@@ -112,6 +113,7 @@ onMounted(refresh)
         <small>业务功能待实现</small>
       </article>
     </section>
+    <TaskEventPanel />
     <footer>当前页面不会发起模型、地图或检索服务调用。</footer>
   </main>
 </template>

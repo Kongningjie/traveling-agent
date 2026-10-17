@@ -20,6 +20,10 @@ spring:
       timeout: 3s
   session:
     timeout: 30m
+    servlet:
+      # 首次请求保存会话；SSE 异步完成不再保存旧请求缓存，避免退出后重新保存已撤销会话。
+      # 传输过程中由 SubscriptionAccess 从 Redis 持续重核，会话到期不因心跳延长。
+      filter-dispatcher-types: request,error
     redis:
       namespace: traveling-agent:local:session
 mybatis:

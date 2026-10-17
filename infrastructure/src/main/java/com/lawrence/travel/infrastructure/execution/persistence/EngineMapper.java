@@ -345,8 +345,10 @@ public interface EngineMapper {
      */
     @Insert("""
             WITH cursor AS (UPDATE travel_task SET event_sequence=event_sequence+1 WHERE user_id=#{scope.userId} AND id=#{scope.taskId} RETURNING event_sequence)
-            INSERT INTO run_event(user_id,task_id,sequence,run_id,step_id,type)
-            SELECT #{scope.userId},#{scope.taskId},event_sequence,#{run},#{step},#{type} FROM cursor
+            INSERT INTO run_event(user_id,task_id,sequence,run_id,step_id,type,generation,payload)
+            SELECT #{scope.userId},#{scope.taskId},event_sequence,#{run},#{step},#{type},
+            (r.body->>'generation')::bigint,jsonb_build_object('state',r.body->>'state') FROM cursor
+            JOIN execution_run r ON r.user_id=#{scope.userId} AND r.task_id=#{scope.taskId} AND r.id=#{run}
             """)
     int event(@Param("scope") TaskScope scope, @Param("run") UUID run, @Param("step") UUID step, @Param("type") String type);
     /**
