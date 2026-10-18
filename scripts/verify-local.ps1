@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow')) { throw '方法选择只能用于单一测试类作用域。' }
+if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow', 'Fault')) { throw '方法选择只能用于单一测试类作用域。' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $projectRoot '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -29,11 +29,12 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 $allowedKeys = @('POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER',
     'POSTGRES_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD')
 $previousValues = @{}
-foreach ($key in $allowedKeys + @('TRAVEL_INTEGRATION_TESTS', 'TRAVEL_ENGINE_ENABLED')) {
+foreach ($key in $allowedKeys + @('TRAVEL_INTEGRATION_TESTS', 'TRAVEL_ENGINE_ENABLED', 'TRAVEL_EXTERNAL_CALLS_ENABLED')) {
     # 同时保存原值和未配置状态，finally 中可精确还原，而不是把测试配置留给后续任务。
     $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 $originalLocation = Get-Location
+$backendWasRunning = $false
 try {
     foreach ($line in Get-Content -LiteralPath $envFile) {
         if ($line -match '^\s*([A-Z_]+)=(.*)$' -and $allowedKeys -contains $Matches[1]) {
@@ -44,10 +45,17 @@ try {
     $env:TRAVEL_INTEGRATION_TESTS = 'true'
     # 集成测试手动推进发现和恢复，避免后台周期与故障注入争抢随机测试事件。
     $env:TRAVEL_ENGINE_ENABLED = 'false'
+    $env:TRAVEL_EXTERNAL_CALLS_ENABLED = 'false'
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
-    $selectedTest = if ($Scope -eq 'Artifact') { '-Dtest=ArtifactIntegrationTest' }
+    # 环境变量只控制本次JVM，不能关闭已运行容器的Worker；先隔离共享测试数据库的竞争者。
+    $runningBackend = & docker compose ps --status running -q backend
+    if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
+    $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
+    if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
+    $selectedTest = if ($Scope -eq 'Fault') { '-Dtest=ExecutionEngineIntegrationTest,BudgetLedgerIntegrationTest,RunEventIntegrationTest,CandidateAcceptanceIntegrationTest,TravelStorageIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,LocalModelFaultTest' }
+        elseif ($Scope -eq 'Artifact') { '-Dtest=ArtifactIntegrationTest' }
         elseif ($Scope -eq 'Context') { '-Dtest=ContextIntegrationTest' }
         elseif ($Scope -eq 'Preference') { '-Dtest=PreferenceIntegrationTest' }
         elseif ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
@@ -66,13 +74,17 @@ try {
         $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '本地基础设施集成测试失败。' }
 } finally {
-    Set-Location -LiteralPath $originalLocation
-    foreach ($key in $previousValues.Keys) {
-        # 新运行时中 SetEnvironmentVariable(null) 可能留下空值；缺失与空字符串会影响 Spring 默认值，必须保留原始存在性。
-        if ($null -eq $previousValues[$key]) {
-            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
-        } else {
-            [Environment]::SetEnvironmentVariable($key, $previousValues[$key], 'Process')
+    try {
+        if ($backendWasRunning) { docker compose start backend; if ($LASTEXITCODE -ne 0) { throw '容器后端恢复启动失败。' } }
+    } finally {
+        Set-Location -LiteralPath $originalLocation
+        foreach ($key in $previousValues.Keys) {
+            # 精确还原缺失状态，失败或后端启动异常时也不留下真实调用开关。
+            if ($null -eq $previousValues[$key]) {
+                Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($key, $previousValues[$key], 'Process')
+            }
         }
     }
 }

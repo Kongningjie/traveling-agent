@@ -85,7 +85,7 @@ class ExecutionEngineIntegrationTest {
             for (UUID user : users) {
                 var runIds = jdbc.queryForList("SELECT id FROM execution_run WHERE user_id=?", UUID.class, user);
                 jdbc.update("UPDATE travel_task SET current_run_id=NULL WHERE user_id=?", user);
-                for (String table : List.of("decision_response", "decision_request", "run_event", "execution_start_request")) jdbc.update("DELETE FROM " + table + " WHERE user_id=?", user);
+                for (String table : List.of("negotiation_card", "conversation_message", "decision_response", "decision_request", "run_event", "execution_start_request")) jdbc.update("DELETE FROM " + table + " WHERE user_id=?", user);
                 jdbc.update("DELETE FROM artifact_content WHERE artifact_id IN (SELECT id FROM artifact_record WHERE user_id=?)", user);
                 for (String table : List.of("artifact_record", "step_attempt", "outbox_event", "execution_step", "execution_run")) jdbc.update("DELETE FROM " + table + " WHERE user_id=?", user);
                 for (UUID run : runIds) { jdbc.update("DELETE FROM call_meter WHERE run_id=?", run); jdbc.update("DELETE FROM execution_budget WHERE run_id=?", run); }
@@ -562,19 +562,89 @@ class ExecutionEngineIntegrationTest {
      */
     @Test void hardProcessExitRecoversFromPostgres() throws Exception {
         var first = plan(StageType.RESEARCH, 0, "crash"); var run = start(task(actor()), first);
-        Path argsFile = Files.createTempFile(Path.of("target"), "stage-crash-", ".args");
-        Process child = null;
+        crash(run.id().toString(), "CLAIM");
+        assertThat(step(run, first.id()).attemptCount()).isEqualTo(1);
+        jdbc.update("UPDATE outbox_event SET lease_until=clock_timestamp()-interval '1 second' WHERE run_id=?", run.id());
+        assertThat(fresh(mapper).recover(100)).isEqualTo(1); due(run.id());
+        var recovered = claim(run.id(), first.id()); assertThat(recovered.step().attemptCount()).isEqualTo(2); complete(recovered);
+    }
+
+    /** @param arguments 仅随机测试身份及固定故障模式；不传凭据 @throws Exception 子进程未按预期到达故障窗口 */
+    private void crash(String... arguments) throws Exception {
+        Path argsFile = Files.createTempFile(Path.of("target"), "stage-crash-", ".args"); Process child = null;
         try {
             String classpath = System.getProperty("java.class.path").replace("\\", "\\\\").replace("\"", "\\\"");
             Files.writeString(argsFile, "-cp\n\"" + classpath + "\"\n");
-            String java = Path.of(System.getProperty("java.home"), "bin", "java.exe").toString();
-            child = new ProcessBuilder(java, "@" + argsFile.toAbsolutePath(), ExecutionCrashProbe.class.getName(), run.id().toString())
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            assertThat(child.waitFor(30, TimeUnit.SECONDS)).isTrue(); assertThat(child.exitValue()).isEqualTo(23);
-            assertThat(step(run, first.id()).attemptCount()).isEqualTo(1);
-            jdbc.update("UPDATE outbox_event SET lease_until=clock_timestamp()-interval '1 second' WHERE run_id=?", run.id());
-            assertThat(fresh(mapper).recover(100)).isEqualTo(1); due(run.id());
-            var recovered = claim(run.id(), first.id()); assertThat(recovered.step().attemptCount()).isEqualTo(2); complete(recovered);
+            String executable = System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win") ? "java.exe" : "java";
+            var command = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", executable).toString(), "@" + argsFile.toAbsolutePath(), ExecutionCrashProbe.class.getName())); command.addAll(List.of(arguments));
+            child = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            assertThat(child.waitFor(45, TimeUnit.SECONDS)).isTrue(); assertThat(child.exitValue()).isEqualTo(23);
         } finally { if (child != null && child.isAlive()) child.destroyForcibly(); Files.deleteIfExists(argsFile); }
     }
+
+    /** 输入提交前硬退出无半条消息或启动事件；提交后硬退出保留唯一收件与唯一运行。 */
+    @Test void inputTransactionsSurviveActualProcessExit() throws Exception {
+        for (String mode : List.of("INPUT_BEFORE", "INPUT_AFTER")) {
+            var actor = actor(); UUID input = UUID.randomUUID(); crash(actor.id().toString(), mode, actor.loginName(), input.toString());
+            int expected = mode.equals("INPUT_BEFORE") ? 0 : 1;
+            for (String table : List.of("travel_task", "conversation_message", "execution_run", "execution_start_request", "outbox_event")) assertThat(jdbc.queryForObject("SELECT count(*) FROM " + table + " WHERE user_id=?", Integer.class, actor.id())).as(table).isEqualTo(expected);
+            if (expected == 1) {
+                UUID run = jdbc.queryForObject("SELECT id FROM execution_run WHERE user_id=?", UUID.class, actor.id());
+                var hint = fresh(mapper).candidates(100).stream().filter(h -> h.runId().equals(run)).findFirst().orElseThrow(); assertThat(fresh(mapper).claim(hint, "new-process")).isPresent();
+            }
+        }
+    }
+
+    /** 产物独立保存后硬退出，不能把有正文当作阶段完成；恢复仍使用原预算并产生新尝试。 */
+    @Test void preparedResultWithoutCommitDoesNotSkipStageAfterCrash() throws Exception {
+        var first = plan(StageType.RESEARCH, 0, "prepare-crash"); var run = start(task(actor()), first);
+        var metered = ledger.reserve(run.id(), CallKind.MODEL, limits, new BudgetLedger.Target("fake", "local", "TEST"), 10, Instant.now()); ledger.finish(metered.id(), new com.lawrence.travel.domain.execution.control.TokenUsage(1, 1), Duration.ofMillis(1));
+        UUID next = UUID.randomUUID(); crash(run.id().toString(), "PREPARE", next.toString());
+        assertThat(mapper.step(run.scope(), run.id(), first.id()).artifactId()).isNull(); assertThat(step(run, first.id()).state()).isEqualTo(ExecutionStep.State.RUNNING);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM artifact_record WHERE run_id=?", Integer.class, run.id())).isOne();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM execution_step WHERE id=?", Integer.class, next)).isZero();
+        jdbc.update("UPDATE outbox_event SET lease_until=clock_timestamp()-interval '1 second' WHERE run_id=?", run.id()); fresh(mapper).recover(100); due(run.id()); var recovered = claim(run.id(), first.id());
+        assertThat(recovered.step().attemptCount()).isEqualTo(2); complete(recovered); assertThat(ledger.read(run.id()).modelCalls()).isOne();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM artifact_record WHERE run_id=?", Integer.class, run.id())).isEqualTo(2); assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.SUCCEEDED);
+    }
+
+    /** 阶段和下一事件提交后硬退出，下游仍可领取，已完成阶段和因果事件均不重复。 */
+    @Test void committedStageSurvivesCrashWithExactlyOneNextEvent() throws Exception {
+        var first = plan(StageType.RESEARCH, 0, "committed-crash"); var run = start(task(actor()), first); UUID next = UUID.randomUUID(); crash(run.id().toString(), "COMMIT", next.toString());
+        assertThat(step(run, first.id()).state()).isEqualTo(ExecutionStep.State.COMPLETED); assertThat(step(run, first.id()).attemptCount()).isOne();
+        assertThat(mapper.step(run.scope(), run.id(), first.id()).artifactId()).isNotNull(); assertThat(fresh(mapper).recover(100)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_event WHERE run_id=?", Integer.class, run.id())).isEqualTo(2); complete(claim(run.id(), next));
+        assertThat(step(run, first.id()).attemptCount()).isOne(); assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.SUCCEEDED);
+    }
+
+    /** 类型化免费耗尽由实际执行器直接持久化为额度暂停，不生成重试或新预算。 */
+    @Test void quotaRejectionPausesAtExecutorBoundaryWithoutRetry() {
+        var first = plan(StageType.UNDERSTAND, 0, "quota-boundary"); var run = start(task(actor()), first); var claim = claim(run.id(), first.id());
+        new StageExecutor(engine, List.of(failingHandler(new com.lawrence.travel.domain.execution.control.CallRejectedException(com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.QUOTA_INSUFFICIENT)))).execute(claim, control());
+        assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.PAUSED_QUOTA); assertThat(step(run, first.id()).attemptCount()).isOne(); assertThat(engine.candidates(100).stream().noneMatch(h -> h.runId().equals(run.id()))).isTrue();
+    }
+
+    /** 超时和限流的固定失败类别在执行器内有界重试，耗尽后DEAD及FAILED，不会无事件永久运行。 */
+    @Test void transientFailuresStopAfterBoundedAttempts() {
+        for (String code : List.of("MODEL_TRANSPORT_FAILED", "MODEL_RATE_LIMITED")) {
+            var first = plan(StageType.UNDERSTAND, 0, "bounded-failure"); var run = start(task(actor()), first); var executor = new StageExecutor(engine, List.of(failingHandler(new IllegalStateException(code))));
+            for (int i = 0; i < 3; i++) { executor.execute(claim(run.id(), first.id()), control()); due(run.id()); }
+            assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.FAILED); assertThat(step(run, first.id()).attemptCount()).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_event WHERE run_id=? AND status='DEAD'", Integer.class, run.id())).isOne();
+        }
+    }
+
+    /** @param failure 固定本地失败，无网络请求 @return 可控理解阶段处理器 */
+    private StageHandler failingHandler(RuntimeException failure) { return new StageHandler() {
+        /** {@inheritDoc} 仅接受本用例理解阶段。 */
+        @Override public boolean supports(StageType type) { return type == StageType.UNDERSTAND; }
+        /** {@inheritDoc} 固定异常用于检查分类，不伪造供应商真实请求。 */
+        @Override public StageOutput execute(ExecutionEngineStore.Claim claim) { throw failure; }
+    }; }
+    /** @return 始终允许进入的本地执行控制；取消与物理资源另由既有并发测试验证 */
+    private StageExecutor.Control control() { return new StageExecutor.Control() {
+        /** {@inheritDoc} 本测试没有并发取消。 */ @Override public boolean enter() { return true; }
+        /** {@inheritDoc} 本地失败不留下中断。 */ @Override public void leave() { Thread.interrupted(); }
+        /** {@inheritDoc} 原运行未被用户取消。 */ @Override public boolean cancelled() { return false; }
+    }; }
 }

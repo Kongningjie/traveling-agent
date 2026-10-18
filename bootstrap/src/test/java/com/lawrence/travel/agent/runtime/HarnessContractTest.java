@@ -85,6 +85,22 @@ public class HarnessContractTest {
         }
     }
 
+    /** 真实Harness异常包装必须保留额度暂停类型，且不进行隐藏模型重试。 */
+    @Test void typedQuotaFailureSurvivesHarnessWithoutRetry() {
+        var quotaCalls = new AtomicInteger();
+        var model = new ScriptedModel() {
+            /** {@inheritDoc} 只产生本地类型化拒绝，绝无网络请求。 */
+            @Override public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                quotaCalls.incrementAndGet(); return Flux.error(new com.lawrence.travel.domain.execution.control.CallRejectedException(com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.QUOTA_INSUFFICIENT));
+            }
+        };
+        try (var agent = RestrictedHarnessFactory.create(model, new Toolkit(), workspace, "planner")) {
+            assertThatThrownBy(() -> agent.call(List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text("local quota failure").build()).build())).block(Duration.ofSeconds(10)))
+                    .satisfies(failure -> { Throwable root = failure; while (root.getCause() != null) root = root.getCause(); assertThat(root).isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class).hasMessage("QUOTA_INSUFFICIENT"); });
+            assertThat(quotaCalls.get()).isOne();
+        }
+    }
+
     /** 相同角色和工作区连续构建时，新尝试不得加载上次对话或工具去重状态。 */
     @Test
     void repeatedAttemptsDoNotShareConversationOrToolState() {

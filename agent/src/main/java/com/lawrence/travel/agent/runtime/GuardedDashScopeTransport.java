@@ -112,7 +112,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                 // 先耗尽并关闭响应，再结算释放许可；取消不会提前释放仍在途的连接。
                 permit.complete(readUsage(responseBody));
                 if (status < 200 || status >= 300) {
-                    throw new HttpTransportException(safeError(status, responseBody));
+                    throw providerFailure(status, responseBody);
                 }
                 if (closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
                 rejectTruncated(responseBody);
@@ -241,6 +241,14 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         return "MODEL_PROVIDER_HTTP_" + status;
     }
 
+    /** @param status 供应商状态 @param body 仅在本边界分类的响应 @return 免费耗尽保留类型化暂停原因，禁止被当成普通失败重试；其余只保留固定错误码 */
+    private static RuntimeException providerFailure(int status, String body) {
+        String code = safeError(status, body);
+        return "MODEL_FREE_QUOTA_EXHAUSTED".equals(code)
+                ? new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT)
+                : new HttpTransportException(code);
+    }
+
     /**
      * 每次订阅只发送一次受门禁保护的 SSE 请求，不缓冲完整生成结果。
      * @param request SDK 完成格式化后的请求
@@ -311,7 +319,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                             int length = reader.read(chars);
                             error = length < 0 ? "" : new String(chars, 0, length);
                         }
-                        throw new HttpTransportException(safeError(response.code(), error));
+                        throw providerFailure(response.code(), error);
                     }
                     if (response.body() == null || !response.header("Content-Type", "").toLowerCase(java.util.Locale.ROOT)
                             .startsWith("text/event-stream")) throw new HttpTransportException("MODEL_STREAM_INVALID");

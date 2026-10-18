@@ -154,3 +154,9 @@ PostgreSQL 保存账号及 BCrypt 哈希，Redis 保存不含密码的会话及�
 停止所有宿主机执行器后，可用PowerShell 7运行`./scripts/backup-local.ps1 -Action Backup -Directory .runtime/backups/manual-001 -Quiesced`。脚本短暂停止运行中的容器后端，备份数据库与必要文件，随后恢复后端运行状态；目标必须为新目录。宿主机文件模式另传`-FilesDirectory .runtime/artifacts`。备份含私有数据，应保存在受限本地目录；不会包含`.env`或Redis登录会话，恢复后重新登录。
 
 运行`./scripts/backup-local.ps1 -Action Verify -Directory .runtime/backups/manual-001`，会在随机临时数据库和临时卷中实际恢复，逐表比对内容指纹并核对每个必要文件引用的大小与哈希，结束清理临时资源；不会覆盖当前源库或原文件卷。该脚本是本地恢复演练，云端备份、加密存放、RPO/RTO及正式切换恢复流程留待部署阶段。`./scripts/verify-local.ps1 -Scope Artifact`覆盖本地存储、隔离、回收锁及备份恢复，不调用真实外部服务。
+
+## 本地故障与资源验收
+
+`./scripts/verify-local.ps1 -Scope Fault`运行输入及阶段事务硬退出、失联租约、取消迟到结果、重复提交、并发接受、SSE断线与会话失效、偏好删除、上下文及附件恢复、模型超时和限流、免费额度暂停等确定性实验。测试只使用本地PostgreSQL／Redis、回环HTTP和受控模型替身；不调用真实供应商。测试脚本会暂时停止运行中的容器后端，避免其Worker争抢测试任务，结束后恢复原运行状态；其他宿主机执行器应先停止。
+
+`./scripts/verify-faults.ps1 -IncludeContainerFaults`额外执行后端SIGKILL重启、PostgreSQL／Redis重启和随机持久化探针核对，会短暂中断服务并保留命名卷。`-ContainersOnly`可只补做容器实验，避免重复已经通过的测试。容器健康探针与精确事务边界的JVM硬退出测试分别记录结果；本地故障通过不代表云端可用性或真实模型质量验收完成。脚本不保存控制台日志。真实免费额度耗尽经HTTP或SSE到达时，类型化拒绝会直接进入PAUSED_QUOTA，UNKNOWN用量仍保留原预占，不自动重发、付费或更换型号。

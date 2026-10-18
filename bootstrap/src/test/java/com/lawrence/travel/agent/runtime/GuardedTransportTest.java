@@ -116,7 +116,7 @@ class GuardedTransportTest {
     void quotaErrorIsSanitizedAndUnknown() throws Exception {
         try (var transport = transport(true)) {
             when(call.execute()).thenReturn(response(403, "{\"code\":\"AllocationQuota.FreeTierOnly\",\"message\":\"private-test-data\"}"));
-            assertThatThrownBy(() -> transport.execute(request())).hasMessage("MODEL_FREE_QUOTA_EXHAUSTED");
+            assertThatThrownBy(() -> transport.execute(request())).isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class).hasMessage("QUOTA_INSUFFICIENT");
             verify(ledger).finish(eq(reservationId), isNull(), any());
         }
     }

@@ -131,7 +131,7 @@ class GuardedStreamTest {
                     "data:{\"code\":\"AllocationQuota.FreeTierOnly\",\"message\":\"private-test-data\"}\n\n",
                     MediaType.get("text/event-stream"))));
             assertThatThrownBy(() -> transport.stream(request()).blockLast(Duration.ofSeconds(3)))
-                    .hasMessage("MODEL_FREE_QUOTA_EXHAUSTED").hasNoCause();
+                    .isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class).hasMessage("QUOTA_INSUFFICIENT").hasNoCause();
             verify(ledger).finish(eq(reservation), isNull(), any());
         }
     }
@@ -220,6 +220,19 @@ class GuardedStreamTest {
         }
     }
 
+    /** 真实DashScope SDK收到SSE免费耗尽时保留类型化暂停原因，HTTP替身没有隐藏重试。 */
+    @Test void quotaFailureSurvivesActualSdk() throws Exception {
+        try (var transport = transport(true)) {
+            when(call.execute()).thenReturn(response(ResponseBody.create("data:{\"code\":\"AllocationQuota.FreeTierOnly\",\"message\":\"private-local-data\"}\n\n", MediaType.get("text/event-stream"))));
+            var model = io.agentscope.extensions.model.dashscope.DashScopeChatModel.builder().apiKey("test-placeholder").modelName("test-model").baseUrl("https://dashscope.aliyuncs.com").endpointType(io.agentscope.extensions.model.dashscope.EndpointType.MULTIMODAL).stream(true).enableThinking(false).enableSearch(false).httpTransport(transport).build();
+            var messages = java.util.List.of(io.agentscope.core.message.Msg.builder().name("user").role(io.agentscope.core.message.MsgRole.USER).content(io.agentscope.core.message.TextBlock.builder().text("local error").build()).build());
+            var options = io.agentscope.core.model.GenerateOptions.builder().maxTokens(128).executionConfig(io.agentscope.core.model.ExecutionConfig.builder().maxAttempts(1).build()).build();
+            assertThatThrownBy(() -> model.stream(messages, java.util.List.of(), options).collectList().block(Duration.ofSeconds(3)))
+                    .satisfies(failure -> { Throwable root = failure; while (root.getCause() != null) root = root.getCause(); assertThat(root).isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class).hasMessage("QUOTA_INSUFFICIENT"); });
+            org.mockito.Mockito.verify(call, org.mockito.Mockito.times(1)).execute(); verify(ledger).finish(eq(reservation), isNull(), any());
+        }
+    }
+
     /** 真实 SDK 与 Harness 消费工具调用流及结构化响应，HTTP 仅为内存替身。 */
     @Test
     void harnessConsumesStreamedToolAndStructuredReply() throws Exception {
@@ -265,7 +278,7 @@ class GuardedStreamTest {
                     MediaType.get("application/json"))).newBuilder().code(403).build();
             when(call.execute()).thenReturn(failure);
             assertThatThrownBy(() -> transport.stream(request()).blockLast(Duration.ofSeconds(3)))
-                    .hasMessage("MODEL_FREE_QUOTA_EXHAUSTED").hasNoCause();
+                    .isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class).hasMessage("QUOTA_INSUFFICIENT").hasNoCause();
             verify(ledger).finish(eq(reservation), isNull(), any());
         }
     }

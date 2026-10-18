@@ -270,6 +270,18 @@ class CandidateAcceptanceIntegrationTest {
         travel.registerChange(f.actor(), f.scope().taskId(), UUID.randomUUID().toString(), task.lockVersion(), UUID.randomUUID(), 1);
         assertThatThrownBy(() -> accept(itineraries, f, UUID.randomUUID())).hasMessage("STALE_VERSION"); assertThat(current(f)).isNull();
     }
+    /** 用户修改与接受同时争锁，旧lockVersion和候选依赖只能允许一个有效转移，无死锁或旧指针覆盖。 */
+    @Test void userChangeAndAcceptanceRaceHasOneWinner() throws Exception {
+        var f = fixture(false); present(f); long expected = travel.task(f.actor(), f.scope().taskId()).lockVersion(); var ready = new CountDownLatch(2); var start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var accepting = workers.submit(() -> { ready.countDown(); start.await(); try { accept(itineraries, f, UUID.randomUUID()); return true; } catch (com.lawrence.travel.application.travel.TravelStorageFailure stale) { assertThat(stale.getMessage()).isEqualTo("STALE_VERSION"); return false; } });
+            var changing = workers.submit(() -> { ready.countDown(); start.await(); try { travel.registerChange(f.actor(), f.scope().taskId(), UUID.randomUUID().toString(), expected, UUID.randomUUID(), 1); return true; } catch (com.lawrence.travel.application.travel.TravelStorageFailure stale) { assertThat(stale.getMessage()).isEqualTo("STALE_VERSION"); return false; } });
+            assertThat(ready.await(3, TimeUnit.SECONDS)).isTrue(); start.countDown(); boolean accepted = accepting.get(8, TimeUnit.SECONDS), changed = changing.get(8, TimeUnit.SECONDS);
+            assertThat(accepted ^ changed).isTrue(); assertThat(current(f)).isEqualTo(accepted ? f.version().snapshotId() : null);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_acceptance WHERE user_id=?", Integer.class, f.actor().id())).isEqualTo(accepted ? 1 : 0);
+        } finally { start.countDown(); }
+    }
+
     /** 已取消运行不能被接受路径复活。 */
     @Test void cancelledRunCannotBeAccepted() {
         var f = fixture(false); present(f); engine.cancel(f.scope(), f.run().id());

@@ -88,9 +88,12 @@ final class DashScopeSseReader {
             catch (RuntimeException invalid) { throw new HttpTransportException("MODEL_STREAM_INVALID"); }
             if (json == null) throw new HttpTransportException("MODEL_STREAM_INVALID");
             if (json.get("code") != null) {
-                String code = "AllocationQuota.FreeTierOnly".equals(json.get("code"))
-                        ? "MODEL_FREE_QUOTA_EXHAUSTED" : "MODEL_STREAM_PROVIDER_ERROR";
-                throw new HttpTransportException(code);
+                if ("AllocationQuota.FreeTierOnly".equals(json.get("code"))) {
+                    // 跨SDK包装后仍须保留额度暂停原因，不能耗完普通重试才停止。
+                    throw new com.lawrence.travel.domain.execution.control.CallRejectedException(
+                            com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.QUOTA_INSUFFICIENT);
+                }
+                throw new HttpTransportException("MODEL_STREAM_PROVIDER_ERROR");
             }
             if (terminal) throw new HttpTransportException("MODEL_STREAM_INVALID");
             if (!(json.get("output") instanceof Map<?, ?> output)
