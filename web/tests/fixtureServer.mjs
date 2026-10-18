@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, extname, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
+import syntheticUser from "./fixtures/identity.json" with { type: "json" };
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const task = "00000000-0000-4000-8000-000000000001",
     second = "00000000-0000-4000-8000-000000000002";
@@ -17,7 +18,7 @@ const run = "00000000-0000-4000-8000-000000000020",
 const scopeQuestion = "00000000-0000-4000-8000-000000000032",
     scopeOption = "00000000-0000-4000-8000-000000000033";
 let sequence = 1,
-    authenticated = true,
+    authenticated = process.env.TRAVEL_UI_FIXTURE_AUTHENTICATED !== "false",
     current = base,
     generation = 1,
     state = "WAITING_USER",
@@ -138,9 +139,7 @@ const server = createServer(async (request, response) => {
             if (path.endsWith("/auth/me"))
                 return json(
                     response,
-                    authenticated
-                        ? { id: "synthetic-user", username: "本地测试账号" }
-                        : { code: "UNAUTHORIZED" },
+                    authenticated ? syntheticUser : { code: "UNAUTHORIZED" },
                     authenticated ? 200 : 401,
                 );
             if (path.startsWith("/api/v1/preferences")) {
@@ -148,7 +147,7 @@ const server = createServer(async (request, response) => {
                     return json(response, { code: "UNAUTHORIZED" }, 401);
                 const view = () => ({
                     version: {
-                        userId: "synthetic-user",
+                        userId: syntheticUser.id,
                         revision: preferenceRevision,
                     },
                     entries: [...preferenceEntries.values()].filter(
@@ -194,10 +193,7 @@ const server = createServer(async (request, response) => {
                 const body = text ? JSON.parse(text) : {};
                 if (path.endsWith("/auth/login")) {
                     authenticated = true;
-                    return json(response, {
-                        id: "synthetic-user",
-                        username: "本地测试账号",
-                    });
+                    return json(response, syntheticUser);
                 }
                 if (!authenticated)
                     return json(response, { code: "UNAUTHORIZED" }, 401);

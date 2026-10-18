@@ -505,10 +505,10 @@ onMounted(initialize);
         <div class="sidebar-account">
           <button class="account-button" @click="openPreferences">
             <span class="avatar">{{
-              user.username.slice(0, 1).toUpperCase()
+              user.loginName.slice(0, 1).toUpperCase()
             }}</span
             ><span
-              ><strong>{{ user.username }}</strong
+              ><strong>{{ user.loginName }}</strong
               ><small>我的旅行偏好</small></span
             ><span aria-hidden="true">⚙</span></button
           ><button class="logout-button" :disabled="busy" @click="logout">

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Api, ApiError } from "../src/workspace/client.ts";
+import { Api, ApiError, decodeUser } from "../src/workspace/client.ts";
+import identity from "./fixtures/identity.json" with { type: "json" };
 import {
   currentNeedsValidation,
   canAccept,
@@ -9,6 +10,33 @@ import {
   tripError,
 } from "../src/workspace/guards.ts";
 import type { CandidateView, Card, View } from "../src/workspace/types.ts";
+
+test("身份使用服务端loginName契约，剔除额外字段而不伪造用户名", () => {
+  assert.deepEqual(decodeUser(identity), identity);
+  assert.deepEqual(
+    decodeUser({ ...identity, extra: "__SYNTHETIC_PRIVATE_FIELD__" }),
+    identity,
+  );
+});
+test("旧username形状和异常身份在渲染前拒绝，固定错误不带原始响应", () => {
+  for (const value of [
+    null,
+    [],
+    {},
+    { id: identity.id, username: "__OLD_FIXTURE__" },
+    { ...identity, id: "invalid" },
+    { ...identity, loginName: "" },
+    { ...identity, loginName: 42 },
+  ]) {
+    assert.throws(
+      () => decodeUser(value),
+      (failure: unknown) =>
+        failure instanceof ApiError &&
+        failure.status === 502 &&
+        !failure.message.includes("__OLD_FIXTURE__"),
+    );
+  }
+});
 
 /** 构造当前一致视图，只有确定性门槛满足才能确认。 */
 function context(): { view: View; candidate: CandidateView } {

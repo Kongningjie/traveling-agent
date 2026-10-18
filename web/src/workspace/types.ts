@@ -3,7 +3,7 @@ import type { TaskView } from "../events/runEvents";
 /** 当前认证身份，不含会话ID或凭证。 */
 export interface User {
   id: string;
-  username: string;
+  loginName: string;
 }
 /** 服务端私有任务摘要。 */
 export interface Task {

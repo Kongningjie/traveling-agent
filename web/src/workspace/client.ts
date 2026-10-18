@@ -1,3 +1,5 @@
+import type { User } from "./types";
+
 /** 固定HTTP错误，不保存或展示服务端原文、请求体或凭证。 */
 export class ApiError extends Error {
   readonly status: number;
@@ -18,6 +20,27 @@ export class ApiError extends Error {
     );
     this.status = status;
   }
+}
+/**
+ * 校验IdentityController返回的最小身份，不能依赖泛型强制转换掩盖字段差异。
+ * @param value 未验证的登录或恢复会话响应；不包含可供前端持久化的凭证。
+ * @returns 仅保留id和loginName；身份不完整时在渲染前拒绝，不返回占位登录身份。
+ * @throws ApiError 结构与UserIdentity契约不符时使用固定502说明，禁止附带原始响应。
+ */
+export function decodeUser(value: unknown): User {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new ApiError(502);
+  const data = value as Record<string, unknown>;
+  if (
+    typeof data.id !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      data.id,
+    ) ||
+    typeof data.loginName !== "string" ||
+    !/^[a-z0-9_]{3,32}$/.test(data.loginName)
+  )
+    throw new ApiError(502);
+  return { id: data.id, loginName: data.loginName };
 }
 /** 同源API封装；Cookie由浏览器管理，CSRF每次写入前获取，不持久化令牌。 */
 export class Api {

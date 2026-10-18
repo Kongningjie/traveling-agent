@@ -1,6 +1,6 @@
 import { computed, onUnmounted, ref } from "vue";
 import { cursorSequence, decodeEvent, applyEvent } from "../events/runEvents";
-import { Api, ApiError } from "./client";
+import { Api, ApiError, decodeUser } from "./client";
 import { canAccept, canAnswer } from "./guards";
 import { conversationInput } from "./conversation";
 import type {
@@ -125,7 +125,7 @@ export function useWorkspace() {
   async function initialize(): Promise<void> {
     const stamp = epoch;
     try {
-      const me = await api.get<User>("/api/v1/auth/me");
+      const me = decodeUser(await api.get<unknown>("/api/v1/auth/me"));
       if (stamp !== epoch) return;
       user.value = me;
       await listTasks();
@@ -151,10 +151,12 @@ export function useWorkspace() {
     try {
       if (register)
         await api.post("/api/v1/auth/register", { username, password });
-      const me = await api.post<User>("/api/v1/auth/login", {
-        username,
-        password,
-      });
+      const me = decodeUser(
+        await api.post<unknown>("/api/v1/auth/login", {
+          username,
+          password,
+        }),
+      );
       if (stamp !== epoch) return;
       user.value = me;
       taskOffset.value = 0;
