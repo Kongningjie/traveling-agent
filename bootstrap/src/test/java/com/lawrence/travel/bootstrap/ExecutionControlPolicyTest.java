@@ -55,7 +55,7 @@ class ExecutionControlPolicyTest {
                 .hasMessage("QUOTA_UNVERIFIED");
     }
 
-    /** 验证未来、快照截止、额度到期和不足时均拒绝，不能无限复用旧余额。 */
+    /** 验证未来核实时间、供应商额度到期及不足仍拒绝，本地历史截止不代表真实失效。 */
     @Test
     void rejectsStaleFutureExpiredOrInsufficientEvidence() {
         var valid = evidence(true);
@@ -63,13 +63,24 @@ class ExecutionControlPolicyTest {
                 .hasMessage("QUOTA_INSUFFICIENT");
         assertThatThrownBy(() -> valid.requireUsable("model", "cn-beijing", "REALTIME", 1, now.minusSeconds(2)))
                 .hasMessage("QUOTA_EXPIRED");
-        assertThatThrownBy(() -> valid.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(10)))
-                .hasMessage("QUOTA_EXPIRED");
+        valid.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(10));
         var expired = new FreeQuotaEvidence("model", "cn-beijing", "REALTIME", 100,
                 now.minusSeconds(1), now.plusSeconds(10), now, true);
         assertThatThrownBy(() -> expired.requireUsable("model", "cn-beijing", "REALTIME", 1, now))
                 .hasMessage("QUOTA_EXPIRED");
         valid.requireUsable("model", "cn-beijing", "REALTIME", 100, now);
+    }
+
+    /** 跨越旧快照截止后仍按供应商实际截止判定，不刷新核实时间，截止本身为排他边界。 */
+    @Test
+    void ignoresLocalSnapshotDeadlineButPreservesActualExpiry() {
+        var stored = new FreeQuotaEvidence("model", "cn-beijing", "REALTIME", 100,
+                now.minusSeconds(86400), now.minusSeconds(3600), now.plusSeconds(60), true);
+        stored.requireUsable("model", "cn-beijing", "REALTIME", 100, now);
+        stored.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(59));
+        assertThat(stored.verifiedAt()).isEqualTo(now.minusSeconds(86400));
+        assertThatThrownBy(() -> stored.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(60)))
+                .hasMessage("QUOTA_EXPIRED");
     }
 
     /** 验证配置、恢复快照及供应商用量不能以负数或溢出绕过限制。 */

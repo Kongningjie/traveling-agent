@@ -10,7 +10,7 @@ import java.util.Objects;
  * @param api 接口类型，用于防止实时额度误用于其他产品
  * @param remainingTokens 记录时输入和输出共用的免费剩余 Token
  * @param verifiedAt 核实时间
- * @param validUntil 本地快照失效时间
+ * @param validUntil 历史本地快照截止字段，仅兼容旧配置，不再作为调用拒绝依据
  * @param expiresAt 额度到期保守截止时间
  * @param stopProtectionConfirmed 用完即停已核实生效
  */
@@ -37,7 +37,7 @@ public record FreeQuotaEvidence(String modelId, String region, String api, long 
      * @param targetApi 实际请求接口类型
      * @param tokenUpperBound 本请求输入和最大输出的保守总 Token 上界，必须为正
      * @param now 当前时间
-     * @throws CallRejectedException 保护未确认、范围不匹配、过期或余额不足
+     * @throws CallRejectedException 保护未确认、范围不匹配、核实时间在未来、实际额度到期或余额不足
      */
     public void requireUsable(String model, String targetRegion, String targetApi,
                               long tokenUpperBound, Instant now) {
@@ -46,7 +46,9 @@ public record FreeQuotaEvidence(String modelId, String region, String api, long 
                 || !api.equals(targetApi)) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
         }
-        if (now.isBefore(verifiedAt) || !now.isBefore(validUntil) || !now.isBefore(expiresAt)) {
+        // 本地资料陈旧不等于供应商额度失效。按用户明确要求取消历史validUntil的自动拒绝，
+        // 保留真实额度截止、接入范围、停用保护和账本扣减；不伪造新的核实时间或清除未知用量。
+        if (now.isBefore(verifiedAt) || !now.isBefore(expiresAt)) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_EXPIRED);
         }
         if (remainingTokens < tokenUpperBound) {

@@ -10,6 +10,7 @@ travel:
       api: DASHSCOPE_NATIVE_REALTIME
       remaining-tokens: 0
       verified-at: "1970-01-01T00:00:00Z"
+      # 历史兼容字段，不再按本地快照时效拦截；实际额度到期仍由 expires-at 限制。
       valid-until: "1970-01-02T00:00:00Z"
       expires-at: "1970-01-02T00:00:00Z"
       stop-protection-confirmed: false
