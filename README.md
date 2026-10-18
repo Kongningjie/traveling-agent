@@ -187,3 +187,13 @@ PowerShell 7 执行 `./scripts/evaluate-local.ps1`：默认仅运行 8 个开发
 自然语言中的接受候选、恢复版本及保存／删除长期偏好需点击精确确认卡；明确停止可直接处理，文字授权仍需在问题卡片选择具体范围。咨询回复基于可用上下文，不接入即时检索工具，不声称已核实实时天气或票价。真实外部调用默认关闭，因此配置密钥并不表示聊天模型已启用；关闭时可靠保存输入并显示明确原因，不用本地规则伪装模型回复。
 
 本地验收使用 `.\scripts\verify-local.ps1 -Scope Dialogue`（仅本机PostgreSQL／Redis与显式模型替身），前端运行 `npm test` 与 `npm run build`。40条人工标注意图语料位于 `bootstrap/src/test/resources/dialogue/intent-cases.json`，分30开发／10留出；语料契约与替身测试不代表真实模型准确率，真实质量评测尚未运行。
+
+## Harness 二期能力验证
+
+DEV-0025提供14项真实SDK／本地模型探针，验证状态恢复、自动压缩、文件Flush、原文及工具结果卸载、工具关联、取消和错误降级。复现命令不读取密钥、不连接数据库或真实供应商：
+
+```powershell
+.\mvnw.cmd --batch-mode --no-transfer-progress '-Dtest=HarnessCapabilityProbeTest,HarnessContractTest,HarnessRuntimeTest,ContextRulesTest,ModuleArchitectureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+探针确认：原生摘要失败可能降级为文本占位；后台Flush可晚于主回复；紧急超限恢复会采用默认Flush配置；卸载失败可保留完整工具结果；仅interrupt不保证立即取消不返回的模型流。因此二期采用原生能力优先、受控适配补齐业务门禁的方向。此阶段只交付测试和本地详细设计，生产开关和调用路径不变，不代表PG适配、文件上传、安全隔离或真实模型质量已经实现／验收。
