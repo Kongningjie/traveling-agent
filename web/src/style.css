@@ -1239,3 +1239,9 @@ summary {
     transition: none !important;
   }
 }
+
+/* 助手回复保持换行，操作确认与撤回均为显式交互。 */
+.dialogue-reply { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dialogue-actions { display: flex; gap: 12px; margin: 8px 0 20px; }
+.operation-confirmation { margin: 12px 0 24px; }
+.operation-confirmation button + button { margin-left: 10px; }

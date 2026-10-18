@@ -11,6 +11,7 @@ import {
   replyMode,
 } from "./workspace/guards";
 import { useWorkspace } from "./workspace/useWorkspace";
+import { useDialogue } from "./workspace/useDialogue";
 import type { Message, Requirement } from "./workspace/types";
 const {
   user,
@@ -31,7 +32,7 @@ const {
   notice,
   connection,
   retryable,
-  acceptable,
+  acceptable: workspaceAcceptable,
   answerable,
   current,
   taskOffset,
@@ -55,6 +56,21 @@ const {
   pageTasks,
   pageVersions,
 } = useWorkspace();
+const dialogue = useDialogue(user, async (id) => { if (selected.value !== id) await selectTask(id); });
+const chatSelected = dialogue.selected;
+const chatView = dialogue.current;
+const chats = dialogue.chats;
+const chatBusy = dialogue.busy;
+const chatError = dialogue.error;
+const chatRetryable = dialogue.retryable;
+const chatOffset = dialogue.offset;
+const hasConversation = computed(() => Boolean(selected.value || chatSelected.value));
+const acceptable = computed(() => workspaceAcceptable.value && !chatBusy.value && !chatView.value?.blocked);
+/** 打开独立聊天前释放旧任务读取，聊天切换不停止后台业务。 */
+async function openChat(id: string): Promise<void> {
+  if (busy.value || retryable.value || chatBusy.value || chatRetryable.value) return;
+  newConversation(); sidebarOpen.value = false; await dialogue.open(id);
+}
 const username = ref(""),
   password = ref(""),
   register = ref(false),
@@ -107,8 +123,8 @@ const mode = computed(() =>
 );
 const inputDisabled = computed(
   () =>
-    busy.value ||
-    retryable.value ||
+    busy.value || chatBusy.value ||
+    retryable.value || chatRetryable.value ||
     Boolean(selected.value && mode.value === "SYNCING"),
 );
 const active = computed(() =>
@@ -198,6 +214,11 @@ async function submitMessage(): Promise<void> {
     submittedText = text;
   }
   try {
+    if ((chatSelected.value || !task) && !target.value && !Object.keys(chosenOptions.value).length) {
+      const saved = await dialogue.send(text);
+      if (saved && message.value === text) message.value = "";
+      return;
+    }
     if (!task) await createTask(text);
     else if (mode.value === "ANSWER")
       await answer("ANSWER", { ...chosenOptions.value }, text, []);
@@ -246,7 +267,8 @@ function useStarter(text: string): void {
 }
 /** 开始新会话不取消旧任务；未知写结果应先处理，不能丢失原重试键。 */
 function startConversation(): void {
-  if (busy.value || retryable.value) return;
+  if (busy.value || retryable.value || chatBusy.value || chatRetryable.value) return;
+  dialogue.start();
   newConversation();
   sidebarOpen.value = false;
   message.value = "";
@@ -254,9 +276,13 @@ function startConversation(): void {
 }
 /** @param id 本人任务；切换只读取，不重新执行规划。 */
 async function openTask(id: string): Promise<void> {
+  if (chatBusy.value || chatRetryable.value) return;
+  dialogue.start();
   sidebarOpen.value = false;
   await selectTask(id);
 }
+// 恢复旧任务或点击旧任务时也接入聊天收件；后台选中关联任务时chatSelected已存在，不重复关联。
+watch(selected, async (id) => { if (id && !chatSelected.value && user.value) await dialogue.attach(id); });
 /** @param tab 用户主动展开的详情；候选到达时不抢占聊天。 */
 function openDetails(tab: string): void {
   detailsTab.value = tab;
@@ -348,6 +374,7 @@ watch(
 watch(
   [
     () => messages.value.length,
+    () => chatView.value?.messages.map((m) => m.id + m.state + m.reply).join("|"),
     () => card.value?.decision.id,
     () => card.value?.decision.revision,
   ],
@@ -447,32 +474,42 @@ onMounted(initialize);
         </div>
         <button
           class="new-chat"
-          :disabled="busy || retryable"
+          :disabled="busy || retryable || chatBusy || chatRetryable"
           @click="startConversation"
         >
-          <span aria-hidden="true">＋</span>开启新旅行<span
+          <span aria-hidden="true">＋</span>开启新对话<span
             class="new-chat-hint"
             >↗</span
           >
         </button>
         <div class="sidebar-label">
-          <span>我的旅行</span
+          <span>我的对话</span
           ><button
             class="icon-button"
             :disabled="busy"
             aria-label="刷新旅行列表"
-            @click="pageTasks(0)"
+            @click="pageTasks(0); dialogue.page(0)"
           >
             ↻
           </button>
         </div>
         <nav class="task-list" aria-label="旅行任务">
+          <button v-for="chat in chats" :key="chat.id" class="task-button"
+            :class="{ active: chatSelected === chat.id }" :disabled="busy || retryable || chatBusy || chatRetryable"
+            @click="openChat(chat.id)">
+            <span class="task-icon" aria-hidden="true">◷</span><span><strong>{{ chat.title }}</strong>
+            <small>{{ chat.taskId ? '旅行规划' : '交流咨询' }}</small></span>
+          </button>
+          <div v-if="chatOffset || chats.length >= 20" class="sidebar-pagination">
+            <button :disabled="chatBusy || chatRetryable || !chatOffset" @click="dialogue.page(-1)">上一页对话</button>
+            <button :disabled="chatBusy || chatRetryable || chats.length < 20" @click="dialogue.page(1)">下一页对话</button>
+          </div>
           <button
-            v-for="task in tasks"
+            v-for="task in tasks.filter((t) => !chats.some((c) => c.taskId === t.task.scope.taskId))"
             :key="task.task.scope.taskId"
             class="task-button"
             :class="{ active: selected === task.task.scope.taskId }"
-            :disabled="busy || retryable"
+            :disabled="busy || retryable || chatBusy || chatRetryable"
             @click="openTask(task.task.scope.taskId)"
           >
             <span class="task-icon" aria-hidden="true">◷</span
@@ -483,7 +520,7 @@ onMounted(initialize);
               }}</small></span
             >
           </button>
-          <p v-if="!tasks.length" class="sidebar-empty">
+          <p v-if="!tasks.length && !chats.length" class="sidebar-empty">
             每段旅程，都从一句话开始。<br />聊聊你想去的地方吧。
           </p>
         </nav>
@@ -528,7 +565,7 @@ onMounted(initialize);
             >
               ☰
             </button>
-            <h1>{{ selected ? taskTitle : "新旅行" }}</h1>
+            <h1>{{ chatView?.chat.title ?? (selected ? taskTitle : "新对话") }}</h1>
             <span class="header-badge">旅行助手</span>
           </div>
           <button
@@ -544,9 +581,9 @@ onMounted(initialize);
         <div
           ref="scrollArea"
           class="chat-scroll"
-          :class="{ 'is-home': !selected }"
+          :class="{ 'is-home': !hasConversation }"
         >
-          <section v-if="!selected" class="conversation-home">
+          <section v-if="!hasConversation" class="conversation-home">
             <div class="home-mark" aria-hidden="true">
               <svg viewBox="0 0 48 48">
                 <path d="m31 16-4 11-11 5 5-12 10-4Z" />
@@ -570,7 +607,7 @@ onMounted(initialize);
                 v-for="starter in starters"
                 :key="starter.title"
                 class="starter-card"
-                :disabled="busy || retryable"
+                :disabled="busy || retryable || chatBusy || chatRetryable"
                 @click="useStarter(starter.text)"
               >
                 <span class="starter-icon" aria-hidden="true">{{
@@ -588,8 +625,25 @@ onMounted(initialize);
             <p class="thread-start">
               这是属于你的旅行对话，随时可以补充或改变想法。
             </p>
+            <template v-if="chatSelected">
+              <template v-for="item in chatView?.messages ?? []" :key="item.id">
+                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small>{{ item.state === 'WITHDRAWN' ? '已撤回处理，原文保留' : '已保存' }}</small></article>
+                <article v-if="item.reply" class="chat-message assistant-message"><span class="assistant-mark" aria-hidden="true">行</span><div class="message-bubble"><p class="dialogue-reply">{{ item.reply }}</p></div></article>
+                <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
+                <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
+                  <h3>请确认这次操作</h3><p>{{ item.operation.description }}</p>
+                  <button :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'CONFIRM')">确认执行</button>
+                  <button class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">取消</button>
+                </section>
+                <div v-if="['PAUSED','CLARIFY','QUEUED','RUNNING'].includes(item.state)" class="dialogue-actions">
+                  <button v-if="['PAUSED','CLARIFY'].includes(item.state)" class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'RETRY')">重试理解</button>
+                  <button class="text-button" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">撤回这条输入</button>
+                </div>
+              </template>
+              <p v-if="chatView?.blocked" class="run-note">有输入待理解或澄清，规划可以继续计算；候选展示与接受暂缓。</p>
+            </template>
             <article
-              v-for="item in messages"
+              v-for="item in messages.filter((m) => !chatView?.messages.some((x) => x.id === m.id))"
               :key="item.id"
               class="chat-message user-message"
             >
@@ -600,7 +654,7 @@ onMounted(initialize);
                 item.state === "APPLIED" ? "已记录" : "已保存"
               }}</small>
             </article>
-            <p v-if="!messages.length" class="muted">正在同步这段旅行对话…</p>
+            <p v-if="!chatSelected && !messages.length" class="muted">正在同步这段旅行对话…</p>
             <div v-if="requirements.length" class="understood-note">
               <span class="assistant-mark" aria-hidden="true">行</span
               ><span
@@ -641,7 +695,7 @@ onMounted(initialize);
             >
               {{ status }}
             </div>
-            <article v-if="candidate" class="candidate-teaser">
+            <article v-if="candidate && !chatView?.blocked && !chatBusy" class="candidate-teaser">
               <div>
                 <span class="eyebrow">{{
                   candidate.candidate.state === "ACCEPTED"
@@ -664,6 +718,10 @@ onMounted(initialize);
           </div>
         </div>
         <div class="chat-bottom">
+          <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
+            <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
+            <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>
+          </div>
           <div v-if="error" class="error banner" role="alert">
             {{ error
             }}<button v-if="retryable" :disabled="busy" @click="retryCommand">
@@ -704,7 +762,7 @@ onMounted(initialize);
             </button>
           </div>
           <ChatComposer
-            v-if="selected"
+            v-if="hasConversation"
             ref="composer"
             v-model="message"
             :disabled="inputDisabled"
@@ -822,7 +880,7 @@ onMounted(initialize);
 
           <section class="panel">
             <h2>推荐候选</h2>
-            <template v-if="candidate">
+            <template v-if="candidate && !chatView?.blocked && !chatBusy">
               <p>
                 依据需求版本
                 {{

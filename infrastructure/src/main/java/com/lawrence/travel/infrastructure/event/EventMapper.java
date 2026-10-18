@@ -39,7 +39,10 @@ public interface EventMapper {
      */
     @Select("""
             SELECT t.id,t.constraint_revision,t.execution_generation,t.current_version_id,t.current_run_id,
-            r.body->>'state' AS state,(t.pending_inputs<>'{}'::jsonb) AS pending_input,t.event_sequence,
+            r.body->>'state' AS state,((t.pending_inputs<>'{}'::jsonb) OR EXISTS(
+              SELECT 1 FROM dialogue_chat dc JOIN dialogue_input di ON di.chat_id=dc.id AND di.user_id=dc.user_id
+              WHERE dc.user_id=t.user_id AND dc.task_id=t.id AND di.state IN ('QUEUED','RUNNING','CLARIFY','PAUSED')
+            )) AS pending_input,t.event_sequence,
             c.payload::text AS requirements,s.payload::text AS itinerary
             FROM travel_task t JOIN travel_constraint_revision c ON c.user_id=t.user_id AND c.task_id=t.id AND c.revision=t.constraint_revision
             LEFT JOIN execution_run r ON r.user_id=t.user_id AND r.task_id=t.id AND r.id=t.current_run_id

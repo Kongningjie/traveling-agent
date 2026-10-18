@@ -33,6 +33,10 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     private final Duration heartbeat;
     private boolean closed;
     private boolean started;
+    private final java.util.List<com.lawrence.travel.application.port.BackgroundWorkSource> auxiliary = new java.util.ArrayList<>();
+    private final Set<Thread> auxiliaryThreads = new HashSet<>();
+    /** @param source 由bootstrap装配的应用收件端口，共用当前轮询和物理运行容量 */
+    public synchronized void register(com.lawrence.travel.application.port.BackgroundWorkSource source) { auxiliary.add(java.util.Objects.requireNonNull(source)); }
 
     /**
      * @param store 唯一持久调度
@@ -60,6 +64,18 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
      */
     public synchronized void tick() {
         if (closed) return;
+        for (var source : auxiliary) {
+            ExecutionResources.RunScope slot;
+            try { slot = resources.openRun(); } catch (RejectedExecutionException full) { break; }
+            java.util.Optional<Runnable> next;
+            try { next = source.claimWork(); } catch (RuntimeException failure) { slot.close(); throw failure; }
+            if (next.isEmpty()) { slot.close(); continue; }
+            var thread = Thread.ofVirtual().name("dialogue-understand").unstarted(() -> {
+                try { next.get().run(); } finally { auxiliaryExited(Thread.currentThread(), slot); }
+            });
+            thread.setUncaughtExceptionHandler((ignored, failure) -> { /* 固定状态由应用持久化，失联请求按租约恢复。 */ });
+            auxiliaryThreads.add(thread); thread.start();
+        }
         store.recover(32);
         for (var hint : store.candidates(32)) {
             if (!executor.supports(hint.type())) continue;
@@ -91,6 +107,8 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
      * 定时器异常仅延迟发现，不写原始异常日志；数据库请求和租约仍是权威。
      */
     private void safeTick() { try { tick(); } catch (RuntimeException failure) { /* 下一轮重新检查，不伪造执行成功。 */ } }
+    /** @param thread 已实际退出的对话线程 @param slot 仅退出后释放物理容量 */
+    private synchronized void auxiliaryExited(Thread thread, ExecutionResources.RunScope slot) { auxiliaryThreads.remove(thread); slot.close(); }
     /**
      * @param work 执行句柄；心跳失败尽力中断，不能延长未知租约
      */
@@ -133,6 +151,8 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
             if (closed) return; closed = true; poller.shutdown(); heartbeats.shutdown();
             for (Group group : groups.values()) for (Work work : group.work) work.requestCancel();
             running = groups.values().stream().flatMap(group -> group.work.stream()).map(work -> work.thread).toList();
+            auxiliaryThreads.forEach(Thread::interrupt);
+            var all = new java.util.ArrayList<>(running); all.addAll(auxiliaryThreads); running = all;
         }
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         try {

@@ -9,6 +9,8 @@ import java.util.UUID;
 
 /** 可靠输入和卡片；写入须参与同一业务事务。 */
 public interface NegotiationStore extends StageProjection {
+    /** @param scope 私有归属 @param input 输入 @param facts 已经校验来源的模型提取结果；保留原文但不重复模型调用 */
+    void interpreted(TaskScope scope, UUID input, List<Negotiation.Fact> facts);
     /**
      * @param scope 归属
      * @param id 输入

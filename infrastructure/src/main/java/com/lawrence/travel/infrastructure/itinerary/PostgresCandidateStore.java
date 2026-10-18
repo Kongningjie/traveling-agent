@@ -104,6 +104,7 @@ public final class PostgresCandidateStore implements CandidateStore {
     }
     /** {@inheritDoc} 展示草案和错误不授予接受资格，旧运行草案不替代当前。 */
     @Override public com.lawrence.travel.application.itinerary.Planning.View latest(TaskScope scope) {
+        if (mapper.dialogueBlocked(scope)) return null;
         var task = tasks.task(scope); require(task != null, NOT_FOUND); String latest = mapper.latest(scope); if (latest == null) return null; UUID id = UUID.fromString(latest);
         var candidate = candidate(scope, id); var result = read(scope, id); var row = engine.run(scope, candidate.runId());
         com.lawrence.travel.domain.itinerary.CostSummary costs;
@@ -255,6 +256,7 @@ public final class PostgresCandidateStore implements CandidateStore {
         String hash = forceRecheck ? json.hash(json.encode(List.of("RECHECK", commandHash(command)))) : commandHash(command);
         var replay = mapper.request(scope, command.acceptanceRequestId());
         if (replay != null) return new Attempt(replay(replay, hash), false);
+        require(!mapper.dialogueBlocked(scope), STALE_VERSION);
         var candidate = candidate(scope, command.candidateId());
         var accepted = mapper.accepted(scope, candidate.id());
         if (accepted != null && !forceRecheck) return receipt(command, hash, replay(accepted, hash), false);

@@ -1,0 +1,575 @@
+{
+  "description": "人工标注的本地评测种子，未调用模型，不代表识别准确率；对象型语句需测试上下文或澄清",
+  "cases": [
+    {
+      "id": "INT-001",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "你好",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "CHAT",
+          "quote": "你好"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-002",
+      "partition": "HOLDOUT",
+      "group": "CONVERSATION",
+      "text": "你能做什么",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "CHAT",
+          "quote": "你能做什么"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-003",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "谢谢你",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "CHAT",
+          "quote": "谢谢你"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-004",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "杭州有哪些值得了解的地方",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "TRAVEL_QA",
+          "quote": "杭州有哪些值得了解的地方"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-005",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "预算六千够吗",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "TRAVEL_QA",
+          "quote": "预算六千够吗"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-006",
+      "partition": "HOLDOUT",
+      "group": "CONVERSATION",
+      "text": "先别改预算，我只是问问六千够不够",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "TRAVEL_QA",
+          "quote": "先别改预算，我只是问问六千够不够"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-007",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "为什么第二天这么安排",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "EXPLAIN_PLAN",
+          "quote": "为什么第二天这么安排"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-008",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "这笔交通费用怎么计算",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "EXPLAIN_PLAN",
+          "quote": "这笔交通费用怎么计算"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-009",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "苏州和杭州哪个更适合慢慢玩",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "COMPARE_OPTIONS",
+          "quote": "苏州和杭州哪个更适合慢慢玩"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-010",
+      "partition": "DEVELOPMENT",
+      "group": "CONVERSATION",
+      "text": "比较一下这两个方案，不要替我选择",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "COMPARE_OPTIONS",
+          "quote": "比较一下这两个方案，不要替我选择"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-011",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "帮我安排杭州三日游",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "START_PLAN",
+          "quote": "帮我安排杭州三日游"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-012",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "想去两个城市，和我一起做个旅行计划",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "START_PLAN",
+          "quote": "想去两个城市，和我一起做个旅行计划"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-013",
+      "partition": "HOLDOUT",
+      "group": "PLANNING",
+      "text": "我们五个人",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "SUPPLEMENT",
+          "quote": "我们五个人"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-014",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "按全组计算",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "SUPPLEMENT",
+          "quote": "按全组计算"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-015",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "不设置预算上限",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "SUPPLEMENT",
+          "quote": "不设置预算上限"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-016",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "还没订酒店和车票",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "SUPPLEMENT",
+          "quote": "还没订酒店和车票"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-017",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "预算改成六千",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "CHANGE_REQUIREMENTS",
+          "quote": "预算改成六千"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-018",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "出发日期改到十一月一日",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "CHANGE_REQUIREMENTS",
+          "quote": "出发日期改到十一月一日"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-019",
+      "partition": "HOLDOUT",
+      "group": "PLANNING",
+      "text": "必须考虑过敏，不能吃花生",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "CHANGE_REQUIREMENTS",
+          "quote": "必须考虑过敏，不能吃花生"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-020",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "第二天安排轻松一点",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "REVISE_ITINERARY",
+          "quote": "第二天安排轻松一点"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-021",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "保留酒店，调整其他安排",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "REVISE_ITINERARY",
+          "quote": "保留酒店，调整其他安排"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-022",
+      "partition": "DEVELOPMENT",
+      "group": "PLANNING",
+      "text": "只换掉已经选中的这个景点",
+      "expected": [
+        {
+          "kind": "PLANNING",
+          "action": "REVISE_ITINERARY",
+          "quote": "只换掉已经选中的这个景点"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-023",
+      "partition": "HOLDOUT",
+      "group": "OPERATION",
+      "text": "停止当前规划",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "STOP",
+          "quote": "停止当前规划"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-024",
+      "partition": "DEVELOPMENT",
+      "group": "OPERATION",
+      "text": "继续当前规划",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "CONTINUE",
+          "quote": "继续当前规划"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-025",
+      "partition": "DEVELOPMENT",
+      "group": "OPERATION",
+      "text": "我要接受当前这份候选方案",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "ACCEPT",
+          "quote": "我要接受当前这份候选方案"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-026",
+      "partition": "HOLDOUT",
+      "group": "OPERATION",
+      "text": "申请恢复我选中的历史版本",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "RESTORE_VERSION",
+          "quote": "申请恢复我选中的历史版本"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-027",
+      "partition": "DEVELOPMENT",
+      "group": "OPERATION",
+      "text": "记住我不吃辣",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "SAVE_PREFERENCE",
+          "quote": "记住我不吃辣"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-028",
+      "partition": "DEVELOPMENT",
+      "group": "OPERATION",
+      "text": "删除我选中的这条长期偏好",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "DELETE_PREFERENCE",
+          "quote": "删除我选中的这条长期偏好"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-029",
+      "partition": "DEVELOPMENT",
+      "group": "OPERATION",
+      "text": "我想授权你决定这道问题",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "AUTHORIZE",
+          "quote": "我想授权你决定这道问题"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-030",
+      "partition": "HOLDOUT",
+      "group": "OPERATION",
+      "text": "这道问题我暂时不决定",
+      "expected": [
+        {
+          "kind": "OPERATION",
+          "action": "UNDECIDED",
+          "quote": "这道问题我暂时不决定"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-031",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "换一下",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "换一下"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-032",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "记住这个",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "记住这个"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-033",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "就这样吧",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "就这样吧"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-034",
+      "partition": "HOLDOUT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "恢复之前的",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "恢复之前的"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-035",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "改成便宜一点的那个",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "改成便宜一点的那个"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-036",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "按刚才那个来",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "按刚才那个来"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-037",
+      "partition": "HOLDOUT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "你替我处理吧",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "你替我处理吧"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-038",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "把那个删掉",
+      "expected": [
+        {
+          "kind": "UNCLEAR",
+          "action": "CLARIFY",
+          "quote": "把那个删掉"
+        }
+      ],
+      "forbidImplicitBusinessWrites": true
+    },
+    {
+      "id": "INT-039",
+      "partition": "DEVELOPMENT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "为什么这么满？帮我减少一个景点，西湖保留",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "EXPLAIN_PLAN",
+          "quote": "为什么这么满？帮我减少一个景点，西湖保留"
+        },
+        {
+          "kind": "PLANNING",
+          "action": "REVISE_ITINERARY",
+          "quote": "为什么这么满？帮我减少一个景点，西湖保留"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    },
+    {
+      "id": "INT-040",
+      "partition": "HOLDOUT",
+      "group": "AMBIGUOUS_OR_MIXED",
+      "text": "先比较一下两个方案，然后把第二天安排轻松一些",
+      "expected": [
+        {
+          "kind": "CONVERSATION",
+          "action": "COMPARE_OPTIONS",
+          "quote": "先比较一下两个方案，然后把第二天安排轻松一些"
+        },
+        {
+          "kind": "PLANNING",
+          "action": "REVISE_ITINERARY",
+          "quote": "先比较一下两个方案，然后把第二天安排轻松一些"
+        }
+      ],
+      "forbidImplicitBusinessWrites": false
+    }
+  ]
+}

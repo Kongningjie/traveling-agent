@@ -48,7 +48,7 @@ public final class NegotiationHandler implements StageHandler {
         var input = json.decode(claim.input(), Input.class);
         var context = store.context(claim.fence().scope(), input.inputId());
         var facts = new ArrayList<>(context.message().facts()); String clarification = ""; boolean outside = false;
-        if (!context.message().text().isBlank()) {
+        if (!context.message().text().isBlank() && !context.message().kind().equals("INTERPRETED")) {
             var parsed = interpreter.interpret(claim.fence().runId(), context);
             if (parsed.facts() == null || parsed.facts().size() > 20) throw new IllegalArgumentException("INTERPRETATION_INVALID");
             for (var fact : parsed.facts()) {

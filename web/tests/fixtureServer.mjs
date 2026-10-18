@@ -33,6 +33,7 @@ let created = null;
 let cardRevision = 1,
     budgetAnswered = false;
 const savedMessages = new Map();
+const dialogueChats = new Map();
 /** @param n 正整数 @returns 固定测试日期，避免依赖真实天气或日历服务。 */
 function date(n) {
     return `2026-11-${String(n).padStart(2, "0")}`;
@@ -142,6 +143,33 @@ const server = createServer(async (request, response) => {
                     authenticated ? syntheticUser : { code: "UNAUTHORIZED" },
                     authenticated ? 200 : 401,
                 );
+            // 以下为确定的本地UI夹具，模拟结果不代表真实模型分类。
+            if (path.startsWith("/api/v1/chats")) {
+                if (!authenticated) return json(response, { code: "UNAUTHORIZED" }, 401);
+                if (request.method === "GET") {
+                    if (path === "/api/v1/chats") return json(response, [...dialogueChats.values()].map((v) => v.chat));
+                    const value = dialogueChats.get(path.split("/")[4]);
+                    return json(response, value ?? { code: "NOT_FOUND" }, value ? 200 : 404);
+                }
+                let raw = ""; for await (const part of request) raw += part;
+                const body = JSON.parse(raw); calls.push({ path, method: request.method, body });
+                const id = path.split("/")[4];
+                let view = dialogueChats.get(id);
+                if (path.endsWith("/link")) {
+                    const old = [...dialogueChats.values()].find((v) => v.chat.taskId === body.taskId);
+                    if (old) return json(response, old);
+                    view = { chat: { id, title: created?.title ?? "本地旅行夹具", taskId: body.taskId }, messages: [], blocked: false };
+                    dialogueChats.set(id, view); return json(response, view);
+                }
+                if (!view) { view = { chat: { id, title: body.text.slice(0, 60), taskId: null }, messages: [], blocked: false }; dialogueChats.set(id, view); }
+                if (path.endsWith("/actions")) {
+                    const m = view.messages.find((m) => m.id === path.split("/")[6]);
+                    if (m) m.state = body.action === "WITHDRAW" ? "WITHDRAWN" : "DONE";
+                    return json(response, view);
+                }
+                if (!view.messages.some((m) => m.id === body.inputId)) view.messages.push({ id: body.inputId, text: body.text, state: body.text === "记住我不吃辣" ? "CONFIRM" : "DONE", reply: "这是本地夹具回复。你可以先咨询，明确规划后再建立旅行任务。", operation: body.text === "记住我不吃辣" ? { action: "SAVE_PREFERENCE", description: "保存长期偏好：饮食不吃辣；适用于所有城市。" } : null, error: "" });
+                return json(response, view);
+            }
             if (path.startsWith("/api/v1/preferences")) {
                 if (!authenticated)
                     return json(response, { code: "UNAUTHORIZED" }, 401);

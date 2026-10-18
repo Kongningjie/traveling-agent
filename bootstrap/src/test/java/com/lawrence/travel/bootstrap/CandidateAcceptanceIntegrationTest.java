@@ -63,6 +63,21 @@ class CandidateAcceptanceIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private BusinessTransactions transactions;
     private final List<UUID> users = new ArrayList<>();
+    /** 未识别自由输入在数据库中隐藏候选并拒绝绕过UI的接受；撤回后恢复原候选资格。 */
+    @Test void dialogueBarrierHidesCandidateAndBlocksAcceptance() {
+        var f = fixture(false); present(f); UUID chat = UUID.randomUUID(); budgets.create(chat);
+        try {
+            jdbc.update("INSERT INTO dialogue_chat(id,user_id,title,task_id,budget_id) VALUES(?,?,'本地屏障测试',?,?)", chat, f.actor().id(), f.scope().taskId(), chat);
+            jdbc.update("INSERT INTO dialogue_input(id,user_id,chat_id,text) VALUES(?,?,?,'预算六千够吗')", UUID.randomUUID(), f.actor().id(), chat);
+            assertThat(candidates.latest(f.scope())).isNull();
+            assertThatThrownBy(() -> accept(itineraries, f, UUID.randomUUID())).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+            assertThat(current(f)).isNull();
+            jdbc.update("UPDATE dialogue_input SET state='WITHDRAWN' WHERE chat_id=?", chat);
+            assertThat(candidates.latest(f.scope()).acceptable()).isTrue();
+        } finally {
+            jdbc.update("DELETE FROM dialogue_input WHERE chat_id=?", chat); jdbc.update("DELETE FROM dialogue_chat WHERE id=?", chat); jdbc.update("DELETE FROM execution_budget WHERE run_id=?", chat);
+        }
+    }
     /**
      * @param actor 身份
      * @param scope 私有任务

@@ -16,6 +16,24 @@ import java.util.UUID;
 
 /** 人工输入用例；消息、取代或继续事件同事务，HTTP 不持有长模型请求。 */
 public final class NegotiationService {
+    /** @param actor 受信用户 @param taskId 已关联任务，可空 @param input 原聊天输入 @param text 完整原文 @param facts 已核实提取项
+     * @return 唯一关联任务；新建、变更失效及已解释标记同事务，既有有效问题内补充沿用原预算 */
+    public UUID applyInterpreted(UserIdentity actor, UUID taskId, UUID input, String text, List<Negotiation.Fact> facts) {
+        return transactions.required(() -> {
+            UUID task = taskId;
+            if (task == null) {
+                String title = text.substring(0, Math.min(60, text.length()));
+                task = travel.create(actor, input.toString(), title, new TravelStore.RevisionContent(List.of(), List.of(), "用户开始规划", "")).task().scope().taskId();
+            }
+            var scope = new TaskScope(actor.id(), task); var current = store.card(scope);
+            var fields = facts.stream().map(Negotiation.Fact::field).collect(java.util.stream.Collectors.toSet());
+            var allowed = current == null ? java.util.Set.<String>of() : current.specs().values().stream().map(Negotiation.QuestionSpec::field).collect(java.util.stream.Collectors.toSet());
+            if (current != null && !facts.isEmpty() && allowed.containsAll(fields)) {
+                answer(actor, task, input, new Negotiation.Response(current.decision().id(), current.decision().revision(), current.decision().constraintRevision(), "ANSWER", java.util.Map.of(), text, java.util.Set.of()));
+            } else sendInternal(actor, scope, input, text, facts);
+            store.interpreted(scope, input, facts); return task;
+        });
+    }
     private final NegotiationStore store;
     private final TravelStorageService travel;
     private final RunService runs;

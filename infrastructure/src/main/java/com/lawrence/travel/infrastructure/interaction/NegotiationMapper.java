@@ -10,6 +10,9 @@ import org.apache.ibatis.annotations.Update;
 
 /** 协商收件箱和历史卡片 SQL；均以服务端用户和任务限定。 */
 public interface NegotiationMapper {
+    /** @param scope 归属 @param id 输入 @param facts 已验证字段JSON @return 更新数；只在新登记事务中标记已解释 */
+    @Update("UPDATE conversation_message SET body=jsonb_set(jsonb_set(body,'{kind}','\"INTERPRETED\"'::jsonb),'{facts}',CAST(#{facts} AS jsonb)) WHERE user_id=#{scope.userId} AND task_id=#{scope.taskId} AND id=#{id} AND status='RECEIVED'")
+    int interpreted(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("facts") String facts);
     /**
      * @param scope 归属
      * @param id 拆分后输入

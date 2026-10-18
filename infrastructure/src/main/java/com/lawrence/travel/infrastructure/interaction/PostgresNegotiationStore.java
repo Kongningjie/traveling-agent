@@ -30,6 +30,8 @@ import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.S
 
 /** 协商收件箱与阶段提交投影；没有网络调用，需求、卡片和采纳记录与引擎 C 事务共同提交。 */
 public final class PostgresNegotiationStore implements NegotiationStore {
+    /** {@inheritDoc} 仅受信应用调用；自由文本的原文已经通过意图解释的来源检查。 */
+    @Override public void interpreted(TaskScope scope, UUID input, List<Negotiation.Fact> facts) { transaction(); checked(mapper.interpreted(scope, input, json.encode(facts))); }
     private final NegotiationMapper mapper;
     private final TravelMapper tasks;
     private final EngineMapper engine;
