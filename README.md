@@ -144,3 +144,13 @@ local profile 提供 `/api/v1/auth/csrf`、`register`、`login`、`me`、`logout
 PostgreSQL 保存账号及 BCrypt 哈希，Redis 保存不含密码的会话及临时认证限流计数。登录轮换会话 ID／CSRF，退出使服务端会话失效；Cookie HttpOnly、SameSite=Lax，只有本地 HTTP 配置关闭 Secure。可用 `scripts/verify-local.ps1 -Scope Identity` 验证本地账号流程，不调用外部服务。登录和注册限流参数位于 `travel.identity`，默认每地址登录 30 次／分钟、每账号 10 次／分钟、注册 10 次／分钟。
 
 本阶段仅交付后端认证，前端登录页面及旅行资源接口后续接入。smoke 不提供真实登录；已有 app 容器未自动重建，不代表运行中镜像已更新。
+
+## 必要产物与本地恢复
+
+普通工具响应、网页文本、会话、检查点和JSON阶段产物继续以PostgreSQL为权威存储。独立需展示的文本／JSON产物保留原始UTF-8字节及哈希；图片、PDF和实际产生的必要框架文件才存文件卷。框架文件不可下载，不增加附件上传业务。`GET /api/v1/artifacts/{id}`要求所属用户会话，限10MiB、限定类型、附件下载、禁止缓存，读取时核对大小和SHA256；缺失或损坏明确失败。
+
+宿主机文件根默认`.runtime/artifacts`，Compose后端为`/var/lib/traveling-agent/artifacts`，与可丢弃的`.runtime/harness`分离。文件落盘及索引登记与孤儿回收使用PostgreSQL事务锁协作；仅回收24小时之前的无引用受管文件，不自动删除未知文件或有效附件。回收仅为受信维护应用入口，无HTTP／Agent工具入口。
+
+停止所有宿主机执行器后，可用PowerShell 7运行`./scripts/backup-local.ps1 -Action Backup -Directory .runtime/backups/manual-001 -Quiesced`。脚本短暂停止运行中的容器后端，备份数据库与必要文件，随后恢复后端运行状态；目标必须为新目录。宿主机文件模式另传`-FilesDirectory .runtime/artifacts`。备份含私有数据，应保存在受限本地目录；不会包含`.env`或Redis登录会话，恢复后重新登录。
+
+运行`./scripts/backup-local.ps1 -Action Verify -Directory .runtime/backups/manual-001`，会在随机临时数据库和临时卷中实际恢复，逐表比对内容指纹并核对每个必要文件引用的大小与哈希，结束清理临时资源；不会覆盖当前源库或原文件卷。该脚本是本地恢复演练，云端备份、加密存放、RPO/RTO及正式切换恢复流程留待部署阶段。`./scripts/verify-local.ps1 -Scope Artifact`覆盖本地存储、隔离、回收锁及备份恢复，不调用真实外部服务。

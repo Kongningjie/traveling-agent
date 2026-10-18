@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -47,7 +47,8 @@ try {
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
-    $selectedTest = if ($Scope -eq 'Context') { '-Dtest=ContextIntegrationTest' }
+    $selectedTest = if ($Scope -eq 'Artifact') { '-Dtest=ArtifactIntegrationTest' }
+        elseif ($Scope -eq 'Context') { '-Dtest=ContextIntegrationTest' }
         elseif ($Scope -eq 'Preference') { '-Dtest=PreferenceIntegrationTest' }
         elseif ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
         elseif ($Scope -eq 'Travel') { '-Dtest=TravelStorageIntegrationTest' }
@@ -58,8 +59,8 @@ try {
         elseif ($Scope -eq 'Research') { '-Dtest=ResearchIntegrationTest' }
         elseif ($Scope -eq 'Planning') { '-Dtest=PlanningIntegrationTest' }
         elseif ($Scope -eq 'M1') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest' }
-        elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest' }
-        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest' }
+        elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
+        else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
     if ($TestMethod) { $selectedTest += "#$TestMethod" }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
         $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test

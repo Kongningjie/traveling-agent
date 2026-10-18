@@ -102,6 +102,7 @@ public class IdentitySecurityConfiguration {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/tasks/*/messages", "/api/v1/tasks/*/decision", "/api/v1/tasks/*/evidence", "/api/v1/tasks/*/candidate", "/api/v1/tasks", "/api/v1/tasks/*/versions", "/api/v1/tasks/*/versions/*", "/api/v1/tasks/*/version-diff").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/tasks", "/api/v1/tasks/*/messages", "/api/v1/tasks/*/answers", "/api/v1/tasks/*/accept", "/api/v1/tasks/*/candidate/revalidate", "/api/v1/tasks/*/versions/*/restore", "/api/v1/tasks/*/runs/*/cancel").authenticated()
                         .requestMatchers("/api/v1/preferences", "/api/v1/preferences/**").authenticated()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/artifacts/*").authenticated()
                         .anyRequest().denyAll())
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contexts))
                 .csrf(csrf -> csrf.csrfTokenRepository(tokens).csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))

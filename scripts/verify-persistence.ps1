@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    重新创建本项目容器，校验 PostgreSQL 与 Redis 的命名卷数据保留。
+    重新创建本项目容器，校验 PostgreSQL、Redis 与必要文件的命名卷数据保留。
 .DESCRIPTION
     会短暂中断本项目四个容器。写入随机数据库表和 Redis key 后重建容器，
     再校验内容并清理本轮探针；不删除卷，不修改已有业务表，不打印凭证。
@@ -16,6 +16,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $probeId = [Guid]::NewGuid().ToString('N')
 $tableName = 'm0_probe_' + $probeId
 $redisKey = 'traveling-agent:verification:' + $probeId
+$fileProbe = '/var/lib/traveling-agent/verification-' + $probeId
 
 <#
 .SYNOPSIS
@@ -41,6 +42,8 @@ try {
         'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"', 'probe', $sql)
     Invoke-Compose -DockerArguments @('exec', '-T', 'redis', 'sh', '-c',
         'export REDISCLI_AUTH="$REDIS_PASSWORD"; exec redis-cli SET "$1" "$2" EX 600', 'probe', $redisKey, $probeId)
+    Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'sh', '-c',
+        'printf %s "$2" > "$1"', 'probe', $fileProbe, $probeId)
 
     # 重新创建本项目四个容器，保留命名卷，比仅重启进程更严格。
     Invoke-Compose -DockerArguments @('--profile', 'app', 'up', '-d', '--force-recreate', '--wait')
@@ -51,9 +54,12 @@ try {
         'export REDISCLI_AUTH="$REDIS_PASSWORD"; exec redis-cli --raw GET "$1"', 'probe', $redisKey)
     if (($pgValue -join '').Trim() -ne $probeId) { throw 'PostgreSQL 探针未恢复。' }
     if (($redisValue -join '').Trim() -ne $probeId) { throw 'Redis 探针未恢复。' }
-    Write-Output 'PASS: PostgreSQL and Redis data survive container recreation with named volumes.'
+    $fileValue = Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'cat', $fileProbe)
+    if (($fileValue -join '').Trim() -ne $probeId) { throw '必要文件卷探针未恢复。' }
+    Write-Output 'PASS: PostgreSQL, Redis and required file data survive container recreation with named volumes.'
 } finally {
     try {
+        Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'rm', '-f', $fileProbe) | Out-Null
         # 仅清理本轮生成的随机探针，保留所有业务数据与命名卷。
         Invoke-Compose -DockerArguments @('exec', '-T', 'postgres', 'sh', '-c',
             'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"',
