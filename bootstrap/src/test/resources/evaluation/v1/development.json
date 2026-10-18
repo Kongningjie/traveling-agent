@@ -1,0 +1,229 @@
+[
+  {
+    "id": "E01",
+    "partition": "DEVELOPMENT",
+    "scenario": "INITIAL",
+    "input": "两人北京单日游，先给一个候选，由我确认。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "1",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E02",
+    "partition": "DEVELOPMENT",
+    "scenario": "PARTIAL",
+    "input": "预算怎么算还没想好，先选部分建议，再自由补充。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E03",
+    "partition": "DEVELOPMENT",
+    "scenario": "MULTICITY",
+    "input": "北京、济南、青岛六天，住宿和两次已订转场必须衔接。",
+    "facts": {
+      "cities": "北京,济南,青岛",
+      "startDate": "2026-11-01",
+      "days": "6",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E04",
+    "partition": "DEVELOPMENT",
+    "scenario": "BUDGET",
+    "input": "把原预算从1000降到20，重新核对费用。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E05",
+    "partition": "DEVELOPMENT",
+    "scenario": "LOW_INTENSITY",
+    "input": "低强度同行，每天休息，14点预约锁定，内部步行未知必须提示。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E06",
+    "partition": "DEVELOPMENT",
+    "scenario": "RAIN_PATCH",
+    "input": "只替换第一天受雨影响的休息安排，保留第二天活动和锁定预约。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40",
+      "changedTitle": "室内休息点"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E07",
+    "partition": "DEVELOPMENT",
+    "scenario": "EXPIRED",
+    "input": "资料查询曾失败，后来得到已过期来源，不能当作已核实。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "1"
+    }
+  },
+  {
+    "id": "E08",
+    "partition": "DEVELOPMENT",
+    "scenario": "PREFERENCE",
+    "input": "保存慢节奏，更新为适中，再删除；本次明确的休息要求保留。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40",
+      "preferenceInitial": "慢节奏",
+      "preferenceUpdated": "适中"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  }
+]

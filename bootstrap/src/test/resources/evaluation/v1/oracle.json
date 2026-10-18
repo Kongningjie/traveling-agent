@@ -1,0 +1,88 @@
+{
+  "E01": {
+    "outcome": "CANDIDATE_REQUIRES_CONFIRMATION",
+    "required": [
+      "STRUCTURE_VALID",
+      "POINTER_UNCHANGED"
+    ]
+  },
+  "E02": {
+    "outcome": "CLARIFICATION_PARTIAL",
+    "required": [
+      "QUESTION_REMAINS",
+      "FREE_TEXT_ACCEPTED"
+    ]
+  },
+  "E03": {
+    "outcome": "MULTICITY_STRUCTURE",
+    "required": [
+      "CITY_DAY_COVERAGE",
+      "LODGING_PRESENT",
+      "TRANSFERS_PRESENT"
+    ]
+  },
+  "E04": {
+    "outcome": "BUDGET_CONFLICT",
+    "required": [
+      "BUDGET_RECALCULATED",
+      "BUDGET_BLOCKED"
+    ]
+  },
+  "E05": {
+    "outcome": "UNKNOWN_BLOCKED",
+    "required": [
+      "UNKNOWN_NOT_PASS",
+      "FIXED_PRESERVED"
+    ]
+  },
+  "E06": {
+    "outcome": "PATCH_SCOPED",
+    "required": [
+      "PATCH_WITHIN_SCOPE",
+      "UNAFFECTED_PRESERVED"
+    ]
+  },
+  "E07": {
+    "outcome": "EVIDENCE_EXPIRED",
+    "required": [
+      "EXPIRED_REJECTED",
+      "FAILURE_NOT_FACT"
+    ]
+  },
+  "E08": {
+    "outcome": "PREFERENCE_DELETED",
+    "required": [
+      "DELETE_PERSISTED",
+      "CURRENT_REQUIREMENT_REMAINS"
+    ]
+  },
+  "E09": {
+    "outcome": "FIXED_CONFLICT",
+    "required": [
+      "FIXED_CONFLICT_REPORTED",
+      "NO_SILENT_RELAXATION"
+    ]
+  },
+  "E10": {
+    "outcome": "OLD_BINDING_REJECTED",
+    "required": [
+      "OLD_COMMIT_REJECTED",
+      "OLD_ANSWER_REJECTED"
+    ]
+  },
+  "E11": {
+    "outcome": "CONTEXT_PROTECTED",
+    "required": [
+      "SUMMARY_PERSISTED",
+      "PROTECTED_FIELDS_REMAIN",
+      "DELETED_PREFERENCE_ABSENT"
+    ]
+  },
+  "E12": {
+    "outcome": "DRAFT_BLOCKED",
+    "required": [
+      "BLOCKING_ISSUES_VISIBLE",
+      "POINTER_UNCHANGED"
+    ]
+  }
+}

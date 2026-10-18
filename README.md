@@ -155,6 +155,16 @@ PostgreSQL 保存账号及 BCrypt 哈希，Redis 保存不含密码的会话及�
 
 运行`./scripts/backup-local.ps1 -Action Verify -Directory .runtime/backups/manual-001`，会在随机临时数据库和临时卷中实际恢复，逐表比对内容指纹并核对每个必要文件引用的大小与哈希，结束清理临时资源；不会覆盖当前源库或原文件卷。该脚本是本地恢复演练，云端备份、加密存放、RPO/RTO及正式切换恢复流程留待部署阶段。`./scripts/verify-local.ps1 -Scope Artifact`覆盖本地存储、隔离、回收锁及备份恢复，不调用真实外部服务。
 
+## 固定场景本地基线
+
+PowerShell 7 执行 `./scripts/evaluate-local.ps1`：默认仅运行 8 个开发场景；显式使用 `-IncludeHoldout -RepeatRepresentatives` 时包含 4 个留出场景，并将 E01、E03、E06、E11 各运行到 3 次，共 20 条本地契约记录。场景、合成种子与程序裁判位于 `bootstrap/src/test/resources/evaluation/v1`，原始 UTF-8／LF 字节经过 SHA256 校验；变动会拒绝执行，不自动更新预期。
+
+该入口使用真实本机 PostgreSQL 和受控本地提取／压缩替身，强制关闭真实供应商调用。测试只清理本轮随机用户；会短暂停止正在运行的容器后端以避免 Worker 争抢，结束恢复。JSON／Markdown 报告保存在被忽略的 `.runtime/evaluations/contract-*`，包含分区、次数、检查失败码、耗时、数据指纹和源码指纹，不保存控制台或 Docker 日志。不要将这些本地报告强制加入 Git。
+
+这不是完整模型 E2E 或质量评分：三城市用例当前只探测结构，局部修改只探测 Patch 契约；自然语言提取、真实规划和独立质量审查没有执行。真实模型、真实工具逐场景标为 `NOT_RUN`，未运行的 Token／延迟不补零。真实模型评测端口和独立裁判已定义，但实际模型执行适配、稳定后的重复试验、全量／局部质量对照及浏览器演示仍待验收；本地通过不表示 DEV-0024／M4 全部完成。以后真实调用仍须取得用户对当次范围的明确授权，不能因模型 Key 已配置或运行此脚本而启用。
+
+依赖与配置以父 POM、各模块 POM、Wrapper、`web/package-lock.json` 及 `config/` 受管示例为准；报告记录当次源码指纹，运行中的未提交版本不能只凭父提交号复现。详细覆盖矩阵及后续验收步骤见本地 [评测与验收规范](docs/standards/评测与验收规范.md)。
+
 ## 本地故障与资源验收
 
 `./scripts/verify-local.ps1 -Scope Fault`运行输入及阶段事务硬退出、失联租约、取消迟到结果、重复提交、并发接受、SSE断线与会话失效、偏好删除、上下文及附件恢复、模型超时和限流、免费额度暂停等确定性实验。测试只使用本地PostgreSQL／Redis、回环HTTP和受控模型替身；不调用真实供应商。测试脚本会暂时停止运行中的容器后端，避免其Worker争抢测试任务，结束后恢复原运行状态；其他宿主机执行器应先停止。

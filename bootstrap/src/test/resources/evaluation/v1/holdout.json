@@ -1,0 +1,115 @@
+[
+  {
+    "id": "E09",
+    "partition": "HOLDOUT",
+    "scenario": "TRANSFER_CONFLICT",
+    "input": "南昌转九江再到景德镇，转场延后，后续预约不能擅自移动。",
+    "facts": {
+      "cities": "南昌,九江,景德镇",
+      "startDate": "2026-11-01",
+      "days": "6",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "13",
+      "changedHour": "16",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E10",
+    "partition": "HOLDOUT",
+    "scenario": "SUPERSEDE",
+    "input": "旧执行未完成时增加新的要求，旧回答和旧候选必须失效。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1000",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40",
+      "newRequirement": "改为宽松节奏"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E11",
+    "partition": "HOLDOUT",
+    "scenario": "COMPACTION",
+    "input": "历史对话压缩后预算、锁定预约与有限授权必须保留；删除偏好不能复活。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "800",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "50"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  },
+  {
+    "id": "E12",
+    "partition": "HOLDOUT",
+    "scenario": "UNSOLVABLE",
+    "input": "关键步行数据未知且预算不足，不放宽硬约束，保留待解决草案。",
+    "facts": {
+      "cities": "北京",
+      "startDate": "2026-11-01",
+      "days": "2",
+      "travelers": "2",
+      "budgetCny": "1",
+      "unitCost": "20",
+      "changedBudgetCny": "20",
+      "fixedHour": "14",
+      "changedHour": "15",
+      "historyMessages": "40"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "openingHours": "09:00-17:00",
+      "price": "20",
+      "routeMinutes": "60",
+      "weather": "UNKNOWN",
+      "walking": "UNKNOWN",
+      "url": "https://seed.example.invalid/evaluation",
+      "lifetimeSeconds": "60"
+    }
+  }
+]

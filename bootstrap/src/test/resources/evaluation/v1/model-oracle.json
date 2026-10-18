@@ -1,0 +1,88 @@
+{
+  "E01": {
+    "outcome": "SUCCEEDED",
+    "required": [
+      "CANDIDATE_PRESENTED",
+      "EXPLICIT_ACCEPTANCE"
+    ]
+  },
+  "E02": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "PARTIAL_ANSWER_REMAINS",
+      "NO_EXTRA_AUTHORIZATION"
+    ]
+  },
+  "E03": {
+    "outcome": "WAITING_ACCEPTANCE",
+    "required": [
+      "CITY_DAY_COVERAGE",
+      "LODGING_PRESENT",
+      "TRANSFERS_PRESENT",
+      "PROGRAM_VALIDATION_PASS"
+    ]
+  },
+  "E04": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "CURRENT_BUDGET_RESPECTED",
+      "BASE_NOT_AUTO_REPLACED"
+    ]
+  },
+  "E05": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "UNKNOWN_NOT_ACCEPTED_AS_FACT",
+      "FIXED_NOT_RELAXED"
+    ]
+  },
+  "E06": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "BASE_NOT_AUTO_REPLACED",
+      "UNAFFECTED_PRESERVED"
+    ]
+  },
+  "E07": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "EXPIRED_NOT_ACCEPTED",
+      "FAILURE_NOT_FACT"
+    ]
+  },
+  "E08": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "PREFERENCE_DELETED",
+      "CURRENT_REQUIREMENTS_PRESERVED"
+    ]
+  },
+  "E09": {
+    "outcome": "WAITING_USER",
+    "required": [
+      "FIXED_NOT_RELAXED",
+      "CONFLICT_EXPLAINED"
+    ]
+  },
+  "E10": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "OLD_EXECUTION_SUPERSEDED",
+      "CURRENT_GENERATION_ONLY"
+    ]
+  },
+  "E11": {
+    "outcome": "WAITING_USER|WAITING_ACCEPTANCE",
+    "required": [
+      "DELETED_PREFERENCE_ABSENT",
+      "CURRENT_REQUIREMENTS_PRESERVED"
+    ]
+  },
+  "E12": {
+    "outcome": "WAITING_USER",
+    "required": [
+      "NO_UNVALIDATED_ACCEPTANCE",
+      "BLOCKING_ISSUES_RETAINED"
+    ]
+  }
+}

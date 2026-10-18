@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow', 'Fault')) { throw '方法选择只能用于单一测试类作用域。' }
+if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow', 'Fault', 'Evaluation')) { throw '方法选择只能用于单一测试类作用域。' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $projectRoot '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -54,7 +54,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'Fault') { '-Dtest=ExecutionEngineIntegrationTest,BudgetLedgerIntegrationTest,RunEventIntegrationTest,CandidateAcceptanceIntegrationTest,TravelStorageIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,LocalModelFaultTest' }
+    $selectedTest = if ($Scope -eq 'Evaluation') { '-Dtest=EvaluationRunnerTest,EvaluationBaselineTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Fault') { '-Dtest=ExecutionEngineIntegrationTest,BudgetLedgerIntegrationTest,RunEventIntegrationTest,CandidateAcceptanceIntegrationTest,TravelStorageIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,LocalModelFaultTest' }
         elseif ($Scope -eq 'Artifact') { '-Dtest=ArtifactIntegrationTest' }
         elseif ($Scope -eq 'Context') { '-Dtest=ContextIntegrationTest' }
         elseif ($Scope -eq 'Preference') { '-Dtest=PreferenceIntegrationTest' }
