@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, extname, relative, isAbsolute } from "node:path";
+import { randomUUID } from "node:crypto";
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const task = "00000000-0000-4000-8000-000000000001",
     second = "00000000-0000-4000-8000-000000000002";
@@ -13,17 +14,24 @@ const base = "00000000-0000-4000-8000-000000000010",
 const run = "00000000-0000-4000-8000-000000000020",
     question = "00000000-0000-4000-8000-000000000030",
     option = "00000000-0000-4000-8000-000000000031";
+const scopeQuestion = "00000000-0000-4000-8000-000000000032",
+    scopeOption = "00000000-0000-4000-8000-000000000033";
 let sequence = 1,
     authenticated = true,
     current = base,
     generation = 1,
-    state = "WAITING_ACCEPTANCE",
+    state = "WAITING_USER",
     stale = false,
     cardVisible = true;
 let preferenceRevision = 0;
-const preferenceEntries = new Map(), preferenceReceipts = new Map();
+const preferenceEntries = new Map(),
+    preferenceReceipts = new Map();
 const calls = [],
-    streams = new Set();
+    streams = new Map();
+let created = null;
+let cardRevision = 1,
+    budgetAnswered = false;
+const savedMessages = new Map();
 /** @param n 正整数 @returns 固定测试日期，避免依赖真实天气或日历服务。 */
 function date(n) {
     return `2026-11-${String(n).padStart(2, "0")}`;
@@ -70,7 +78,8 @@ candidateTrip.items[0].title = "<img src=x onerror=alert(1)>测试文字应转�
 function version(id) {
     return {
         snapshotId: id,
-        baseVersionId: id === next ? base : null,
+        baseVersionId:
+            id === next ? (created && current === null ? null : base) : null,
         constraintRevision: 1,
         payloadHash: "a".repeat(64),
     };
@@ -86,9 +95,9 @@ function json(response, body, status = 200) {
 /** 递增合成水位并触发SSE，事件不包含用户原文。 */
 function changed() {
     sequence++;
-    for (const stream of streams)
+    for (const [stream, taskId] of streams)
         stream.write(
-            `id: ${task}:${sequence}\nevent: run-event\ndata: ${JSON.stringify({ id: `${task}:${sequence}`, sequence: String(sequence), runId: run, generation, type: "RUN_STATUS", sourceType: "RUN_QUEUED", state })}\n\n`,
+            `id: ${taskId}:${sequence}\nevent: run-event\ndata: ${JSON.stringify({ id: `${taskId}:${sequence}`, sequence: String(sequence), runId: run, generation, type: "RUN_STATUS", sourceType: "RUN_QUEUED", state })}\n\n`,
         );
 }
 /** 处理仅本机夹具的静态文件及模拟API，不调用供应商。 */
@@ -104,6 +113,9 @@ const server = createServer(async (request, response) => {
                     selectedCount: Object.keys(c.body?.response?.selected ?? {})
                         .length,
                     requestId: c.body?.requestId ?? c.body?.inputId,
+                    text: c.body?.text ?? c.body?.response?.text,
+                    factsCount: c.body?.facts?.length,
+                    authorizationCount: c.body?.response?.authorization?.length,
                 })),
                 current,
                 state,
@@ -132,18 +144,49 @@ const server = createServer(async (request, response) => {
                     authenticated ? 200 : 401,
                 );
             if (path.startsWith("/api/v1/preferences")) {
-                if (!authenticated) return json(response, {code:"UNAUTHORIZED"}, 401);
-                const view = () => ({version:{userId:"synthetic-user",revision:preferenceRevision}, entries:[...preferenceEntries.values()].filter(p=>p.state!=="DELETED")});
+                if (!authenticated)
+                    return json(response, { code: "UNAUTHORIZED" }, 401);
+                const view = () => ({
+                    version: {
+                        userId: "synthetic-user",
+                        revision: preferenceRevision,
+                    },
+                    entries: [...preferenceEntries.values()].filter(
+                        (p) => p.state !== "DELETED",
+                    ),
+                });
                 if (request.method === "GET") return json(response, view());
-                let text=""; for await (const part of request) text += part;
-                const body=JSON.parse(text); calls.push({path, method:request.method, body});
-                if (preferenceReceipts.has(body.requestId)) return json(response, view());
-                if(body.revision!==preferenceRevision) return json(response,{code:"STALE_VERSION"},409);
-                const id=body.id ?? path.split("/")[4], old=preferenceEntries.get(id);
-                if(request.method==="DELETE") preferenceEntries.set(id,{...old,value:"",state:"DELETED"});
-                else if(path.endsWith("/confirm")) preferenceEntries.set(id,{...old,state:"CONFIRMED"});
-                else preferenceEntries.set(id,{id,category:body.category,value:body.value,city:body.city??"",source:body.suggestion?"SUGGESTION":"USER",state:body.suggestion?"PENDING":"CONFIRMED",updatedAt:"2026-10-17T12:00:00Z"});
-                preferenceRevision++; preferenceReceipts.set(body.requestId,true); return json(response,view());
+                let text = "";
+                for await (const part of request) text += part;
+                const body = JSON.parse(text);
+                calls.push({ path, method: request.method, body });
+                if (preferenceReceipts.has(body.requestId))
+                    return json(response, view());
+                if (body.revision !== preferenceRevision)
+                    return json(response, { code: "STALE_VERSION" }, 409);
+                const id = body.id ?? path.split("/")[4],
+                    old = preferenceEntries.get(id);
+                if (request.method === "DELETE")
+                    preferenceEntries.set(id, {
+                        ...old,
+                        value: "",
+                        state: "DELETED",
+                    });
+                else if (path.endsWith("/confirm"))
+                    preferenceEntries.set(id, { ...old, state: "CONFIRMED" });
+                else
+                    preferenceEntries.set(id, {
+                        id,
+                        category: body.category,
+                        value: body.value,
+                        city: body.city ?? "",
+                        source: body.suggestion ? "SUGGESTION" : "USER",
+                        state: body.suggestion ? "PENDING" : "CONFIRMED",
+                        updatedAt: "2026-10-17T12:00:00Z",
+                    });
+                preferenceRevision++;
+                preferenceReceipts.set(body.requestId, true);
+                return json(response, view());
             }
             if (request.method === "POST") {
                 let text = "";
@@ -185,13 +228,76 @@ const server = createServer(async (request, response) => {
                     );
                 }
                 if (path.endsWith("/answers")) {
-                    cardVisible = false;
+                    // 只供UI流程：选预算口径但未补范围时保留另一问题；不声称做了LLM语义理解。
+                    if (
+                        !cardVisible ||
+                        body.response?.revision !== cardRevision
+                    )
+                        return json(response, { code: "STALE_VERSION" }, 409);
+                    if (["REJECT", "UNDECIDED"].includes(body.response?.action))
+                        return json(response, { status: "RECORDED" }, 202);
+                    budgetAnswered =
+                        Boolean(body.response?.selected?.[question]) ||
+                        budgetAnswered;
+                    cardVisible =
+                        !body.response?.text?.trim() &&
+                        !body.response?.selected?.[scopeQuestion];
+                    cardRevision++;
+                    state = cardVisible ? "WAITING_USER" : "WAITING_ACCEPTANCE";
+                    const id = path.split("/")[4];
+                    savedMessages.set(id, [
+                        ...(savedMessages.get(id) ?? []),
+                        {
+                            id: randomUUID(),
+                            kind: "ANSWER",
+                            text:
+                                body.response?.text || "已提交选择：按全组总额",
+                            facts: [],
+                            state: "APPLIED",
+                        },
+                    ]);
                     changed();
                     return json(response, { status: "RECORDED" }, 202);
                 }
                 if (path.endsWith("/messages")) {
+                    const id = path.split("/")[4];
+                    savedMessages.set(id, [
+                        ...(savedMessages.get(id) ?? []),
+                        {
+                            id: randomUUID(),
+                            kind: "CHANGE",
+                            text: body.text,
+                            facts: body.facts ?? [],
+                            state: "APPLIED",
+                        },
+                    ]);
+                    state = "WAITING_USER";
+                    cardVisible = true;
+                    generation++;
+                    cardRevision++;
+                    budgetAnswered = false;
                     changed();
                     return json(response, { status: "RECEIVED" }, 202);
+                }
+                if (path === "/api/v1/tasks") {
+                    created = { id: randomUUID(), title: body.title };
+                    savedMessages.set(created.id, [
+                        {
+                            id: randomUUID(),
+                            kind: "CHANGE",
+                            text: body.text,
+                            facts: body.facts ?? [],
+                            state: "APPLIED",
+                        },
+                    ]);
+                    state = "WAITING_USER";
+                    cardVisible = true;
+                    generation++;
+                    cardRevision++;
+                    budgetAnswered = false;
+                    current = null;
+                    changed();
+                    return json(response, { taskId: created.id }, 202);
                 }
                 return json(response, { taskId: task }, 202);
             }
@@ -200,29 +306,44 @@ const server = createServer(async (request, response) => {
             if (path === "/api/v1/tasks")
                 return json(
                     response,
-                    [task, second].map((id, i) => ({
-                        title: i ? "单城市测试任务" : "本地夹具 · 三城市十天",
-                        task: {
-                            scope: { taskId: id },
-                            constraintRevision: 1,
-                            currentVersionId: base,
-                        },
-                    })),
+                    [...(created ? [created.id] : []), task, second].map(
+                        (id) => ({
+                            title:
+                                id === created?.id
+                                    ? created.title
+                                    : id === second
+                                      ? "单城市测试任务"
+                                      : "本地夹具 · 三城市十天",
+                            task: {
+                                scope: { taskId: id },
+                                constraintRevision: 1,
+                                currentVersionId:
+                                    id === created?.id ? current : base,
+                            },
+                        }),
+                    ),
                 );
             const isSecond = path.includes(second);
             if (path.endsWith("/view"))
                 return json(response, {
-                    taskId: isSecond ? second : task,
+                    taskId: path.split("/")[4],
                     constraintRevision: 1,
                     generation,
                     currentVersionId: current,
                     runId: run,
                     state,
                     pendingInput: false,
-                    cursor: `${isSecond ? second : task}:${sequence}`,
+                    cursor: `${path.split("/")[4]}:${sequence}`,
                     requirements: {
                         requirements: [
-                            {id:"synthetic-pace",field:"pace",value:"合成建议：轻松",kind:"SOFT",source:"USER",targetIds:[]},
+                            {
+                                id: "synthetic-pace",
+                                field: "pace",
+                                value: "合成建议：轻松",
+                                kind: "SOFT",
+                                source: "USER",
+                                targetIds: [],
+                            },
                             {
                                 id: "req",
                                 field: "cities",
@@ -233,18 +354,26 @@ const server = createServer(async (request, response) => {
                             },
                         ],
                     },
-                    itinerary: current === next ? candidateTrip : trip,
+                    itinerary:
+                        current === null
+                            ? null
+                            : current === next
+                              ? candidateTrip
+                              : trip,
                 });
             if (path.endsWith("/messages"))
-                return json(response, [
-                    {
-                        id: "message",
-                        kind: "CHANGE",
-                        text: "这是一份本地合成旅行任务，用于验证界面。",
-                        facts: [],
-                        state: "APPLIED",
-                    },
-                ]);
+                return json(
+                    response,
+                    savedMessages.get(path.split("/")[4]) ?? [
+                        {
+                            id: "message",
+                            kind: "CHANGE",
+                            text: "这是一份本地合成旅行任务，用于验证界面。",
+                            facts: [],
+                            state: "APPLIED",
+                        },
+                    ],
+                );
             if (path.endsWith("/decision"))
                 return json(
                     response,
@@ -254,18 +383,34 @@ const server = createServer(async (request, response) => {
                                   id: "decision",
                                   runId: run,
                                   generation,
-                                  revision: 1,
+                                  revision: cardRevision,
                                   constraintRevision: 1,
                                   state: "OPEN",
                                   remaining: {
-                                      [question]: {
-                                          id: question,
-                                          prompt: "预算口径由你选择",
-                                          options: { [option]: "按全组总额" },
-                                          recommendedOption: option,
+                                      ...(!budgetAnswered
+                                          ? {
+                                                [question]: {
+                                                    id: question,
+                                                    prompt: "预算口径由你选择",
+                                                    options: {
+                                                        [option]: "按全组总额",
+                                                    },
+                                                    recommendedOption: option,
+                                                },
+                                            }
+                                          : {}),
+                                      [scopeQuestion]: {
+                                          id: scopeQuestion,
+                                          prompt: "预算主要想包含哪些开支？",
+                                          options: {
+                                              [scopeOption]: "先只算游玩和吃饭",
+                                          },
+                                          recommendedOption: null,
                                       },
                                   },
-                                  allowedAuthorizationScope: [question],
+                                  allowedAuthorizationScope: budgetAnswered
+                                      ? [scopeQuestion]
+                                      : [question, scopeQuestion],
                               },
                               specs: {
                                   [question]: {
@@ -273,24 +418,42 @@ const server = createServer(async (request, response) => {
                                       reason: "方便比较整次旅行开支",
                                       tradeoff: "选择后仍需明确包含项目",
                                   },
+                                  [scopeQuestion]: {
+                                      field: "budgetScope",
+                                      reason: "交通与住宿也可以单独考虑",
+                                      tradeoff:
+                                          "现在不确定，也可以直接说说自己的想法",
+                                  },
                               },
                           }
                         : null,
                 );
             if (path.endsWith("/candidate"))
-                return json(response, {
-                    candidate: {
-                        candidateId: "synthetic-candidate",
-                        version: version(next),
-                        snapshot: candidateTrip,
-                        state: current === next ? "ACCEPTED" : "PRESENTED",
-                        validation: { conclusion: "PASS", issues: [] },
-                        review: { conclusion: "PASS", issues: [] },
-                    },
-                    costs: { lowerCny: 0, upperCny: null },
-                    acceptable:
-                        current !== next && state === "WAITING_ACCEPTANCE",
-                });
+                return json(
+                    response,
+                    ["WAITING_ACCEPTANCE", "SUCCEEDED"].includes(state)
+                        ? {
+                              candidate: {
+                                  candidateId: "synthetic-candidate",
+                                  version: version(next),
+                                  snapshot: candidateTrip,
+                                  state:
+                                      current === next
+                                          ? "ACCEPTED"
+                                          : "PRESENTED",
+                                  validation: {
+                                      conclusion: "PASS",
+                                      issues: [],
+                                  },
+                                  review: { conclusion: "PASS", issues: [] },
+                              },
+                              costs: { lowerCny: 0, upperCny: null },
+                              acceptable:
+                                  current !== next &&
+                                  state === "WAITING_ACCEPTANCE",
+                          }
+                        : null,
+                );
             if (path.endsWith("/evidence"))
                 return json(response, [
                     {
@@ -343,7 +506,7 @@ const server = createServer(async (request, response) => {
                     "Cache-Control": "no-cache",
                 });
                 response.write(": synthetic local fixture\n\n");
-                streams.add(response);
+                streams.set(response, path.split("/")[4]);
                 request.on("close", () => streams.delete(response));
                 return;
             }
@@ -367,8 +530,11 @@ const server = createServer(async (request, response) => {
         json(response, { code: "FIXTURE_ERROR" }, 500);
     }
 });
-server.listen(4189, "127.0.0.1", () =>
+const port = Number(process.env.TRAVEL_UI_FIXTURE_PORT ?? 4189);
+if (!Number.isInteger(port) || port < 1024 || port > 65535)
+    throw new Error("INVALID_LOCAL_FIXTURE_PORT");
+server.listen(port, "127.0.0.1", () =>
     process.stdout.write(
-        "Local synthetic UI fixture ready: http://127.0.0.1:4189\n",
+        `Local synthetic UI fixture ready: http://127.0.0.1:${port}\n`,
     ),
 );

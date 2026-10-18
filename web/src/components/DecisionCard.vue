@@ -1,9 +1,10 @@
-<!-- 版本化决策卡片：推荐仅展示，部分回答与有限授权必须由用户显式提交。 -->
+<!-- 对话内的版本化追问：推荐不预选；自由回答使用主聊天框，选项与有限授权必须显式提交。 -->
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { Card } from "../workspace/types";
+/** 卡片及可回答资格来自一致的服务端视图，不在组件内自行判定权限。 */
 const props = defineProps<{ card: Card; enabled: boolean }>();
-/** 每次提交带明确动作及用户实际选择，不因推荐或挂载自动发送。 */
+/** selection只同步未提交草稿；只有answer事件才表示用户提交，reply只聚焦聊天框。 */
 const emit = defineEmits<{
   answer: [
     action: string,
@@ -11,90 +12,125 @@ const emit = defineEmits<{
     text: string,
     authorization: string[],
   ];
+  selection: [selected: Record<string, string>];
+  reply: [];
 }>();
 const selected = ref<Record<string, string>>({}),
-  text = ref(""),
   authorized = ref<string[]>([]);
 const choices = computed(() =>
   Object.fromEntries(
     Object.entries(selected.value).filter(([, value]) => value),
   ),
 );
-/** @param action 明确点击的动作；暂未决定不夹带选项，授权仅限本次勾选的问题。 */
+watch(choices, (value) => emit("selection", { ...value }));
+/** @param question 当前问题 @param option 用户点选项；再次点击取消，不自动采纳推荐。 */
+function toggle(question: string, option: string): void {
+  if (!props.enabled) return;
+  selected.value = {
+    ...selected.value,
+    [question]: selected.value[question] === option ? "" : option,
+  };
+}
+/** @param action 明确动作；自由文本由主聊天框提交，授权不能由选择建议推断。 */
 function submit(action: string): void {
+  if (!props.enabled) return;
   emit(
     "answer",
     action,
-    action === "UNDECIDED" ? {} : choices.value,
-    action === "UNDECIDED" ? "" : text.value,
+    action === "UNDECIDED" ? {} : { ...choices.value },
+    "",
     action === "AUTHORIZE" ? [...authorized.value] : [],
   );
 }
+/** 父页面确认提交成功且卡片仍为原版本时清除已提交草稿，不影响后端决策状态。 */
+function reset(): void {
+  selected.value = {};
+  authorized.value = [];
+}
+defineExpose({ reset });
 </script>
 <template>
   <section class="decision" aria-label="需要你决定">
-    <h3>一起确定这几件事</h3>
-    <p class="muted">推荐仅供参考。可以只回答一部分，也可以给出自己的想法。</p>
+    <div class="decision-heading">
+      <span class="assistant-mark" aria-hidden="true">行</span>
+      <h3>有几件事，想听听你的想法</h3>
+    </div>
     <fieldset :disabled="!enabled">
       <div
         v-for="question in card.decision.remaining"
         :key="question.id"
         class="question"
       >
-        <label :for="`q-${question.id}`">{{ question.prompt }}</label>
-        <p>{{ card.specs[question.id]?.reason }}</p>
-        <p class="muted">{{ card.specs[question.id]?.tradeoff }}</p>
-        <select
-          v-if="Object.keys(question.options).length"
-          :id="`q-${question.id}`"
-          v-model="selected[question.id]"
-        >
-          <option value="">请选择（尚未采纳）</option>
-          <option v-for="(label, id) in question.options" :key="id" :value="id">
-            {{ label }}{{ id === question.recommendedOption ? " · 推荐" : "" }}
-          </option>
-        </select>
-        <label
-          v-if="card.decision.allowedAuthorizationScope.includes(question.id)"
-          class="inline"
-        >
-          <input v-model="authorized" type="checkbox" :value="question.id" />
-          授权系统在这个问题范围内决定
-        </label>
+        <p class="question-title">{{ question.prompt }}</p>
+        <p v-if="card.specs[question.id]?.reason" class="muted">
+          {{ card.specs[question.id]?.reason }}
+        </p>
+        <p v-if="card.specs[question.id]?.tradeoff" class="muted">
+          {{ card.specs[question.id]?.tradeoff }}
+        </p>
+        <div class="option-chips" :role="'group'" :aria-label="question.prompt">
+          <button
+            v-for="(label, id) in question.options"
+            :key="id"
+            type="button"
+            class="option-chip"
+            :class="{ chosen: selected[question.id] === id }"
+            :aria-pressed="selected[question.id] === id"
+            @click="toggle(question.id, String(id))"
+          >
+            {{ label
+            }}<span
+              v-if="id === question.recommendedOption"
+              class="recommend-label"
+              >推荐</span
+            >
+          </button>
+        </div>
       </div>
-      <label>
-        我的补充
-        <textarea
-          v-model="text"
-          rows="3"
-          maxlength="4000"
-          placeholder="可以用自己的话说明"
-        />
-      </label>
+      <p class="muted">可以只选一部分，也可以直接在下面的聊天框回答。</p>
       <div class="actions">
         <button
-          :disabled="!Object.keys(choices).length && !text.trim()"
+          :disabled="!Object.keys(choices).length"
           @click="submit('ANSWER')"
         >
-          提交回答
+          提交选择
         </button>
-        <button
-          class="secondary"
-          :disabled="!authorized.length"
-          @click="submit('AUTHORIZE')"
-        >
-          提交有限授权
-        </button>
-        <button
-          class="secondary"
-          :disabled="!Object.keys(choices).length"
-          @click="submit('REJECT')"
-        >
-          不采纳所选建议
-        </button>
-        <button class="quiet" @click="submit('UNDECIDED')">暂未决定</button>
+        <button class="quiet" @click="emit('reply')">用自己的话回答 ↗</button>
       </div>
+      <details class="decision-more">
+        <summary>暂不决定或设置授权</summary>
+        <label
+          v-for="id in card.decision.allowedAuthorizationScope"
+          :key="id"
+          class="inline"
+        >
+          <input
+            v-model="authorized"
+            type="checkbox"
+            :value="id"
+          />仅授权系统决定：{{
+            card.decision.remaining[id]?.prompt ?? "当前问题"
+          }}
+        </label>
+        <div class="actions">
+          <button
+            class="secondary"
+            :disabled="!authorized.length"
+            @click="submit('AUTHORIZE')"
+          >
+            确认有限授权
+          </button>
+          <button
+            class="quiet"
+            :disabled="!Object.keys(choices).length"
+            @click="submit('REJECT')"
+          >
+            不采纳所选建议
+          </button>
+          <button class="quiet" @click="submit('UNDECIDED')">暂未决定</button>
+        </div>
+      </details>
     </fieldset>
-    <p v-if="!enabled" class="muted">正在同步或卡片已过期，请等待最新状态。</p>
+    <p v-if="!enabled" class="muted">正在同步最新问题，稍后就能继续。</p>
   </section>
 </template>

@@ -41,6 +41,23 @@ export function canAnswer(
       card.decision.constraintRevision === view.constraintRevision,
   );
 }
+/**
+ * @param view 当前一致的任务视图，尚未读取时可空。
+ * @param card 最新问题卡片，可空；不能按界面推荐推断已采纳。
+ * @param ready 整组读取是否完成且水位一致。
+ * @returns 提交去向；待回答时卡片过期则等待同步，不能把回答变成新修改绕过版本绑定。
+ */
+export function replyMode(
+  view: View | null,
+  card: Card | null,
+  ready: boolean,
+): "ANSWER" | "MESSAGE" | "SYNCING" {
+  if (!view || !ready) return "SYNCING";
+  if (view.state === "WAITING_USER" && card)
+    return canAnswer(view, card, ready) ? "ANSWER" : "SYNCING";
+  return "MESSAGE";
+}
+
 /** 只允许普通网页来源，不渲染脚本、文件或认证URL。 */
 export function sourceLink(value: string | null): string | undefined {
   try {

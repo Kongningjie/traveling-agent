@@ -2,6 +2,7 @@ import { computed, onUnmounted, ref } from "vue";
 import { cursorSequence, decodeEvent, applyEvent } from "../events/runEvents";
 import { Api, ApiError } from "./client";
 import { canAccept, canAnswer } from "./guards";
+import { conversationInput } from "./conversation";
 import type {
   CandidateView,
   Card,
@@ -88,6 +89,12 @@ export function useWorkspace() {
     connection.value = "未连接";
     notice.value = "";
     error.value = "";
+  }
+  /** 用户主动开启空白对话，不取消原任务；清除选中ID以防刷新又跳回旧对话，未知命令不能丢弃。 */
+  function newConversation(): void {
+    if (busy.value || retryable.value) return;
+    if (user.value) sessionStorage.removeItem(`travel.task.${user.value.id}`);
+    clearTask();
   }
   /** @param failure 固定异常 @param stamp 请求所属页面代次；过时异常也不能退出新账号 */
   function failed(failure: unknown, stamp: number): void {
@@ -313,7 +320,7 @@ export function useWorkspace() {
         result.status === "REVALIDATION_REQUIRED"
       )
         notice.value = "已请求重新校验；完成后需要你再次接受。";
-      else notice.value = "操作已收到，请以最新服务端状态为准。";
+      else notice.value = "已保存你的操作。";
       await refresh();
       await listTasks();
       if (
@@ -342,9 +349,9 @@ export function useWorkspace() {
   async function retryCommand(): Promise<void> {
     if (retry) await execute(retry);
   }
-  /** @param title 标题 @param facts 已明确填写的旅行范围；成功后选择服务端实际任务 */
-  async function createTask(title: string, facts: Fact[]): Promise<void> {
-    const body = { requestId: crypto.randomUUID(), title, text: "", facts };
+  /** @param text 用户完整旅行想法；不默认任何范围、预算或已订状态，缺项由后端协商。 */
+  async function createTask(text: string): Promise<void> {
+    const body = { requestId: crypto.randomUUID(), ...conversationInput(text) };
     await execute(() => api.post<{ taskId: string }>("/api/v1/tasks", body));
   }
   /** @param text 自由修改 @param facts 明确字段编辑；保留用户尚未明确修改的要求 */
@@ -533,6 +540,7 @@ export function useWorkspace() {
     selectTask,
     refresh,
     createTask,
+    newConversation,
     send,
     answer,
     accept,
