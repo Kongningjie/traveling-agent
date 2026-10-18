@@ -10,6 +10,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 纯离线并发实验，验证真实线程资源而非数据库状态或业务恢复。 */
 class ExecutionResourcesTest {
+    /** 并行工作显式复制因果身份，退出后不污染调用线程的上下文。 */
+    @Test void researchBranchPropagatesCorrelationAndParentSpan() throws Exception {
+        var ids=new com.lawrence.travel.application.execution.ExecutionCorrelation.Ids(java.util.UUID.randomUUID(),java.util.UUID.randomUUID()); var parent=java.util.UUID.randomUUID();
+        try(var resources=new BoundedExecutionResources(1,1); var scope=resources.openRun();
+            var correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(ids);
+            var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent)) {
+            var result=scope.forkResearch(() -> java.util.List.of(com.lawrence.travel.application.execution.ExecutionCorrelation.current().traceId(),com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan()));
+            assertThat(result.toCompletableFuture().get(3,TimeUnit.SECONDS)).containsExactly(ids.traceId(),parent);
+        }
+        assertThat(com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan()).isNull();
+    }
     /** 两运行、每运行两调查均有界；父流程仅组合 Future，不占用调查执行线程等待。 */
     @Test
     void composesTwoParentsAndFourChildrenWithoutStarvation() throws Exception {

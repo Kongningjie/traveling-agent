@@ -16,6 +16,8 @@ public final class CallRejectedException extends RuntimeException {
         QUOTA_INSUFFICIENT,
         /** 本运行调用或修订次数已达上限。 */
         CALL_BUDGET_EXHAUSTED,
+        /** 用户当日预占与已消费合计达到上限；不能通过新聊天绕过。 */
+        DAILY_QUOTA_EXHAUSTED,
         /** 本运行主动执行时间已达上限。 */
         ACTIVE_TIME_EXHAUSTED,
         /** 关键上下文无法在输入上限内完整容纳，必须保留产物并暂停。 */

@@ -3,7 +3,6 @@ package com.lawrence.travel.api.identity;
 import com.lawrence.travel.application.identity.IdentityFailure;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -58,7 +57,7 @@ public final class IdentityErrors {
      * @param retryable 重试提示
      * @return 不含输入的错误
      */
-    private static ErrorBody body(String code, boolean retryable) { return new ErrorBody(code, "请求无法完成", UUID.randomUUID().toString(), retryable); }
+    private static ErrorBody body(String code, boolean retryable) { return new ErrorBody(code, "请求无法完成", com.lawrence.travel.application.execution.ExecutionCorrelation.current().requestId().toString(), retryable); }
     /**
      * 安全过滤器不能依赖 MVC advice，直接输出固定 JSON。
      * @param response HTTP 响应
@@ -70,6 +69,6 @@ public final class IdentityErrors {
         response.setStatus(status); response.setContentType("application/json;charset=UTF-8");
         response.setHeader("Cache-Control", "no-store");
         response.getWriter().write("{\"code\":\"" + code + "\",\"message\":\"请求无法完成\",\"requestId\":\""
-                + UUID.randomUUID() + "\",\"retryable\":" + (status == 503) + "}");
+                + com.lawrence.travel.application.execution.ExecutionCorrelation.current().requestId() + "\",\"retryable\":" + (status == 503) + "}");
     }
 }

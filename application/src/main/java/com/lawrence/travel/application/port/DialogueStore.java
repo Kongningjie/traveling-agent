@@ -7,6 +7,10 @@ import java.util.UUID;
 
 /** PostgreSQL聊天收件与租约；所有写入在应用短事务执行，模型调用必须在事务外。 */
 public interface DialogueStore {
+    /** @param claim 原输入资格 @return 是否仍可续租，不复活撤回或过期输入 */
+    default boolean renew(Dialogue.Claim claim) { return true; }
+    /** @param claim 原输入 @return 持久化入口关联，异步执行不生成另一条无关trace */
+    default com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(Dialogue.Claim claim) { return com.lawrence.travel.application.execution.ExecutionCorrelation.current(); }
     /** @param user 身份 @param id 创建幂等键 @param title 首条文本生成的标题 @return 私有会话 */
     Dialogue.Chat create(UUID user, UUID id, String title);
     /** @param user 身份 @param id 新会话幂等ID @param task 已存在的私有任务 @return 已有关联会话或新会话，兼容历史任务而不重复创建旅行 */

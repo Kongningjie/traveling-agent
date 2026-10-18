@@ -17,6 +17,8 @@ import java.util.UUID;
  * PostgreSQL 唯一执行调度入口；无锁候选不是领取资格，所有变更事务内重新判断。
  */
 public interface ExecutionEngineStore extends StageCommitPort {
+    /** @param claim 已领取归属 @return 持久化链路；兼容离线实现 */
+    default com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(Claim claim) { return new com.lawrence.travel.application.execution.ExecutionCorrelation.Ids(claim.fence().runId(), claim.fence().runId()); }
     /**
      * 用例明确选择的运行目标；模型不能将规划自行改为咨询完成。
      */

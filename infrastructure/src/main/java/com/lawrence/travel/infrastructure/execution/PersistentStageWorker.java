@@ -35,6 +35,24 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     private boolean started;
     private final java.util.List<com.lawrence.travel.application.port.BackgroundWorkSource> auxiliary = new java.util.ArrayList<>();
     private final Set<Thread> auxiliaryThreads = new HashSet<>();
+    private final java.util.concurrent.Semaphore parserSlots = new java.util.concurrent.Semaphore(1);
+    private volatile java.util.function.BiConsumer<String, String> problems = (component, code) -> { };
+    /** @param reporter 由装配层提供的固定分类问题端口；不传原始异常 */
+    public synchronized void problems(java.util.function.BiConsumer<String, String> reporter) { this.problems = java.util.Objects.requireNonNull(reporter); }
+    /** @param component 固定组件 @param code 固定分类；诊断库故障不能覆盖原执行状态 */
+    private void report(String component, String code) { try { problems.accept(component, code); } catch (RuntimeException unavailable) { System.getLogger(getClass().getName()).log(System.Logger.Level.WARNING, "PROBLEM_STORE_UNAVAILABLE"); } }
+    /** @param parser 独立解析物理槽 @return 只有实际退出才释放的资源范围 */
+    private ExecutionResources.RunScope openAuxiliary(boolean parser) {
+        if (!parser) return resources.openRun();
+        if (!parserSlots.tryAcquire()) throw new RejectedExecutionException("PARSER_CAPACITY_FULL");
+        return new ExecutionResources.RunScope() {
+            private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+            /** 解析工作不能借此额外派发调查。 */
+            @Override public <T> java.util.concurrent.CompletionStage<T> forkResearch(java.util.function.Supplier<T> work) { throw new RejectedExecutionException("PARSER_CANNOT_FORK"); }
+            /** 仅由实际退出路径幂等归还。 */
+            @Override public void close() { if (closed.compareAndSet(false, true)) parserSlots.release(); }
+        };
+    }
     /** @param source 由bootstrap装配的应用收件端口，共用当前轮询和物理运行容量 */
     public synchronized void register(com.lawrence.travel.application.port.BackgroundWorkSource source) { auxiliary.add(java.util.Objects.requireNonNull(source)); }
 
@@ -66,14 +84,20 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
         if (closed) return;
         for (var source : auxiliary) {
             ExecutionResources.RunScope slot;
-            try { slot = resources.openRun(); } catch (RejectedExecutionException full) { break; }
+            try { slot = openAuxiliary(source.parserCapacity()); } catch (RejectedExecutionException full) { continue; }
             java.util.Optional<Runnable> next;
             try { next = source.claimWork(); } catch (RuntimeException failure) { slot.close(); throw failure; }
             if (next.isEmpty()) { slot.close(); continue; }
             var thread = Thread.ofVirtual().name("dialogue-understand").unstarted(() -> {
-                try { next.get().run(); } finally { auxiliaryExited(Thread.currentThread(), slot); }
+                Thread running = Thread.currentThread();
+                ScheduledFuture<?> pulse = null;
+                try {
+                pulse = next.get() instanceof com.lawrence.travel.application.port.BackgroundWorkSource.LeasedWork leased
+                        ? heartbeats.scheduleWithFixedDelay(() -> { try { if (!leased.renew()) running.interrupt(); } catch (RuntimeException failure) { report("JOB", "HEARTBEAT_FAILED"); running.interrupt(); } }, heartbeat.toMillis(), heartbeat.toMillis(), TimeUnit.MILLISECONDS) : null;
+                next.get().run();
+                } finally { if (pulse != null) pulse.cancel(false); auxiliaryExited(running, slot); }
             });
-            thread.setUncaughtExceptionHandler((ignored, failure) -> { /* 固定状态由应用持久化，失联请求按租约恢复。 */ });
+            thread.setUncaughtExceptionHandler((ignored, failure) -> { report("JOB", "WORKER_EXECUTION_FAILED"); });
             auxiliaryThreads.add(thread); thread.start();
         }
         store.recover(32);
@@ -94,10 +118,15 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
             Work work = new Work(claim.get(), research);
             group.work.add(work); if (research) group.research++; else group.nonResearch++;
             work.thread = Thread.ofVirtual().name("stage-" + claim.get().step().id()).unstarted(() -> {
-                try { executor.execute(work.claim, work); }
+                try {
+                    var ids = store.correlation(work.claim);
+                    if (ids == null) executor.execute(work.claim, work);
+                    else try (var correlated = com.lawrence.travel.application.execution.ExecutionCorrelation.bind(ids);
+                              var span = com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(work.claim.fence().attemptId())) { executor.execute(work.claim, work); }
+                }
                 finally { exited(hint.runId(), selected, work); }
             });
-            work.thread.setUncaughtExceptionHandler((thread, failure) -> { /* 原始异常不得泄露；失联阶段由权威租约恢复。 */ });
+            work.thread.setUncaughtExceptionHandler((thread, failure) -> { report("STAGE", "WORKER_EXECUTION_FAILED"); });
             work.heartbeat = heartbeats.scheduleWithFixedDelay(() -> pulse(work), heartbeat.toMillis(), heartbeat.toMillis(), TimeUnit.MILLISECONDS);
             work.thread.start();
         }
@@ -106,7 +135,7 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     /**
      * 定时器异常仅延迟发现，不写原始异常日志；数据库请求和租约仍是权威。
      */
-    private void safeTick() { try { tick(); } catch (RuntimeException failure) { /* 下一轮重新检查，不伪造执行成功。 */ } }
+    private void safeTick() { try { tick(); } catch (RuntimeException failure) { report("WORKER", "DISCOVERY_FAILED"); } }
     /** @param thread 已实际退出的对话线程 @param slot 仅退出后释放物理容量 */
     private synchronized void auxiliaryExited(Thread thread, ExecutionResources.RunScope slot) { auxiliaryThreads.remove(thread); slot.close(); }
     /**

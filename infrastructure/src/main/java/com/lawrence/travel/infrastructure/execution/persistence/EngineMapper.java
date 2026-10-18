@@ -127,8 +127,11 @@ public interface EngineMapper {
      * @param limits 原预算
      * @return 插入数
      */
-    @Insert("INSERT INTO execution_run(id,user_id,task_id,body,goal,limits) VALUES(#{id},#{scope.userId},#{scope.taskId},CAST(#{body} AS jsonb),#{goal},CAST(#{limits} AS jsonb))")
-    int insertRun(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("body") String body, @Param("goal") String goal, @Param("limits") String limits);
+    @Insert("INSERT INTO execution_run(id,user_id,task_id,body,goal,limits,request_id,trace_id) VALUES(#{id},#{scope.userId},#{scope.taskId},CAST(#{body} AS jsonb),#{goal},CAST(#{limits} AS jsonb),#{ids.requestId},#{ids.traceId})")
+    int insertRun(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("body") String body, @Param("goal") String goal, @Param("limits") String limits, @Param("ids") com.lawrence.travel.application.execution.ExecutionCorrelation.Ids ids);
+    /** @param id 原运行 @return 持久入口关联，不从模型消息恢复权限 */
+    @Select("SELECT request_id,trace_id FROM execution_run WHERE id=#{id}")
+    com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(@Param("id") UUID id);
     /**
      * @param scope 归属
      * @param id 运行

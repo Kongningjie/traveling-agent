@@ -39,6 +39,7 @@ class DialogueIntegrationTest {
     @Autowired private BusinessTransactions tx;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ExecutionEngineStore engine;
+    @Autowired private com.lawrence.travel.application.port.BudgetLedger ledger;
     @Autowired private NegotiationHandler handler;
     @Autowired private PreferenceService preferences;
     @Autowired private org.springframework.transaction.PlatformTransactionManager manager;
@@ -48,13 +49,33 @@ class DialogueIntegrationTest {
     @Autowired private com.lawrence.travel.infrastructure.travel.TravelJson json;
     @org.springframework.boot.test.web.server.LocalServerPort private int port;
     private final List<String> sessionIds = new ArrayList<>();
+    /** 聊天到旅行阶段交接保持trace，实际调用只归旅行预算及唯一日配额。 */
+    @Test void travelHandoffKeepsTraceAndUniqueCallOwnership() {
+        var user=actor(); UUID chat=UUID.randomUUID(); service.send(user,chat,UUID.randomUUID(),"去杭州");
+        process(result(DialogueIntent.Kind.PLANNING,DialogueIntent.Action.START_PLAN,"去杭州",List.of(new DialogueIntent.Fact("cities","杭州","杭州"))));
+        UUID task=service.read(user,chat).chat().taskId(); var hint=engine.candidates(100).stream().filter(h -> h.scope().taskId().equals(task)).findFirst().orElseThrow();
+        var claim=engine.claim(hint,"trace_local_test").orElseThrow(); var ids=engine.correlation(claim);
+        com.lawrence.travel.application.port.BudgetLedger.Reservation meter;
+        try(var correlated=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(ids); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(claim.fence().attemptId())) {
+            meter=ledger.reserve(hint.runId(),com.lawrence.travel.domain.execution.control.CallKind.MODEL,new com.lawrence.travel.domain.execution.control.RunLimits(30,60,2,java.time.Duration.ofSeconds(180),java.time.Duration.ofMinutes(15)),new com.lawrence.travel.application.port.BudgetLedger.Target("LOCAL_FAKE_MODEL","LOCAL","LOCAL_FAKE"),100,java.time.Instant.now());
+        }
+        assertThat(jdbc.queryForObject("SELECT parent_span_id FROM call_ownership WHERE id=?",UUID.class,meter.id())).isEqualTo(claim.fence().attemptId());
+        assertThat(jdbc.queryForObject("SELECT trace_id FROM execution_trace_span WHERE id=?",UUID.class,meter.id())).isEqualTo(ids.traceId());
+        assertThat(ledger.read(hint.runId()).modelCalls()).isEqualTo(1);
+        UUID inputBudget=jdbc.queryForObject("SELECT budget_id FROM operation_context WHERE user_id=?",UUID.class,user.id()); assertThat(ledger.read(inputBudget).modelCalls()).isZero();
+        ledger.finish(meter.id(),new com.lawrence.travel.domain.execution.control.TokenUsage(5,3),java.time.Duration.ZERO);
+        engine.fail(claim.fence(),ExecutionEngineStore.Failure.PERMANENT);
+        assertThat(jdbc.queryForObject("SELECT code FROM problem_event WHERE user_id=? AND component='STAGE'",String.class,user.id())).isEqualTo("STAGE_FAILED");
+    }
     /** 仅清理测试随机账号，先解除循环引用，再按FK依赖清理；不删除用户真实数据。 */
     @AfterEach void clean() {
         sessionIds.forEach(sessions::deleteById);
         tx.required(() -> {
             for (UUID user : users) {
-                var budgetIds = jdbc.queryForList("SELECT id FROM execution_run WHERE user_id=? UNION SELECT budget_id FROM dialogue_chat WHERE user_id=?", UUID.class, user, user);
-                jdbc.update("DELETE FROM dialogue_input WHERE user_id=?", user); jdbc.update("DELETE FROM dialogue_chat WHERE user_id=?", user);
+                var budgetIds = jdbc.queryForList("SELECT id FROM execution_run WHERE user_id=? UNION SELECT budget_id FROM dialogue_chat WHERE user_id=? UNION SELECT budget_id FROM operation_context WHERE user_id=?", UUID.class, user, user, user);
+                jdbc.update("DELETE FROM dialogue_input WHERE user_id=?", user);
+                JobTestCleanup.remove(jdbc, user);
+                jdbc.update("DELETE FROM dialogue_chat WHERE user_id=?", user);
                 jdbc.update("UPDATE travel_task SET current_run_id=NULL,current_version_id=NULL WHERE user_id=?", user);
                 for (String table : List.of("negotiation_card", "conversation_message", "decision_response", "decision_request", "run_event", "execution_start_request")) jdbc.update("DELETE FROM " + table + " WHERE user_id=?", user);
                 jdbc.update("DELETE FROM artifact_content WHERE artifact_id IN(SELECT id FROM artifact_record WHERE user_id=?)", user);
@@ -87,6 +108,8 @@ class DialogueIntegrationTest {
         var user = actor(); UUID chat = UUID.randomUUID(); service.send(user, chat, UUID.randomUUID(), "去杭州");
         process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, "去杭州", List.of(new DialogueIntent.Fact("cities", "杭州", "杭州"))));
         UUID task = service.read(user, chat).chat().taskId(); assertThat(task).isNotNull();
+        UUID trace=jdbc.queryForObject("SELECT trace_id FROM operation_context WHERE user_id=?",UUID.class,user.id());
+        assertThat(jdbc.queryForObject("SELECT trace_id FROM execution_run WHERE user_id=?",UUID.class,user.id())).isEqualTo(trace);
         var hint = engine.candidates(100).stream().filter(h -> h.scope().taskId().equals(task)).findFirst().orElseThrow();
         var claim = engine.claim(hint, "dialogue_test").orElseThrow();
         var output = handler.execute(claim); engine.commit(engine.prepare(claim, output));
@@ -102,12 +125,13 @@ class DialogueIntegrationTest {
         var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID(); service.send(user, chat, input, "你好");
         when(interpreter.interpret(any())).thenThrow(new IllegalStateException("SYNTHETIC_FAILURE")); service.claimWork().orElseThrow().run();
         assertThat(service.read(user, chat).messages().getFirst().state()).isEqualTo("PAUSED");
-        jdbc.update("UPDATE execution_budget SET model_calls=7 WHERE run_id=?", chat);
+        UUID budget = jdbc.queryForObject("SELECT budget_id FROM operation_context WHERE user_id=?", UUID.class, user.id());
+        jdbc.update("UPDATE execution_budget SET model_calls=7 WHERE run_id=?", budget);
         service.act(user, chat, input, "RETRY");
-        var claim = tx.required(store::claim).orElseThrow(); assertThat(claim.budgetId()).isEqualTo(chat);
+        var claim = tx.required(store::claim).orElseThrow(); assertThat(claim.budgetId()).isEqualTo(budget);
         service.act(user, chat, input, "WITHDRAW"); assertThat(tx.required(() -> store.guard(claim))).isFalse();
-        assertThat(jdbc.queryForObject("SELECT model_calls FROM execution_budget WHERE run_id=?", Long.class, chat)).isEqualTo(7);
-        assertThat(jdbc.queryForObject("SELECT active_millis FROM execution_budget WHERE run_id=?", Long.class, chat)).isGreaterThanOrEqualTo(239000L);
+        assertThat(jdbc.queryForObject("SELECT model_calls FROM execution_budget WHERE run_id=?", Long.class, budget)).isEqualTo(7);
+        assertThat(jdbc.queryForObject("SELECT active_millis FROM execution_budget WHERE run_id=?", Long.class, budget)).isGreaterThanOrEqualTo(239000L);
         assertThat(service.read(user, chat).messages().getFirst().text()).isEqualTo("你好");
     }
     /** 同聊天只有一条有效租约，失联重领递增令牌，旧持有者不能提交。 */
@@ -115,8 +139,9 @@ class DialogueIntegrationTest {
         var user = actor(); UUID chat = UUID.randomUUID(); service.send(user, chat, UUID.randomUUID(), "你好");
         var old = tx.required(store::claim).orElseThrow(); assertThat(tx.required(store::claim)).isEmpty();
         jdbc.update("UPDATE dialogue_input SET active_since=clock_timestamp()-interval '10 seconds',lease_until=clock_timestamp()-interval '1 second' WHERE user_id=?", user.id());
+        jdbc.update("UPDATE background_job SET active_since=clock_timestamp()-interval '10 seconds',lease_until=clock_timestamp()-interval '1 second' WHERE user_id=?", user.id());
         var next = tx.required(store::claim).orElseThrow(); assertThat(next.token()).isGreaterThan(old.token());
-        assertThat(jdbc.queryForObject("SELECT active_millis FROM execution_budget WHERE run_id=?", Long.class, chat)).isGreaterThanOrEqualTo(9000L);
+        assertThat(jdbc.queryForObject("SELECT active_millis FROM execution_budget WHERE run_id=?", Long.class, old.budgetId())).isGreaterThanOrEqualTo(9000L);
         assertThat(tx.required(() -> store.guard(old))).isFalse(); assertThat(tx.required(() -> store.guard(next))).isTrue();
     }
     /** 保存偏好必须确认，重复确认只产生一条；后来删除同样先确认。 */

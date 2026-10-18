@@ -74,7 +74,7 @@ public interface BudgetMapper {
     @Update("UPDATE traveling_agent.call_meter SET status=#{status}, input_tokens=#{input,jdbcType=BIGINT}, "
             + "output_tokens=#{output,jdbcType=BIGINT}, latency_millis=#{latency} "
             + "WHERE id=#{id} AND status='RESERVED'")
-    void finish(@Param("id") UUID id, @Param("status") String status, @Param("input") Long input,
+    int finish(@Param("id") UUID id, @Param("status") String status, @Param("input") Long input,
                 @Param("output") Long output, @Param("latency") long latency);
 
     /**

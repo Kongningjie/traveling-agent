@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Update;
 /** 偏好私有SQL；全部读写限定user_id，不执行用户文本中的指令。 */
 public interface PreferenceMapper {
     /** @param user 用户 @return 排他锁版本；变更与候选提交统一先锁此行 */
-    @Select("SELECT preference_revision FROM app_user WHERE id=#{user} AND account_status='ACTIVE' FOR UPDATE") Long lock(@Param("user") UUID user);
+    @Select("SELECT preference_revision FROM app_user WHERE id=#{user} AND account_status='ACTIVE' FOR NO KEY UPDATE") Long lock(@Param("user") UUID user);
     /** @param user 用户 @return 共享锁版本；同事务读取条目避免新版本配旧文本 */
     @Select("SELECT preference_revision FROM app_user WHERE id=#{user} AND account_status='ACTIVE' FOR SHARE") Long readLock(@Param("user") UUID user);
     /** @param user 用户 @return 当前版本；调用方已持锁时重用 */

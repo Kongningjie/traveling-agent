@@ -20,9 +20,10 @@ public final class PostgresDialogueStore implements DialogueStore {
     private final TravelMapper tasks;
     private final BudgetMapper budgets;
     private final TravelJson json;
+    private final com.lawrence.travel.application.port.JobStore jobs;
     /** @param mapper 聊天SQL @param tasks 权威任务SQL @param budgets 原预算 @param json 严格JSON */
-    public PostgresDialogueStore(DialogueMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json) {
-        this.mapper = mapper; this.tasks = tasks; this.budgets = budgets; this.json = json;
+    public PostgresDialogueStore(DialogueMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json, com.lawrence.travel.application.port.JobStore jobs) {
+        this.mapper = mapper; this.tasks = tasks; this.budgets = budgets; this.json = json; this.jobs = jobs;
     }
     /** {@inheritDoc} 同会话ID异标题拒绝，不重置预算。 */
     @Override public Dialogue.Chat create(UUID user, UUID id, String title) {
@@ -57,6 +58,7 @@ public final class PostgresDialogueStore implements DialogueStore {
         if (replay != null) { require(replay.text().equals(text), false); return read(user, chat); }
         require(mapper.messages(user, chat).stream().filter(m -> List.of("QUEUED", "RUNNING", "PAUSED", "CLARIFY", "CONFIRM").contains(m.state())).count() < 20, false);
         mapper.insert(user, chat, id, text);
+        ensureJob(user, chat, id, false);
         return read(user, chat);
     }
     /** {@inheritDoc} 同聊天串行，领取使用用户锁与输入租约，恢复不创建新的预算身份。 */
@@ -65,8 +67,16 @@ public final class PostgresDialogueStore implements DialogueStore {
         for (var hint : mapper.hints()) {
             var chat = lock(hint.userId(), hint.id());
             var row = mapper.next(hint.userId(), hint.id()); if (row == null) continue;
-            mapper.settle(hint.userId(), hint.id(), row.id(), false, false); mapper.cap(hint.userId(), hint.id());
-            var token = mapper.lease(hint.userId(), hint.id(), row.id()); if (token == null) continue;
+            if (mapper.legacyRunning(hint.userId(), hint.id(), row.id())) continue;
+            UUID jobId = ensureJob(hint.userId(), hint.id(), row.id(), true);
+            var work = jobs.claim(new com.lawrence.travel.application.execution.Jobs.Scope(hint.userId(), hint.id()), jobId);
+            if (work.isEmpty()) {
+                var state = jobs.read(new com.lawrence.travel.application.execution.Jobs.Scope(hint.userId(), hint.id()), jobId).state();
+                if (state == com.lawrence.travel.domain.execution.BackgroundJob.State.PAUSED) mapper.project(hint.userId(), hint.id(), row.id(), jobId);
+                continue;
+            }
+            mapper.project(hint.userId(), hint.id(), row.id(), jobId);
+            long token = work.get().fence().token();
             var basis = basis(hint.userId(), chat); var context = new LinkedHashMap<String, Object>();
             // 只保留本轮之前的少量对话，不把后到消息当作本轮授权依据。
             var history = mapper.messages(hint.userId(), hint.id()); int index = 0;
@@ -83,29 +93,65 @@ public final class PostgresDialogueStore implements DialogueStore {
             // 不能截断JSON造成语义错乱；大行程降为需求＋说明，具体对象由用户定位。
             if (data.length() > 14000) { context.remove("itinerary"); context.put("itineraryOmitted", true); data = json.encode(context); }
             if (data.length() > 14000) data = "{\"contextOmitted\":true}";
-            return Optional.of(new Dialogue.Claim(hint.userId(), chat.id(), row.id(), token, chat.id(), row.text(), row.receivedAt(), basis, data));
+            return Optional.of(new Dialogue.Claim(hint.userId(), chat.id(), row.id(), token, work.get().job().budgetId(), row.text(), row.receivedAt(), basis, data));
         }
         return Optional.empty();
     }
     /** {@inheritDoc} 业务版本改变后拒绝旧理解；后续由应用标记澄清，不强行合并旧上下文。 */
-    @Override public boolean guard(Dialogue.Claim claim) { transaction(); var chat = lock(claim.userId(), claim.chatId()); return mapper.live(claim) && Objects.equals(basis(claim.userId(), chat), claim.basis()); }
+    @Override public boolean guard(Dialogue.Claim claim) { transaction(); var chat = lock(claim.userId(), claim.chatId()); return jobs.live(jobClaim(claim).fence()) && mapper.live(claim) && Objects.equals(basis(claim.userId(), chat), claim.basis()); }
     /** {@inheritDoc} 保留旧原文和提问，状态变化与本轮处理同事务；不允许清理失败或其他聊天请求。 */
     @Override public void resolve(Dialogue.Claim claim, List<UUID> inputs) {
         transaction();
-        for (UUID id : inputs) { var old = mapper.message(claim.userId(), claim.chatId(), id); require(old != null && old.state().equals("CLARIFY") && !id.equals(claim.messageId()), false); mapper.state(claim.userId(), claim.chatId(), id, "DONE"); }
+        for (UUID id : inputs) { var old = mapper.message(claim.userId(), claim.chatId(), id); require(old != null && old.state().equals("CLARIFY") && !id.equals(claim.messageId()), false); changeState(claim.userId(), claim.chatId(), id, "DONE"); }
     }
     /** {@inheritDoc} 一个聊天只能关联一个任务。 */
     @Override public Dialogue.Chat link(Dialogue.Claim claim, UUID task) { transaction(); require(mapper.link(claim, task) == 1, false); return mapper.chat(claim.userId(), claim.chatId()); }
     /** {@inheritDoc} CAS同时检查租约有效期，迟到结果不得清除屏障。 */
     @Override public void finish(Dialogue.Claim claim, String state, String reply, Dialogue.Operation operation, String error) {
         transaction(); require(List.of("DONE", "CONFIRM", "CLARIFY", "PAUSED").contains(state), false);
-        require(mapper.live(claim), false); mapper.settle(claim.userId(), claim.chatId(), claim.messageId(), true, false);
+        require(mapper.live(claim), false);
+        var target = switch (state) { case "DONE" -> com.lawrence.travel.domain.execution.BackgroundJob.State.COMPLETED; case "PAUSED" -> com.lawrence.travel.domain.execution.BackgroundJob.State.PAUSED; default -> com.lawrence.travel.domain.execution.BackgroundJob.State.WAITING_USER; };
+        jobs.finish(jobClaim(claim), new com.lawrence.travel.application.execution.Jobs.Output(target, null, List.of(), error));
         require(mapper.finish(claim, state, reply, operation == null ? null : json.encode(operation), error) == 1, false);
     }
     /** {@inheritDoc} 用户和任务锁保护操作确认与候选接受的原子性。 */
     @Override public Dialogue.Message lockMessage(UUID user, UUID chat, UUID message, String action) { transaction(); lock(user, chat); var row = mapper.message(user, chat, message); require(row != null, true); return message(row); }
     /** {@inheritDoc} 重试只改队列尝试，不重置execution_budget或未知用量。 */
-    @Override public void changeState(UUID user, UUID chat, UUID message, String state) { transaction(); require(List.of("DONE", "WITHDRAWN", "QUEUED").contains(state), false); if (state.equals("WITHDRAWN")) mapper.settle(user, chat, message, true, true); require(mapper.state(user, chat, message, state) == 1, false); }
+    @Override public void changeState(UUID user, UUID chat, UUID message, String state) {
+        transaction(); lock(user, chat); require(List.of("DONE", "WITHDRAWN", "QUEUED").contains(state), false);
+        UUID id = jobId(user, chat, message);
+        if (id != null) { var scope = new com.lawrence.travel.application.execution.Jobs.Scope(user, chat); if (state.equals("DONE")) jobs.acknowledge(scope, id); else jobs.control(scope, id, state.equals("QUEUED")); }
+        else if (state.equals("WITHDRAWN")) mapper.settle(user, chat, message, true, true);
+        require(mapper.state(user, chat, message, state) == 1, false);
+    }
+    /** {@inheritDoc} 同事务续租并刷新投影，失效时不延长任何租约。 */
+    @Override public boolean renew(Dialogue.Claim c) {
+        transaction(); lock(c.userId(), c.chatId()); boolean renewed = jobs.renew(jobClaim(c).fence());
+        if (renewed) mapper.project(c.userId(), c.chatId(), c.messageId(), jobId(c.userId(), c.chatId(), c.messageId())); return renewed;
+    }
+    /** {@inheritDoc} 只读取已鉴权范围，不把用户原文或认证信息放进关联。 */
+    @Override public com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(Dialogue.Claim c) {
+        var job = jobs.read(new com.lawrence.travel.application.execution.Jobs.Scope(c.userId(), c.chatId()), jobId(c.userId(), c.chatId(), c.messageId()));
+        return new com.lawrence.travel.application.execution.ExecutionCorrelation.Ids(job.requestId(), job.traceId());
+    }
+    /** @param user 归属 @param chat 聊天 @param input 输入 @return 可空映射；MyBatis标量UUID通过显式文本转换 */
+    private UUID jobId(UUID user, UUID chat, UUID input) { String id=mapper.job(user,chat,input); return id==null ? null : UUID.fromString(id); }
+    /** @param c 既有聊天资格 @return 当前作业元数据与原token组合，不能用读取到的新token替换旧资格 */
+    private com.lawrence.travel.application.execution.Jobs.Claim jobClaim(Dialogue.Claim c) {
+        var scope = new com.lawrence.travel.application.execution.Jobs.Scope(c.userId(), c.chatId());
+        var job = jobs.read(scope, jobId(c.userId(), c.chatId(), c.messageId()));
+        require(job.budgetId().equals(c.budgetId()), false);
+        return new com.lawrence.travel.application.execution.Jobs.Claim(new com.lawrence.travel.application.execution.Jobs.Fence(scope, job.id(), c.token(), job.version()), job, "{}");
+    }
+    /** @param user 归属 @param chat 聊天 @param input 输入 @param legacy 是否旧待处理输入 @return 稳定映射；旧完成消息不进入此路径 */
+    private UUID ensureJob(UUID user, UUID chat, UUID input, boolean legacy) {
+        UUID old = jobId(user, chat, input); if (old != null) return old;
+        // 旧在途请求先保守结算到已保存租约；复制原累计预算不删除旧计量或UNKNOWN。
+        if (legacy) mapper.settle(user, chat, input, true, false);
+        UUID operation = UUID.nameUUIDFromBytes((user+"/"+chat+"/"+input).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var job = jobs.submit(new com.lawrence.travel.application.execution.Jobs.Submit(new com.lawrence.travel.application.execution.Jobs.Scope(user, chat), operation, com.lawrence.travel.domain.execution.BackgroundJob.Kind.CHAT_INPUT, "input", json.encode(java.util.Map.of("inputId", input)), null, legacy ? chat : null, legacy ? mapper.priorAttempts(user, chat, input) : 0));
+        mapper.associate(user, chat, input, job.id()); return job.id();
+    }
     /** {@inheritDoc} 用作任务锁内的接受门禁及对外展示屏障。 */
     @Override public boolean blocked(UUID user, UUID task) { return mapper.blocked(user, task); }
     /** {@inheritDoc} 只保存应用服务确认的结果，不接收模型自行声称的执行成功。 */
@@ -119,7 +165,7 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
     /** @param user 用户 @param chat 聊天 @return 已按统一锁序保护的关联，不允许适配器绕过事务 */
     private Dialogue.Chat lock(UUID user, UUID chat) {
-        require(mapper.lockUser(user) != null, true); var result = mapper.chat(user, chat); require(result != null, true);
+        require(mapper.lockUser(user) != null, true); var result = mapper.lockChat(user, chat); require(result != null, true);
         if (result.taskId() != null) require(tasks.lockTask(new TaskScope(user, result.taskId())) != null, true);
         return result;
     }

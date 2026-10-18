@@ -28,8 +28,8 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class DialogueConfiguration {
-    /** @param mapper 聊天SQL @param tasks 任务SQL @param budgets 持久预算 @param json 编解码 @return 权威对话存储 */
-    @Bean DialogueStore dialogueStore(DialogueMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json) { return new PostgresDialogueStore(mapper, tasks, budgets, json); }
+    /** @param mapper 聊天SQL @param tasks 任务SQL @param budgets 持久预算 @param json 编解码 @param jobs 唯一作业端口 @return 权威对话存储 */
+    @Bean DialogueStore dialogueStore(DialogueMapper mapper, TravelMapper tasks, BudgetMapper budgets, TravelJson json, com.lawrence.travel.application.port.JobStore jobs) { return new PostgresDialogueStore(mapper, tasks, budgets, json, jobs); }
     /** @param runtime Harness @param json JSON @param controls 已有调用门禁 @return 无工具的一次协调理解 */
     @Bean DialogueInterpreter dialogueInterpreter(AgentRuntimePort runtime, InteractionCodec json, ExecutionControlProperties controls) { return new DialogueIntentInterpreter(runtime, json, controls.externalCallsEnabled()); }
     /** @param store 聊天 @param interpreter 理解 @param tx 事务 @param accounts 身份 @param negotiation 协商 @param runs 运行

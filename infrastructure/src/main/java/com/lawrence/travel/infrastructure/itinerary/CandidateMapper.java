@@ -47,7 +47,7 @@ public interface CandidateMapper {
      * @param scope 用户归属
      * @return 当前偏好修订；先锁用户防止接受与偏好更新交错
      */
-    @Select("SELECT preference_revision FROM app_user WHERE id=#{scope.userId} AND account_status='ACTIVE' FOR UPDATE")
+    @Select("SELECT preference_revision FROM app_user WHERE id=#{scope.userId} AND account_status='ACTIVE' FOR NO KEY UPDATE")
     Long lockUser(@Param("scope") TaskScope scope);
     /** @param scope 私有归属 @return 权威偏好版本；最终写入方已先锁用户行 */
     @Select("SELECT preference_revision FROM app_user WHERE id=#{scope.userId} AND account_status='ACTIVE'") Long preferenceRevision(@Param("scope") TaskScope scope);

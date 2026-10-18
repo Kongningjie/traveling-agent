@@ -47,6 +47,8 @@ import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.N
  * 全部写路径先锁任务，再运行，阶段与事件按稳定 UUID 锁定；预算只做增量，不覆盖并发请求预占。
  */
 public final class PostgresExecutionEngine implements ExecutionEngineStore {
+    /** {@inheritDoc} 归属先经原运行读取校验，不能凭任意runId取得其他用户链路。 */
+    @Override public com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(Claim claim) { run(claim.fence().scope(), claim.fence().runId()); return mapper.correlation(claim.fence().runId()); }
     private final EngineMapper mapper;
     private final TravelMapper tasks;
     private final BudgetMapper budgets;
@@ -488,7 +490,7 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      * @param goal 用例目标
      * @param limits 原预算；建账和运行插入必须同一事务
      */
-    private void insertRun(ExecutionRun run, Goal goal, RunLimits limits) { budgets.create(run.id()); checked(mapper.insertRun(run.scope(), run.id(), json.encode(run), goal.name(), json.encode(limits))); }
+    private void insertRun(ExecutionRun run, Goal goal, RunLimits limits) { budgets.create(run.id()); checked(mapper.insertRun(run.scope(), run.id(), json.encode(run), goal.name(), json.encode(limits), com.lawrence.travel.application.execution.ExecutionCorrelation.current())); }
     /**
      * @param session 当前事务
      * @param id 事件

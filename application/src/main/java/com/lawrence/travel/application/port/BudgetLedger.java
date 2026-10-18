@@ -10,6 +10,8 @@ import java.util.UUID;
 
 /** 持久化计量端口；调用前原子预占，未知请求不退还次数或 Token 预占。 */
 public interface BudgetLedger {
+    /** @param runId 输入或旅行预算 @param fallback 原旅行限制 @return 输入预算采用独立上限，旧实现保持兼容 */
+    default RunLimits limitsFor(UUID runId, RunLimits fallback) { return fallback; }
     /**
      * 建立预算身份；重复调用不能重置旧计数。
      * @param runId 本次运行稳定标识

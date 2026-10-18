@@ -63,7 +63,16 @@ public final class DialogueService implements BackgroundWorkSource {
     /** @param actor 已认证用户 @param chat 新聊天幂等身份 @param task 历史私有旅行 @return 原有或新关联聊天，历史任务不绕过意图理解 */
     public Dialogue.View attach(UserIdentity actor, UUID chat, UUID task) { return transactions.required(() -> store.read(actor.id(), store.attach(actor.id(), chat, task).id())); }
     /** {@inheritDoc} 由既有Worker取得运行容量后调用，领取事务不跨模型调用。 */
-    @Override public Optional<Runnable> claimWork() { return transactions.required(store::claim).map(c -> () -> process(c)); }
+    @Override public Optional<Runnable> claimWork() { return transactions.required(store::claim).map(c -> new com.lawrence.travel.application.port.BackgroundWorkSource.LeasedWork() {
+        /** 原输入续租，不授予新预算或业务版本。 */
+        @Override public boolean renew() { return transactions.required(() -> store.renew(c)); }
+        /** 异步执行显式绑定持久关联身份；业务提交仍由原领取资格控制。 */
+        @Override public void run() {
+            var ids = store.correlation(c);
+            if (ids == null) { process(c); return; }
+            try (var ignored = com.lawrence.travel.application.execution.ExecutionCorrelation.bind(ids)) { process(c); }
+        }
+    }); }
     /** @param c 原领取；任何模型或协议失败保存固定原因，屏障必须等待重试或撤回 */
     private void process(Dialogue.Claim c) {
         try {
@@ -81,10 +90,11 @@ public final class DialogueService implements BackgroundWorkSource {
         } catch (RuntimeException failure) {
             Thread.interrupted();
             boolean disabled = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected && rejected.reason() == com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.EXTERNAL_DISABLED;
+            String reason = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected ? rejected.reason().name() : "DIALOGUE_PROCESSING_FAILED";
             String explanation = disabled ? "真实外部调用尚未开启，输入已保存，暂未进行模型理解。此提示不表示免费额度用完；可以保留或撤回这条输入。" : "输入已保存，理解尚未完成。可重试或撤回；不会自动修改行程。";
             try {
-                transactions.required(() -> { store.guard(c); store.finish(c, "PAUSED", explanation, null, disabled ? "EXTERNAL_DISABLED" : "DIALOGUE_PROCESSING_FAILED"); return null; });
-            } catch (RuntimeException obsolete) { /* 整个失败提交事务回滚，撤回或租约失效时不覆盖新状态、不部分结算。 */ }
+                transactions.required(() -> { store.guard(c); store.finish(c, "PAUSED", explanation, null, reason); return null; });
+            } catch (RuntimeException obsolete) { System.getLogger(getClass().getName()).log(System.Logger.Level.INFO, "DIALOGUE_FAILURE_NOT_COMMITTED"); }
         }
     }
     /** @param c 已锁上下文 @param result 结构化语义；不以模型回复声称业务已提交 */

@@ -81,7 +81,8 @@ public final class ModelCallAdmission {
             // 单实例的短临界区仅串行“检查快照 + 预占”，真实网络请求不持此锁。
             // 请求次数在发送前提交，失败、取消和进程崩溃均不自动退还。
             var reservation = ledger.reserve(runId, CallKind.MODEL, limits, target, tokenUpperBound, now);
-            return new Permit(reservation, target, lease, limits.requestTimeout(reservation.budget()));
+            var effective = ledger.limitsFor(runId, limits);
+            return new Permit(reservation, target, lease, (effective == null ? limits : effective).requestTimeout(reservation.budget()));
         } catch (RuntimeException failure) {
             lease.close();
             throw failure;

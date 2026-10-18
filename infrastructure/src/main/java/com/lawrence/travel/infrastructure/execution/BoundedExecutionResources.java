@@ -61,6 +61,8 @@ public final class BoundedExecutionResources implements ExecutionResources, Auto
         public <T> CompletionStage<T> forkResearch(Supplier<T> work) {
             Objects.requireNonNull(work);
             var result = new CompletableFuture<T>();
+            var correlation = com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+            var parentSpan = com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
             synchronized (BoundedExecutionResources.this) {
                 if (stopped || closing || branches >= maximumBranches) {
                     throw new RejectedExecutionException("RESEARCH_CAPACITY");
@@ -70,7 +72,8 @@ public final class BoundedExecutionResources implements ExecutionResources, Auto
                     executor.execute(() -> {
                         T value = null;
                         Throwable failure = null;
-                        try { value = work.get(); }
+                        try (var ids = com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation);
+                             var span = com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { value = work.get(); }
                         catch (Throwable error) { failure = error; }
                         finally { branchExited(); }
                         // 先释放实际执行资源，再通知父流程；回调可立即开启下一调查分支。

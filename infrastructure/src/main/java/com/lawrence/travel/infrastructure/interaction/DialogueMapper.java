@@ -11,13 +11,31 @@ import org.apache.ibatis.annotations.Update;
 
 /** 独立聊天SQL；用户、任务、聊天、输入依次加锁，所有私有查询限定用户。 */
 public interface DialogueMapper {
+    /** @param user 用户 @param id 聊天 @return 调用者已持user锁，继续按chat→task顺序加锁 */
+    @Select("SELECT id,title,task_id FROM dialogue_chat WHERE user_id=#{user} AND id=#{id} FOR NO KEY UPDATE")
+    Dialogue.Chat lockChat(@Param("user") UUID user, @Param("id") UUID id);
+    /** @param user 用户 @param chat 聊天 @param input 旧输入 @return 老版本仍有有效租约时不能提前迁移和接管 */
+    @Select("SELECT EXISTS(SELECT 1 FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{input} AND job_id IS NULL AND state='RUNNING' AND lease_until>clock_timestamp())")
+    boolean legacyRunning(@Param("user") UUID user, @Param("chat") UUID chat, @Param("input") UUID input);
+    /** @param user 用户 @param chat 聊天 @param input 旧输入 @return 原尝试次数，迁移不能重新授予重试 */
+    @Select("SELECT attempts FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{input}")
+    int priorAttempts(@Param("user") UUID user, @Param("chat") UUID chat, @Param("input") UUID input);
+    /** @param user 用户 @param chat 聊天 @param id 输入 @return 关联作业，可空表示旧数据 */
+    @Select("SELECT job_id::text FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id}")
+    String job(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id);
+    /** @param user 用户 @param chat 聊天 @param id 输入 @param job 权威作业；只登记一次 */
+    @Update("UPDATE dialogue_input SET job_id=#{job} WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id} AND job_id IS NULL")
+    void associate(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id, @Param("job") UUID job);
+    /** @param user 用户 @param chat 聊天 @param id 输入 @param job 权威作业；输入租约只是展示投影，不再单独调度和计时 */
+    @Update("UPDATE dialogue_input i SET state=CASE WHEN j.state='RUNNING' THEN 'RUNNING' ELSE 'PAUSED' END,token=j.token,attempts=j.attempts,lease_until=j.lease_until,active_since=NULL,error=j.error FROM background_job j WHERE i.user_id=#{user} AND i.chat_id=#{chat} AND i.id=#{id} AND i.job_id=#{job} AND j.id=i.job_id")
+    void project(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id, @Param("job") UUID job);
     /** @param user 用户 @param task 任务 @return 当前运行最近候选身份，仅供服务端构造确认，不向界面提前展示 */
     @Select("SELECT c.id::text FROM itinerary_candidate c JOIN travel_task t ON t.user_id=c.user_id AND t.id=c.task_id AND t.current_run_id=c.run_id WHERE c.user_id=#{user} AND c.task_id=#{task} ORDER BY c.created_at DESC,c.id DESC LIMIT 1")
     String candidate(@Param("user") UUID user, @Param("task") UUID task);
     /** @param id 消息 @param text 原文 @param state 生命周期 @param reply 助手内容 @param operation 确认JSON @param error 固定码 @param token 租约代次 @param receivedAt 收件时间 */
     record Row(UUID id, String text, String state, String reply, String operation, String error, long token, Instant receivedAt) { }
     /** @param user 权威用户 @return 规范登录名，同时锁住用户以维持全局锁序 */
-    @Select("SELECT login_name FROM app_user WHERE id=#{user} FOR UPDATE")
+    @Select("SELECT login_name FROM app_user WHERE id=#{user} FOR NO KEY UPDATE")
     String lockUser(@Param("user") UUID user);
     /** @param user 归属 @param id 聊天 @return 聊天，不加行锁；所有改变关联的调用必须先锁用户 */
     @Select("SELECT id,title,task_id FROM dialogue_chat WHERE user_id=#{user} AND id=#{id}")
@@ -51,10 +69,6 @@ public interface DialogueMapper {
     /** @param user 用户 @param chat 聊天 @return 最早排队或运行输入，超时后原身份重新领取 */
     @Select("SELECT id,text,state,reply,operation::text,error,token,received_at FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND state IN ('QUEUED','RUNNING') ORDER BY sequence LIMIT 1 FOR UPDATE")
     Row next(@Param("user") UUID user, @Param("chat") UUID chat);
-    /** @param user 用户 @param chat 聊天 @param id 消息 @return 唯一新租约令牌；三次失败后需显式重试，不丢屏障 */
-    @Select(value = "UPDATE dialogue_input SET state='RUNNING',token=token+1,attempts=attempts+1,active_since=clock_timestamp(),lease_until=clock_timestamp()+interval '240 seconds' WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id} AND attempts<3 AND (state='QUEUED' OR (state='RUNNING' AND lease_until<clock_timestamp())) RETURNING token", affectData = true)
-    @org.apache.ibatis.annotations.Options(flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
-    Long lease(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id);
     /** @param user 用户 @param chat 聊天 @param id 输入 @param force 正常结束或显式撤回 @param full 撤回后调用可能仍在途，保守计完整租约
      * @return 首次结算更新数；失联仅计到租约到期，不计服务停机等待时间 */
     @Update("""
@@ -63,14 +77,11 @@ public interface DialogueMapper {
             (CASE WHEN #{full} THEN i.lease_until ELSE LEAST(clock_timestamp(),i.lease_until) END)-i.active_since))*1000))::bigint
           FROM dialogue_chat c,dialogue_input i
           WHERE b.run_id=c.budget_id AND c.user_id=#{user} AND c.id=#{chat} AND i.user_id=c.user_id AND i.chat_id=c.id AND i.id=#{id}
-            AND i.active_since IS NOT NULL AND (#{force} OR (i.state='RUNNING' AND i.lease_until<clock_timestamp()))
+            AND i.job_id IS NULL AND i.active_since IS NOT NULL AND (#{force} OR (i.state='RUNNING' AND i.lease_until<clock_timestamp()))
           RETURNING b.run_id
         ) UPDATE dialogue_input SET active_since=NULL WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id} AND EXISTS(SELECT 1 FROM accounted)
         """)
     int settle(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id, @Param("force") boolean force, @Param("full") boolean full);
-    /** @param user 用户 @param chat 聊天 @return 暂停超出重试次数的失联工作，不清零预算 */
-    @Update("UPDATE dialogue_input SET state='PAUSED',error='DIALOGUE_RETRY_LIMIT' WHERE user_id=#{user} AND chat_id=#{chat} AND attempts>=3 AND (state='QUEUED' OR (state='RUNNING' AND lease_until<clock_timestamp()))")
-    int cap(@Param("user") UUID user, @Param("chat") UUID chat);
     /** @param c 原领取 @return 是否仍有提交资格 */
     @Select("SELECT EXISTS(SELECT 1 FROM dialogue_input WHERE user_id=#{c.userId} AND chat_id=#{c.chatId} AND id=#{c.messageId} AND state='RUNNING' AND token=#{c.token} AND lease_until>clock_timestamp())")
     boolean live(@Param("c") Dialogue.Claim c);
