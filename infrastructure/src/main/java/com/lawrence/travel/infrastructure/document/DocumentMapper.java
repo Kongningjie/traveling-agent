@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Update;
 import org.apache.ibatis.annotations.Param;
 /** 显式归属SQL；锁序user→chat→job，元数据没有公开路径接口。 */
 public interface DocumentMapper {
+    /** @param s 私有范围 @return 已读取失效资料的活跃聊天作业，调用方通过JobStore取消并结算 */
+    @Select("SELECT DISTINCT j.id::text FROM background_job j JOIN operation_context o ON o.id=j.operation_id JOIN source_read_attempt a ON a.budget_id=o.budget_id JOIN dialogue_chat c ON c.user_id=j.user_id AND c.id=j.chat_id WHERE j.user_id=#{s.userId} AND j.chat_id=#{s.chatId} AND j.kind='CHAT_INPUT' AND j.state IN('QUEUED','RUNNING','WAITING_USER','WAITING_DEPENDENCY') AND a.revision<c.document_revision AND a.token IN(j.token,j.token-1)")
+    List<String> revokedReaders(@Param("s") Jobs.Scope s);
     /** @param s 归属 @return 有效用户并持锁 */
     @Select("SELECT id::text FROM app_user WHERE id=#{s.userId} AND account_status='ACTIVE' FOR NO KEY UPDATE") String user(@Param("s") Jobs.Scope s);
     /** @param s 归属 @return 同用户聊天并持锁 */

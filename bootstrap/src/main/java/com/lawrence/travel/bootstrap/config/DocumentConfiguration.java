@@ -25,6 +25,14 @@ import org.springframework.core.env.Environment;
 @MapperScan(basePackageClasses=DocumentMapper.class)
 @org.springframework.scheduling.annotation.EnableScheduling
 public class DocumentConfiguration {
+    /** @param mapper 资料SQL @return PG权威引用，不依赖本机文件缓存 */
+    @Bean com.lawrence.travel.application.port.SourceReadStore sourceReadStore(com.lawrence.travel.infrastructure.document.SourceReadMapper mapper) {
+        return new com.lawrence.travel.infrastructure.document.PostgresSourceReadStore(mapper);
+    }
+    /** @param sources 引用 @param documents 索引 @param jobs 作业 @param tx 短事务 @param json JSON @param safety 安全 @return 本地确定性检索 */
+    @Bean com.lawrence.travel.application.document.SourceReadService sourceReadService(com.lawrence.travel.application.port.SourceReadStore sources, DocumentStore documents, JobStore jobs, BusinessTransactions tx, InteractionCodec json, SafetyGate safety) {
+        return new com.lawrence.travel.application.document.SourceReadService(sources, documents, jobs, tx, json, safety);
+    }
     /** @param e 服务端非敏感数值配置 @return 冻结初值及收紧范围 */
     @Bean com.lawrence.travel.application.document.DocumentLimits documentLimits(Environment e) {return com.lawrence.travel.application.document.DocumentLimits.from(e::getProperty);}
     /** @param mapper SQL @param limits 有界配置 @return 权威索引 */

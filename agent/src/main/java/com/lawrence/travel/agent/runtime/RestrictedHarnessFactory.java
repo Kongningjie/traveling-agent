@@ -25,7 +25,7 @@ public final class RestrictedHarnessFactory {
     public static HarnessAgent create(Model model, Toolkit toolkit, Path workspace, String role) {
         var execution = ExecutionConfig.builder().maxAttempts(1).timeout(Duration.ofSeconds(185)).build();
         // 2.0.4 的 maxRetries 实际映射为 maxAttempts，设为 1 才是单次尝试。
-        var agent = HarnessAgent.builder().name(role).agentId(role).workspace(workspace)
+        var builder = HarnessAgent.builder().name(role).agentId(role).workspace(workspace)
                 // disableSessionPersistence 不会替换核心默认状态仓库，必须显式隔离每次尝试。
                 .stateStore(new InMemoryAgentStateStore()).defaultSessionId(java.util.UUID.randomUUID().toString())
                 .model(model).toolkit(toolkit).maxIters(4).maxRetries(1)
@@ -39,7 +39,9 @@ public final class RestrictedHarnessFactory {
                 .disableSessionPersistence().disableWorkspaceContext().disableAtPathExpansion()
                 .disableSubagents().disableDynamicSubagents().disableToolsConfig()
                 .disableCompaction().disableToolResultEviction().enableAgentTracingLog(false)
-                .enableTaskList(false).enableMetaTool(false).build();
+                .enableTaskList(false).enableMetaTool(false);
+        if (toolkit instanceof SourceToolkit sources) builder.middleware(sources.eviction());
+        var agent = builder.build();
         // 框架仍会注入 wait_async_results；M0 不使用后台工具，最终工具集严格取显式白名单。
         for (String name : java.util.Set.copyOf(agent.getToolkit().getToolNames())) {
             if (!toolkit.getToolNames().contains(name)) agent.getToolkit().removeTool(name);

@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.UUID;
 /** PG附件仓储，仅做索引与配额，不调用其他适配器。 */
 public final class PostgresDocumentStore implements DocumentStore {
+    /** {@inheritDoc} 不直接改作业状态，保留预算/尝试/投影的唯一提交入口。 */
+    @Override public List<UUID> revokedReaders(Jobs.Scope s) { return safe(() -> mapper.revokedReaders(s).stream().map(UUID::fromString).toList()); }
     private final DocumentMapper mapper;
     private final com.lawrence.travel.application.document.DocumentLimits limits;
     /** @param mapper 明确SQL */

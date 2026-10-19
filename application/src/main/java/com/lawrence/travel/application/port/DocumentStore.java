@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.UUID;
 /** PG元数据及解析权威，调用方短事务内先锁用户／聊天再锁作业。 */
 public interface DocumentStore {
+    /** @param scope 已完成删除事务中的私有范围 @return 依赖旧资料水位、仍待执行/确认的聊天作业；不得包含无关附件作业 */
+    default List<UUID> revokedReaders(Jobs.Scope scope) { return List.of(); }
     /** @param scope 私有范围；不存在时拒绝 */
     void lock(Jobs.Scope scope);
     /** @param scope 私有范围 @param bytes 新原件字节；同时预留20万字符及聊天／用户容量 */

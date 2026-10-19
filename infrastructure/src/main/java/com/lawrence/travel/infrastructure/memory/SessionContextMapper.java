@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Select;
 
 /** 会话上下文SQL；参数为服务器预算归属，不暴露任意用户或任意SQL给Agent。 */
 public interface SessionContextMapper {
+    /** @param user 所有者 @param chat 聊天 @return 附件目录及资料水位，不装载全文 */
+    @Select("SELECT jsonb_build_object('revision',c.document_revision,'documents',(SELECT COALESCE(jsonb_agg(jsonb_build_object('id',d.id,'name',d.name,'kind',d.kind,'state',CASE WHEN j.state='COMPLETED' THEN 'READY' ELSE 'UNREADABLE' END)), '[]'::jsonb) FROM uploaded_document d JOIN background_job j ON j.id=d.job_id WHERE d.user_id=c.user_id AND d.chat_id=c.id AND NOT d.deleted))::text FROM dialogue_chat c WHERE c.user_id=#{user} AND c.id=#{chat}")
+    String documents(@Param("user") UUID user, @Param("chat") UUID chat);
     /** @param budget 原旅行 @param attempt 原阶段尝试 @return 仍处于同一有效租约，不能采用其他活跃阶段的资格 */
     @Select("SELECT EXISTS(SELECT 1 FROM step_attempt a JOIN outbox_event e ON e.id=a.event_id WHERE a.run_id=#{budget} AND a.id=#{attempt} AND a.state='RUNNING' AND e.status='LEASED' AND e.fencing_token=a.fencing_token AND e.lease_until>clock_timestamp())")
     boolean stageLive(@Param("budget") UUID budget,@Param("attempt") UUID attempt);

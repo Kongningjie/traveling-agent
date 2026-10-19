@@ -71,7 +71,13 @@ public final class DocumentService implements JobHandler {
     public void action(UserIdentity actor,UUID chat,UUID id,String action) { tx.required(() -> {
         var s=new Jobs.Scope(actor.id(),chat);store.lock(s);var e=store.get(s,id);
         if(action.equals("DELETE")) {
-            if(!e.deleted()) { store.delete(s,id);var job=jobs.read(s,e.jobId());if(!BackgroundJob.terminal(job.state())) jobs.control(s,e.jobId(),false); }
+            if(!e.deleted()) {
+                store.delete(s,id);
+                // 删除触发来源撤销后，通过原作业用例取消已读旧资料的输入并结算；不让失效作业等待租约后自动重跑。
+                // 只取消受影响CHAT_INPUT，不使其他附件解析失去资格，也不绕过JobStore的预算与投影处理。
+                for (UUID reader : store.revokedReaders(s)) jobs.control(s,reader,false);
+                var job=jobs.read(s,e.jobId());if(!BackgroundJob.terminal(job.state())) jobs.control(s,e.jobId(),false);
+            }
         } else {
             if(e.deleted()) throw new DocumentFailure("DOCUMENT_NOT_FOUND");
             var job=jobs.read(s,e.jobId());

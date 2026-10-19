@@ -1,6 +1,7 @@
 <!-- 私有附件交互；上传只表示保存，解析状态和清理由服务端决定，不执行文件内容。 -->
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from "vue";
+import SourcePreview from "./SourcePreview.vue";
 import { Api } from "../workspace/client";
 import { decodeDocumentList as decode, documentLabel as label } from "../workspace/documents";
 import type { DocumentView } from "../workspace/documents";
@@ -26,7 +27,7 @@ async function upload(): Promise<void> {
   finally {busy.value=false;void refresh();}
 }
 /** @param id 本聊天附件 @param action 明确操作；删除需用户确认，不通过LLM授权。 */
-async function act(id:string,action:string): Promise<void> {if(busy.value)return;if(action==="DELETE"&&!window.confirm("删除原附件及已提取正文？删除后立即不可读，后台清理原件。"))return;busy.value=true;const stamp=generation;try{await api.post(`/api/v1/chats/${props.chat}/documents/${id}/actions`,{action});}catch{if(stamp===generation)error.value="操作尚未确认，请刷新状态后重试。";}finally{busy.value=false;void refresh();}}
+async function act(id:string,action:string): Promise<void> {if(busy.value)return;if(action==="DELETE"&&!window.confirm("删除原附件及已提取正文？删除后立即不可读，后台清理原件。"))return;busy.value=true;const stamp=generation;try{await api.post(`/api/v1/chats/${props.chat}/documents/${id}/actions`,{action});if(action==="DELETE")window.dispatchEvent(new CustomEvent("travel:sources-invalidated",{detail:props.chat}));}catch{if(stamp===generation)error.value="操作尚未确认，请刷新状态后重试。";}finally{busy.value=false;void refresh();}}
 </script>
 <template>
   <details class="document-panel"><summary>旅行资料 <small>PDF / DOCX / TXT / Markdown · 单份10MiB</small></summary>
@@ -34,6 +35,7 @@ async function act(id:string,action:string): Promise<void> {if(busy.value)return
     <div class="inline"><input aria-label="上传旅行资料" type="file" accept=".pdf,.docx,.txt,.md" :disabled="busy||disabled" @change="select"/><button :disabled="busy||disabled||!file" @click="upload">{{busy?"处理中…":"保存附件"}}</button><button :disabled="busy" @click="refresh">刷新</button></div>
     <p v-if="error" role="alert" class="error">{{error}}</p>
     <ul><li v-for="item in items" :key="item.id"><strong>{{item.name}}</strong> — {{label(item)}}<p>{{item.notice}}</p>
+      <SourcePreview v-if="item.state==='READY'" :key="item.id" :chat="chat" :document="item.id" />
       <a :href="`/api/v1/chats/${chat}/documents/${item.id}/download`" download>下载原件</a>
       <button v-if="['QUEUED','RUNNING'].includes(item.state)" :disabled="busy" @click="act(item.id,'STOP')">停止解析</button>
       <button v-if="item.state==='PAUSED'" :disabled="busy" @click="act(item.id,'RETRY')">重试解析</button>

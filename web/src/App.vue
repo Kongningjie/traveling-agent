@@ -3,6 +3,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import PreferencePanel from "./components/PreferencePanel.vue";
 import ChatComposer from "./components/ChatComposer.vue";
+import SourcePreview from "./components/SourcePreview.vue";
 import DocumentPanel from "./components/DocumentPanel.vue";
 import DecisionCard from "./components/DecisionCard.vue";
 import ItineraryPanel from "./components/ItineraryPanel.vue";
@@ -629,7 +630,7 @@ onMounted(initialize);
             <template v-if="chatSelected">
               <template v-for="item in chatView?.messages ?? []" :key="item.id">
                 <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small>{{ item.state === 'WITHDRAWN' ? '已撤回处理，原文保留' : '已保存' }}</small></article>
-                <article v-if="item.reply" class="chat-message assistant-message"><span class="assistant-mark" aria-hidden="true">行</span><div class="message-bubble"><p class="dialogue-reply">{{ item.reply }}</p></div></article>
+                <article v-if="item.reply" class="chat-message assistant-message"><span class="assistant-mark" aria-hidden="true">行</span><div class="message-bubble"><p class="dialogue-reply">{{ item.reply }}</p><SourcePreview :key="chatSelected + item.id" :chat="chatSelected" :message="item.id" :revision="item.reply" /></div></article>
                 <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
                 <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
                   <h3>请确认这次操作</h3><p>{{ item.operation.description }}</p>

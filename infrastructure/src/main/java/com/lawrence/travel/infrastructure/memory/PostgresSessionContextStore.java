@@ -71,6 +71,7 @@ public final class PostgresSessionContextStore implements SessionContextStore {
             core.put("travel",json.decode(legacy.authority(),Object.class));
         }
         if(preference==null) throw new PreferenceChangedException();
+        if (chat != null) core.put("documentSources", json.decode(mapper.documents(user, chat), Object.class));
         core.put("policy","session-context-v1"); core.put("preferenceRevision",preference); core.put("historyCannotGrantPermission",true);
         var messages=new ArrayList<SessionContext.Message>();
         if(!role.equals("reviewer")) {

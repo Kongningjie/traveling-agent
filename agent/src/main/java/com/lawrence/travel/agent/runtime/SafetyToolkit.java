@@ -5,7 +5,7 @@ import io.agentscope.core.tool.Toolkit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 一次调用的失败关闭工具集，SDK不能把安全异常转成工具文本后继续让模型改写绕过。 */
-public final class SafetyToolkit extends Toolkit {
+public class SafetyToolkit extends Toolkit {
     private final AtomicReference<SafetyGate.Failure> rejected=new AtomicReference<>();
     /** 无共享跨用户状态；每次运行实例独立。 */
     public SafetyToolkit() { super(); }

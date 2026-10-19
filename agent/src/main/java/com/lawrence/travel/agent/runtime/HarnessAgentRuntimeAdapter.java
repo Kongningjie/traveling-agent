@@ -34,6 +34,9 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final com.lawrence.travel.application.port.InteractionCodec json;
     private final com.lawrence.travel.application.memory.SessionContextService sessions;
     private final com.lawrence.travel.application.safety.SafetyGate safety;
+    private final com.lawrence.travel.application.document.SourceReadService sourceReads;
+    private final com.lawrence.travel.application.port.BudgetLedger sourceLedger;
+    private final com.lawrence.travel.domain.execution.control.RunLimits sourceLimits;
     private final OkHttpClient client = new OkHttpClient();
 
     /** smoke 仅提供状态，没有请求发送能力。 */
@@ -74,6 +77,15 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
             java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
             com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions, com.lawrence.travel.application.safety.SafetyGate safety) {
+        this(admission, models, keySupplier, workspaceRoot, toolkits, contexts, json, sessions, safety, null, null, null);
+    }
+    /** @param admission 统一准入 @param models 白名单 @param keySupplier 本机凭据 @param workspaceRoot 隔离工作区 @param toolkits 外部工具白名单 @param contexts 业务源 @param json JSON @param sessions PG会话 @param safety 安全 @param sourceReads 本地资料 @param sourceLedger 原预算计量 @param sourceLimits 预算初值 */
+    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
+            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.document.SourceReadService sourceReads,
+            com.lawrence.travel.application.port.BudgetLedger sourceLedger, com.lawrence.travel.domain.execution.control.RunLimits sourceLimits) {
+        this.sourceReads=sourceReads; this.sourceLedger=sourceLedger; this.sourceLimits=sourceLimits;
         this.contexts = contexts; this.json = json; this.sessions=sessions; this.safety=safety==null?com.lawrence.travel.application.safety.SafetyGate.local():safety;
         this.admission = admission;
         this.models = Map.copyOf(models);
@@ -116,7 +128,10 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         safety.require("INPUT",prompt);
         String key = keySupplier.get();
         if (key == null || key.isBlank()) throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
-        var toolkit=allowTools?toolkits.apply(runId,role):new Toolkit();
+        // 只为有原领取身份的协调请求开放资料工具；原文提取、审核及普通探针仍无资料读取权。
+        Toolkit toolkit = basis != null && basis.attemptToken() != null && role.equals("coordinator") && sourceReads != null
+                ? new SourceToolkit(sourceReads, runId, basis.attemptToken(), sourceLedger, sourceLimits)
+                : allowTools ? toolkits.apply(runId, role) : new Toolkit();
         var source = new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.AgentContext.Source>();
         var sessionSource=new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.SessionContext.Source>();
         var transport = new GuardedDashScopeTransport(admission, runId, role, client, () -> {
