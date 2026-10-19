@@ -12,6 +12,12 @@ import org.apache.ibatis.annotations.Update;
 
 /** 所有证据查询均限定双重归属；写入在任务锁和引擎权威事务内串行化。 */
 public interface EvidenceMapper {
+    /** @param user 用户 @return 当前偏好，用于交接快照 */
+    @org.apache.ibatis.annotations.Select("SELECT preference_revision FROM app_user WHERE id=#{user}")
+    long preference(@org.apache.ibatis.annotations.Param("user") java.util.UUID user);
+    /** @param user 用户 @return C事务先用户后任务锁，防止旧策略贴上新偏好版本 */
+    @org.apache.ibatis.annotations.Select("SELECT preference_revision FROM app_user WHERE id=#{user} FOR SHARE")
+    long lockPreference(@org.apache.ibatis.annotations.Param("user") java.util.UUID user);
     /** @param body 不可变正文 @param artifactId 精确被选中的已提交产物 @param reason 追加失效状态，可空 */
     record Row(String body, UUID artifactId, String reason) { }
     /** @return 数据库时间；用于最终门禁 */

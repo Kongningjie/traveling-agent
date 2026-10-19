@@ -23,11 +23,14 @@ public final class StageExecutor {
     }
     private final ExecutionEngineStore store;
     private final List<StageHandler> handlers;
+    private final com.lawrence.travel.application.port.ExecutionTrace trace;
     /**
      * @param store 权威状态
      * @param handlers 明确注册的处理器；不得默认替换为真实模型
      */
-    public StageExecutor(ExecutionEngineStore store, List<StageHandler> handlers) { this.store = store; this.handlers = List.copyOf(handlers); }
+    public StageExecutor(ExecutionEngineStore store, List<StageHandler> handlers) { this(store,handlers,com.lawrence.travel.application.port.ExecutionTrace.disabled()); }
+    /** @param store 权威引擎 @param handlers 固定处理器 @param trace 无正文执行轨迹 */
+    public StageExecutor(ExecutionEngineStore store, List<StageHandler> handlers, com.lawrence.travel.application.port.ExecutionTrace trace) {this.store=store;this.handlers=List.copyOf(handlers);this.trace=trace;}
     /**
      * @param type 阶段
      * @return 恰好一个处理器支持；未配置或冲突均不领取
@@ -43,12 +46,22 @@ public final class StageExecutor {
             if (!store.renew(claim.fence())) return;
             var matches = handlers.stream().filter(h -> h.supports(claim.step().key().type())).toList();
             if (matches.size() != 1) { store.fail(claim.fence(), ExecutionEngineStore.Failure.PERMANENT); return; }
-            if (!control.enter()) return;
+            var type=claim.step().key().type();
+            var kind=switch(type) {case PLAN -> com.lawrence.travel.application.port.ExecutionTrace.Kind.PLAN;case REVIEW -> com.lawrence.travel.application.port.ExecutionTrace.Kind.REVIEW;case VALIDATE -> com.lawrence.travel.application.port.ExecutionTrace.Kind.VALIDATE;case RESEARCH -> claim.step().key().branchKey().startsWith("delegate_")?com.lawrence.travel.application.port.ExecutionTrace.Kind.DELEGATE:com.lawrence.travel.application.port.ExecutionTrace.Kind.COORDINATE;default -> com.lawrence.travel.application.port.ExecutionTrace.Kind.CONTEXT;};
             StageOutput output;
-            try { output = matches.getFirst().execute(claim); }
-            finally { control.leave(); }
-            if (control.cancelled()) return;
-            store.commit(store.prepare(claim, output));
+            try(var span=trace.open(claim.fence().runId(),kind,java.util.Map.of("stage",claim.fence().stepId().toString(),"generation",Long.toString(claim.fence().generation()),"revision",Long.toString(claim.fence().constraintRevision()),"schema","stage-output-v1","sourceHash",com.lawrence.travel.application.memory.AgentContext.hash(claim.input())))) {
+                if (!control.enter()) {span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED);return;}
+                try { output=matches.getFirst().execute(claim); }
+                catch(Exception failure) {span.fail(failure instanceof CallRejectedException?com.lawrence.travel.application.port.ExecutionTrace.Failure.REJECTED:Thread.currentThread().isInterrupted()?com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED:com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);throw failure;}
+                finally {control.leave();}
+                if(control.cancelled()){span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED);return;}
+            }
+            com.lawrence.travel.application.port.StageCommitPort.Result committed;
+            try(var span=trace.open(claim.fence().runId(),com.lawrence.travel.application.port.ExecutionTrace.Kind.COMMIT,java.util.Map.of("stage",claim.fence().stepId().toString()))) {
+                try {committed=store.commit(store.prepare(claim,output));if(committed==com.lawrence.travel.application.port.StageCommitPort.Result.STALE)span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED);}
+                catch(RuntimeException failure){span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);throw failure;}
+            }
+            if(committed==com.lawrence.travel.application.port.StageCommitPort.Result.COMMITTED && output.outcome()==StageOutput.Outcome.WAIT_USER)try(var wait=trace.open(claim.fence().runId(),com.lawrence.travel.application.port.ExecutionTrace.Kind.WAIT,java.util.Map.of("stage",claim.fence().stepId().toString()))) { }
         } catch (CallRejectedException rejected) {
             if (control.cancelled()) return;
             var failure = switch (rejected.reason()) {

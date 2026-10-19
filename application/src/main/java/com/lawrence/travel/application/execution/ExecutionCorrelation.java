@@ -6,6 +6,19 @@ import java.util.UUID;
 public final class ExecutionCorrelation {
     private static final ThreadLocal<Ids> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<UUID> SPAN = new ThreadLocal<>();
+    private static final ThreadLocal<UUID> TRACE = new ThreadLocal<>();
+    /** @return 可嵌套诊断父级；与原业务attempt分离，避免子轨迹被当作PG阶段身份 */
+    public static UUID traceParent() { return TRACE.get()==null?SPAN.get():TRACE.get(); }
+    /** @param id 子轨迹 @return 关闭后恢复，不改变parentSpan()业务身份 */
+    public static TraceScope bindTrace(UUID id) { var previous=TRACE.get();TRACE.set(id);return new TraceScope(previous); }
+    /** 诊断轨迹线程作用域，只能在创建线程退出。 */
+    public static final class TraceScope implements AutoCloseable {
+        private final UUID previous;
+        /** @param previous 上层轨迹，可空 */
+        private TraceScope(UUID previous) { this.previous=previous; }
+        /** 恢复诊断父级，不更改业务领取身份。 */
+        @Override public void close() {if(previous==null)TRACE.remove();else TRACE.set(previous);}
+    }
     /** @return 当前阶段父span；并行调查线程必须各自绑定，不猜测最近执行阶段 */
     public static UUID parentSpan() { return SPAN.get(); }
     /** @param id 当前实际阶段尝试 @return 用完恢复原值 */

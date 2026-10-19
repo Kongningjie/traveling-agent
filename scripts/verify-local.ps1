@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -56,7 +56,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'Source') { '-Dtest=SourceReadIntegrationTest,SourceToolkitTest,SessionContextIntegrationTest,DocumentIntegrationTest,ControlledHarnessCallTest,ModuleArchitectureTest' }
+    $selectedTest = if ($Scope -eq 'Trace') { '-Dtest=TracedCompressionTest,SessionContextIntegrationTest,BudgetLedgerIntegrationTest,TravelToolContractTest,SourceToolkitTest,ControlledHarnessCallTest,GuardedTransportTest,GuardedStreamTest,SourceReadIntegrationTest,AgentStrategyTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Strategy') { '-Dtest=AgentStrategyTest,ResearchIntegrationTest,ExecutionEngineIntegrationTest,PlanningIntegrationTest,SessionContextIntegrationTest,BudgetLedgerIntegrationTest,GuardedTransportTest,GuardedStreamTest,ControlledHarnessCallTest,HarnessContractTest,SourceToolkitTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Source') { '-Dtest=SourceReadIntegrationTest,SourceToolkitTest,SessionContextIntegrationTest,DocumentIntegrationTest,ControlledHarnessCallTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Document') { '-Dtest=DocumentLimitsTest,DocumentIntegrationTest,DocumentParserTest,JobIntegrationTest,ArtifactIntegrationTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Session') { '-Dtest=BackgroundJobTest,TravelToolContractTest,SessionContextIntegrationTest,DialogueIntegrationTest,ContextIntegrationTest,JobIntegrationTest,SafetyGateTest,ControlledHarnessCallTest,DialogueIntentContractTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Job') { '-Dtest=PreferenceIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,IdentityIntegrationTest,JobIntegrationTest,DialogueIntegrationTest,BudgetLedgerIntegrationTest,DialogueWorkerTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,ModuleArchitectureTest,ModelCallAdmissionTest,BackgroundJobTest' }
@@ -82,6 +84,8 @@ try {
         if ($Scope -eq 'Job') { $selectedTest = '-Dtest=JobIntegrationTest' }
         if ($Scope -eq 'Document') { $selectedTest = '-Dtest=DocumentIntegrationTest' }
         if ($Scope -eq 'Source') { $selectedTest = '-Dtest=SourceReadIntegrationTest' }
+        if ($Scope -eq 'Trace') { throw 'Trace为多类回归，不接受方法选择。' }
+        if ($Scope -eq 'Strategy') { $selectedTest = '-Dtest=ResearchIntegrationTest' }
         if ($Scope -eq 'Session') { $selectedTest = '-Dtest=SessionContextIntegrationTest' }
         $selectedTest += "#$TestMethod"
     }

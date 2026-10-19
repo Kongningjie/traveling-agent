@@ -19,27 +19,39 @@ public final class SourceTools {
     private final BudgetLedger ledger;
     private final RunLimits limits;
     private final SourceToolkit boundary;
+    private final com.lawrence.travel.application.port.ExecutionTrace trace;
+    private final com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+    private final UUID parent=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
+    private final UUID traceParent=com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent();
 
     /** @param service 应用入口 @param budget 原输入 @param token 原领取token @param ledger 统一计量 @param limits 默认预算 @param boundary 当前调用失败关闭 */
     public SourceTools(SourceReadService service, UUID budget, long token, BudgetLedger ledger, RunLimits limits, SourceToolkit boundary) {
+        this(service,budget,token,ledger,limits,boundary,com.lawrence.travel.application.port.ExecutionTrace.disabled());
+    }
+    /** @param service 应用读取 @param budget 预算 @param token 原尝试 @param ledger 计量 @param limits 上限 @param boundary 失败关闭 @param trace 事实 */
+    public SourceTools(SourceReadService service, UUID budget, long token, BudgetLedger ledger, RunLimits limits, SourceToolkit boundary, com.lawrence.travel.application.port.ExecutionTrace trace) {
         this.service = service; this.budget = budget; this.token = token;
-        this.ledger = ledger; this.limits = limits; this.boundary = boundary;
+        this.ledger = ledger; this.limits = limits; this.boundary = boundary; this.trace=trace;
     }
 
     /** @param work 确定性本地读取 @param <T> 返回类型 @return 计入原工具预算的结果，失败不自动重试 */
     private <T> T query(Supplier<T> work) {
-        boundary.check(); long started = System.nanoTime();
+        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation);var attempt=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent);var binding=com.lawrence.travel.application.execution.ExecutionCorrelation.bindTrace(traceParent);
+                var span=trace.open(budget,com.lawrence.travel.application.port.ExecutionTrace.Kind.RETRIEVAL,java.util.Map.of("schema","source-read-v1"))) {
+        long started = System.nanoTime();
         BudgetLedger.Reservation reservation = null; boolean completed = false;
         try {
+            boundary.check();
             reservation = ledger.reserve(budget, CallKind.TOOL, limits,
                     new BudgetLedger.Target("SOURCE_READ", "LOCAL", "LOCAL_READ"), 0, Instant.now());
             T value = work.get(); completed = true; return value;
         }
-        catch (RuntimeException failure) { boundary.fail(); throw new IllegalStateException("SOURCE_READ_REJECTED"); }
+        catch (RuntimeException failure) { boundary.fail(); span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED); throw new IllegalStateException("SOURCE_READ_REJECTED"); }
         finally {
             // 本地确定性读取没有供应商Token；成功可确定为零，失败保留UNKNOWN，不改旧账。
             if (reservation != null) try { ledger.finish(reservation.id(), completed ? new com.lawrence.travel.domain.execution.control.TokenUsage(0, 0) : null, Duration.ofNanos(System.nanoTime() - started)); }
-            catch (RuntimeException failure) { boundary.fail(); throw new IllegalStateException("SOURCE_METER_UNAVAILABLE"); }
+            catch (RuntimeException failure) { boundary.fail(); span.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.UNKNOWN); throw new IllegalStateException("SOURCE_METER_UNAVAILABLE"); }
+        }
         }
     }
 

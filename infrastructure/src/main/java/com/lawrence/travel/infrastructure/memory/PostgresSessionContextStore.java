@@ -52,7 +52,7 @@ public final class PostgresSessionContextStore implements SessionContextStore {
     /** @param budget 受信预算 @param role 固定角色 @param attempt 原阶段尝试，聊天为空 @return 完整近期来源和保护区 */
     private SessionContext.Source snapshot(UUID budget,String role,UUID attempt) {
         ContextAssembler.limit(role); var operation=mapper.operation(budget); AgentContext.Source legacy=null;
-        UUID user,chat; long before,epoch,token; Long preference;
+        UUID user,chat; long before,epoch,token; Long preference; long handoffGeneration=0,handoffRevision=0;
         var core=new LinkedHashMap<String,Object>();
         if(operation!=null) {
             if(!operation.live()) throw new PreferenceChangedException(); user=operation.userId(); chat=operation.chatId(); before=operation.sequence(); token=operation.token();
@@ -60,7 +60,7 @@ public final class PostgresSessionContextStore implements SessionContextStore {
             core.put("preferences",mapper.preferences(user).stream().map(s -> json.decode(s,Object.class)).toList());
             if(operation.taskId()!=null) {
                 var scope=new com.lawrence.travel.domain.travel.TaskScope(user,operation.taskId()); var task=travel.task(scope);
-                if(task==null) throw new PreferenceChangedException(); core.put("requirements",json.decode(travel.requirements(scope,task.revision()),Object.class)); core.put("versions",json.decode(travel.versions(scope),Object.class));
+                if(task==null) throw new PreferenceChangedException(); handoffGeneration=task.generation(); handoffRevision=task.revision(); core.put("requirements",json.decode(travel.requirements(scope,task.revision()),Object.class)); core.put("versions",json.decode(travel.versions(scope),Object.class));
             }
             core.put("unresolved",mapper.unresolved(user,chat).stream().map(s -> json.decode(s,Object.class)).toList());
         } else {
@@ -71,6 +71,11 @@ public final class PostgresSessionContextStore implements SessionContextStore {
             core.put("travel",json.decode(legacy.authority(),Object.class));
         }
         if(preference==null) throw new PreferenceChangedException();
+        // 统一角色交接只传可信身份、版本、允许工具和完成契约，不传上一个角色的任意自评。
+        var handoff=new LinkedHashMap<String,Object>();handoff.put("schema","role-handoff-v1");handoff.put("userId",user);handoff.put("chatId",chat);handoff.put("taskId",legacy==null?operation.taskId():legacy.scope().taskId());
+        handoff.put("runId",legacy==null?null:legacy.runId());handoff.put("budgetId",budget);handoff.put("generation",legacy==null?handoffGeneration:legacy.generation());handoff.put("constraintRevision",legacy==null?handoffRevision:legacy.constraintRevision());handoff.put("preferenceRevision",preference);handoff.put("role",role);
+        handoff.put("allowedTools",operation!=null && role.equals("coordinator")?List.of("ListDocuments","SearchDocument","ReadDocumentSection","ReadConversationSource","read_file"):List.of());
+        handoff.put("completion",role.equals("reviewer")?"ISSUES_ONLY":role.equals("planner")?"PROPOSE_ONLY":role.equals("research")?"EVIDENCE_OR_UNKNOWN":"STRATEGY_OR_CLARIFY");handoff.put("blockedReason","NONE");core.put("handoff",handoff);
         if (chat != null) core.put("documentSources", json.decode(mapper.documents(user, chat), Object.class));
         core.put("policy","session-context-v1"); core.put("preferenceRevision",preference); core.put("historyCannotGrantPermission",true);
         var messages=new ArrayList<SessionContext.Message>();

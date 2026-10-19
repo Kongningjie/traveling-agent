@@ -25,6 +25,10 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class EngineConfiguration {
+    /** @param mapper 诊断 @param ownership 归属 @param tx 事务 @param json 元数据 @return 只存执行事实的PG轨迹 */
+    @Bean com.lawrence.travel.application.port.ExecutionTrace executionTrace(com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper mapper, com.lawrence.travel.infrastructure.execution.jobs.QuotaMapper ownership, BusinessTransactions tx, TravelJson json) {
+        return new com.lawrence.travel.infrastructure.execution.jobs.PostgresExecutionTrace(mapper, ownership, tx, json);
+    }
     /**
      * @param mapper 执行 SQL
      * @param tasks 任务 SQL
@@ -44,9 +48,10 @@ public class EngineConfiguration {
     /**
      * @param store 执行权威
      * @param handlers 显式业务处理器，当前允许为空
+     * @param trace 受控事实轨迹
      * @return 唯一阶段执行器
      */
-    @Bean StageExecutor stageExecutor(ExecutionEngineStore store, List<StageHandler> handlers) { return new StageExecutor(store, handlers); }
+    @Bean StageExecutor stageExecutor(ExecutionEngineStore store, List<StageHandler> handlers, com.lawrence.travel.application.port.ExecutionTrace trace) { return new StageExecutor(store, handlers, trace); }
     /**
      * @param store 执行权威
      * @param executor 阶段处理

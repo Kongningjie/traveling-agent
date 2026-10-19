@@ -66,6 +66,9 @@ class ResearchIntegrationTest {
     @Autowired private EvidencePolicy policy;
     @Autowired private TravelJson json;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.lawrence.travel.application.port.ExecutionTrace trace;
+    @Autowired private com.lawrence.travel.application.port.BudgetLedger ledger;
+    @Autowired private com.lawrence.travel.bootstrap.config.ExecutionControlProperties controls;
     @MockitoBean private ResearchAdvisor advisor;
     @MockitoBean private TravelToolService tools;
     @org.springframework.boot.test.web.server.LocalServerPort private int port;
@@ -274,4 +277,149 @@ class ResearchIntegrationTest {
         jdbc.update("INSERT INTO itinerary_candidate(id,user_id,task_id,snapshot_id,run_id,generation,plan_step_id,plan_attempt_id,state) VALUES(?,?,?,?,?,?,?,?,'PRESENTED')", candidate, f.actor().id(), f.scope().taskId(), snapshot, c.fence().runId(), c.fence().generation(), c.fence().stepId(), c.fence().attemptId());
         return candidate;
     }
+
+    /** @param count 合成查询数 @param stop 收敛条件 @return 受限并行策略，工具参数不含外部真实地址 */
+    private Research.Plan strategyPlan(int count, com.lawrence.travel.domain.execution.AgentStrategy.Stop stop) {
+        var queries=new java.util.ArrayList<Research.Query>();var nodes=new java.util.ArrayList<com.lawrence.travel.domain.execution.AgentStrategy.Branch>();
+        for(int i=0;i<count;i++){queries.add(new Research.Query("北京"+i,"poi",TravelToolPort.Operation.PLACE,Map.of("city","北京","keywords","合成地点"+i),null));nodes.add(new com.lawrence.travel.domain.execution.AgentStrategy.Branch(i,List.of(),List.of("PLACE")));}
+        return new Research.Plan(queries,new com.lawrence.travel.domain.execution.AgentStrategy(1,count==0?com.lawrence.travel.domain.execution.AgentStrategy.Goal.REUSE:com.lawrence.travel.domain.execution.AgentStrategy.Goal.RESEARCH,stop,nodes,List.of()));
+    }
+    /** @param run 当前运行 @param step 稳定阶段 @return 精确候选，不误取其他测试/真实任务 */
+    private ExecutionEngineStore.Hint hint(UUID run,UUID step) {return engine.candidates(100).stream().filter(h -> h.runId().equals(run)&&h.stepId().equals(step)).findFirst().orElseThrow();}
+
+    /** 分支/汇合原子登记，最多两项实际领取；必要分支未完成不能进入PLAN。 */
+    @Test void strategyFanoutUsesExistingTwoBranchSchedulerAndJoin() {
+        var f=fixture();when(advisor.plan(any(),any())).thenReturn(strategyPlan(3,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN));
+        var root=claim(f,"{}");var output=handler.execute(root);var command=engine.prepare(root,output);
+        assertThat(engine.commit(command)).isEqualTo(StageCommitPort.Result.COMMITTED);assertThat(engine.commit(command)).isEqualTo(StageCommitPort.Result.ALREADY_COMMITTED);
+        var a=engine.claim(hint(root.fence().runId(),output.next().get(0).id()),"strategy-test").orElseThrow();
+        var b=engine.claim(hint(root.fence().runId(),output.next().get(1).id()),"strategy-test").orElseThrow();
+        assertThat(engine.claim(hint(root.fence().runId(),output.next().get(2).id()),"strategy-test")).isEmpty();
+        assertThat(engine.claim(hint(root.fence().runId(),output.next().get(3).id()),"strategy-test")).isEmpty();
+        when(tools.query(any(),any(),any())).thenThrow(new IllegalStateException("SYNTHETIC_FAILURE"));
+        complete(a);complete(b);var c=engine.claim(hint(root.fence().runId(),output.next().get(2).id()),"strategy-test").orElseThrow();complete(c);
+        assertThat(engine.claim(hint(root.fence().runId(),output.next().get(3).id()),"strategy-test")).isPresent();
+        assertThat(service.list(f.actor(),f.scope().taskId())).allSatisfy(v -> assertThat(v.effectiveStatus()).isEqualTo(EvidenceRecord.Status.UNKNOWN));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM itinerary_candidate WHERE user_id=?",Integer.class,f.actor().id())).isZero();
+    }
+
+    /** 自定义依赖由PG判定，前置调查未完成时从属调查不领取。 */
+    @Test void strategyDependenciesAndToolRequestsAreChecked() {
+        var f=fixture();var plan=strategyPlan(2,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN);
+        var strategy=new com.lawrence.travel.domain.execution.AgentStrategy(1,plan.strategy().goal(),plan.strategy().stop(),List.of(plan.strategy().branches().getFirst(),new com.lawrence.travel.domain.execution.AgentStrategy.Branch(1,List.of(0),List.of("PLACE"))),List.of());
+        when(advisor.plan(any(),any())).thenReturn(new Research.Plan(plan.queries(),strategy));var root=claim(f,"{}");var output=handler.execute(root);engine.commit(engine.prepare(root,output));
+        assertThat(engine.claim(hint(root.fence().runId(),output.next().get(1).id()),"strategy-test")).isEmpty();
+        var first=engine.claim(hint(root.fence().runId(),output.next().getFirst().id()),"strategy-test").orElseThrow();when(tools.query(any(),any(),any())).thenThrow(new IllegalStateException("SYNTHETIC_FAILURE"));complete(first);
+        assertThat(engine.claim(hint(root.fence().runId(),output.next().get(1).id()),"strategy-test")).isPresent();
+        var bad=new com.lawrence.travel.domain.execution.AgentStrategy(1,plan.strategy().goal(),plan.strategy().stop(),List.of(new com.lawrence.travel.domain.execution.AgentStrategy.Branch(0,List.of(),List.of("SHELL")),plan.strategy().branches().get(1)),List.of());
+        when(advisor.plan(any(),any())).thenReturn(new Research.Plan(plan.queries(),bad));
+        assertThatThrownBy(() -> handler.execute(claim(f,"{}"))).hasMessage("AGENT_TOOL_SCOPE_INVALID");
+    }
+
+    /** 只允许一次补查，完全重复查询没有进展时拒绝，不无限循环。 */
+    @Test void strategyRefinementRejectsDuplicateQueries() {
+        var f=fixture();var plan=strategyPlan(1,com.lawrence.travel.domain.execution.AgentStrategy.Stop.REFINE_ONCE);when(advisor.plan(any(),any())).thenReturn(plan);
+        var root=claim(f,"{}");var output=handler.execute(root);engine.commit(engine.prepare(root,output));
+        when(tools.query(any(),any(),any())).thenThrow(new IllegalStateException("SYNTHETIC_FAILURE"));complete(engine.claim(hint(root.fence().runId(),output.next().getFirst().id()),"strategy-test").orElseThrow());
+        var join=engine.claim(hint(root.fence().runId(),output.next().getLast().id()),"strategy-test").orElseThrow();
+        assertThatThrownBy(() -> handler.execute(join)).hasMessage("RESEARCH_NO_PROGRESS");
+    }
+
+    /** 偏好在协调返回至提交之间变化，C事务拒绝旧策略和委派，不贴最新标签。 */
+    @Test void strategyPreferenceChangeRejectsAtomicDispatch() {
+        var f=fixture();when(advisor.plan(any(),any())).thenReturn(strategyPlan(1,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN));
+        var root=claim(f,"{}");var command=engine.prepare(root,handler.execute(root));jdbc.update("UPDATE app_user SET preference_revision=preference_revision+1 WHERE id=?",f.actor().id());
+        assertThatThrownBy(() -> engine.commit(command)).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM execution_step WHERE run_id=?",Integer.class,root.fence().runId())).isEqualTo(1);
+    }
+
+    /** 实际StageExecutor写协调/提交父子轨迹；持久身份不等于新的业务执行权。 */
+    @Test void executorPersistsCoordinatorAndCommitFactsWithoutPayload() {
+        var f=fixture();when(advisor.plan(any(),any())).thenReturn(strategyPlan(0,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN));var root=claim(f,"{}");
+        var executor=new com.lawrence.travel.application.execution.StageExecutor(engine,List.of(handler),trace);
+        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(engine.correlation(root));var attempt=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(root.fence().attemptId())) {
+            executor.execute(root,new com.lawrence.travel.application.execution.StageExecutor.Control() {
+                /** 受控本地执行，不创建任何实际模型请求。 */
+                @Override public boolean enter(){return true;}
+                /** 模拟原worker清理中断标记。 */
+                @Override public void leave(){Thread.interrupted();}
+                /** 本例未请求停止。 */
+                @Override public boolean cancelled(){return false;}
+            });
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM execution_trace_span WHERE run_id=? AND kind IN('COORDINATE','COMMIT') AND state='COMPLETED' AND parent_id=?",Integer.class,root.fence().runId(),root.fence().attemptId())).isEqualTo(2);
+        assertThat(jdbc.queryForList("SELECT metadata::text FROM execution_trace_span WHERE run_id=?",String.class,root.fence().runId())).allSatisfy(body -> assertThat(body).doesNotContain("requirements","fixedArrangements","apiKey"));
+    }
+
+    /** 原预算实际计量保持唯一；嵌套压缩及UNKNOWN归到正确父级，不清未知或复算费用。 */
+    @Test void traceSummarizesOriginalMetersAndRetainsUnknown() {
+        var f=fixture();var root=claim(f,"{}");var run=root.fence().runId();
+        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(engine.correlation(root));var attempt=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(root.fence().attemptId());
+                var outer=trace.open(run,com.lawrence.travel.application.port.ExecutionTrace.Kind.COORDINATE,Map.of("schema","trace-meter-test"))) {
+            try(var compact=trace.open(run,com.lawrence.travel.application.port.ExecutionTrace.Kind.COMPACT,Map.of("schema","digest-v1"))) {
+                var meter=ledger.reserve(run,com.lawrence.travel.domain.execution.control.CallKind.MODEL,controls.limits().runLimits(),new com.lawrence.travel.application.port.BudgetLedger.Target("SYNTHETIC_MODEL","LOCAL","LOCAL_TEST"),10,Instant.now());
+                ledger.finish(meter.id(),new com.lawrence.travel.domain.execution.control.TokenUsage(4,2),java.time.Duration.ofMillis(1));
+            }
+            var unknown=ledger.reserve(run,com.lawrence.travel.domain.execution.control.CallKind.TOOL,controls.limits().runLimits(),new com.lawrence.travel.application.port.BudgetLedger.Target("SYNTHETIC_TOOL","LOCAL","LOCAL_TEST"),0,Instant.now());ledger.finish(unknown.id(),null,java.time.Duration.ofMillis(1));outer.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.UNKNOWN);
+        }
+        var metadata=jdbc.queryForObject("SELECT metadata::text FROM execution_trace_span WHERE run_id=? AND metadata->>'schema'='trace-meter-test'",String.class,run);
+        var parsed=json.decode(metadata,Map.class);assertThat(((Number)parsed.get("meterCalls")).intValue()).isEqualTo(2);assertThat(((Number)parsed.get("unknownCalls")).intValue()).isEqualTo(1);assertThat(((Number)parsed.get("knownInputTokens")).intValue()).isEqualTo(4);
+        assertThat(ledger.read(run).modelCalls()).isEqualTo(1);assertThat(ledger.read(run).toolCalls()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM call_meter WHERE run_id=? AND status='UNKNOWN'",Integer.class,run)).isEqualTo(1);
+        assertThatThrownBy(() -> trace.open(run,com.lawrence.travel.application.port.ExecutionTrace.Kind.PLAN,Map.of("prompt","FORBIDDEN_SYNTHETIC_BODY"))).hasMessage("TRACE_METADATA_INVALID");
+    }
+    /** 缺少多个字段时各自生成问题，真实提交暂停且不产生规划或候选。 */
+    @Test void strategyClarificationPersistsSeparateQuestions() {
+        var f=fixture();
+        var strategy=new com.lawrence.travel.domain.execution.AgentStrategy(1,com.lawrence.travel.domain.execution.AgentStrategy.Goal.CLARIFY,com.lawrence.travel.domain.execution.AgentStrategy.Stop.WAIT_USER,List.of(),List.of("interests","hardRequirements"));
+        when(advisor.plan(any(),any())).thenReturn(new Research.Plan(List.of(),strategy));
+        var root=claim(f,"{}");var output=handler.execute(root);
+        assertThat(output.outcome()).isEqualTo(StageOutput.Outcome.WAIT_USER);assertThat(output.decision().remaining()).hasSize(2);
+        assertThat(engine.commit(engine.prepare(root,output))).isEqualTo(StageCommitPort.Result.COMMITTED);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM decision_request WHERE run_id=?",Integer.class,root.fence().runId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM execution_step WHERE run_id=?",Integer.class,root.fence().runId())).isEqualTo(1);
+        verifyNoInteractions(tools);
+    }
+
+    /** 第二轮即使模型仍要求补查，也只能汇合PLAN；停止后迟到产物不能提交。 */
+    @Test void strategyRefinementConvergesAndCancellationRejectsLateBranch() {
+        var f=fixture();var first=strategyPlan(1,com.lawrence.travel.domain.execution.AgentStrategy.Stop.REFINE_ONCE);
+        var second=new Research.Plan(List.of(new Research.Query("北京补查","poi",TravelToolPort.Operation.PLACE,Map.of("city","北京","keywords","补查地点"),null)),first.strategy());
+        when(advisor.plan(any(),any())).thenReturn(first,second);when(tools.query(any(),any(),any())).thenThrow(new IllegalStateException("SYNTHETIC_TIMEOUT"));
+        var root=claim(f,"{}");var initial=handler.execute(root);engine.commit(engine.prepare(root,initial));
+        complete(engine.claim(hint(root.fence().runId(),initial.next().getFirst().id()),"strategy-test").orElseThrow());
+        var join=engine.claim(hint(root.fence().runId(),initial.next().getLast().id()),"strategy-test").orElseThrow();var refined=handler.execute(join);
+        assertThat(refined.next().getLast().key().type()).isEqualTo(StageType.PLAN);engine.commit(engine.prepare(join,refined));
+        var branch=engine.claim(hint(root.fence().runId(),refined.next().getFirst().id()),"strategy-test").orElseThrow();
+        var prepared=engine.prepare(branch,handler.execute(branch));transactions.required(() -> engine.cancel(f.scope(),root.fence().runId()));
+        assertThat(engine.commit(prepared)).isEqualTo(StageCommitPort.Result.STALE);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM field_evidence WHERE run_id=?",Integer.class,root.fence().runId())).isEqualTo(1);
+    }
+
+    /** 恢复交接不能换用户、代次、工具或输出协议，拒绝发生在任何工具调用之前。 */
+    @Test void strategyHandoffRejectsScopeGenerationAndSchemaChanges() {
+        var f=fixture();when(advisor.plan(any(),any())).thenReturn(strategyPlan(1,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN));
+        var root=claim(f,"{}");var output=handler.execute(root);engine.commit(engine.prepare(root,output));
+        var branch=engine.claim(hint(root.fence().runId(),output.next().getFirst().id()),"strategy-test").orElseThrow();var body=json.decode(branch.input(),Map.class);
+        for(var field:List.of("scope","generation","schema","tools")) {
+            var altered=new java.util.LinkedHashMap<String,Object>(body);var handoff=new java.util.LinkedHashMap<String,Object>((Map)body.get("handoff"));
+            handoff.put(field,switch(field){case "scope" -> Map.of("userId",UUID.randomUUID(),"taskId",f.scope().taskId());case "generation" -> root.fence().generation()+1;case "schema" -> "wrong-schema";default -> List.of("SHELL");});altered.put("handoff",handoff);
+            assertThatThrownBy(() -> handler.execute(new ExecutionEngineStore.Claim(branch.fence(),branch.step(),json.encode(altered)))).hasMessage("AGENT_HANDOFF_STALE");
+        }
+        verifyNoInteractions(tools);
+    }
+
+    /** 委派所依赖的旧资料在处理后撤回，证据与分支完成必须一起回滚。 */
+    @Test void strategySourceWithdrawalRejectsBranchCommit() {
+        var f=fixture();var q=query("https://official.example/tickets");response(q,"20元",Instant.now());complete(claim(f,q));
+        var reference=service.list(f.actor(),f.scope().taskId()).getFirst().evidence().reference();
+        when(advisor.plan(any(),any())).thenReturn(strategyPlan(1,com.lawrence.travel.domain.execution.AgentStrategy.Stop.PLAN));
+        var root=claim(f,"{}");var output=handler.execute(root);engine.commit(engine.prepare(root,output));
+        var branch=engine.claim(hint(root.fence().runId(),output.next().getFirst().id()),"strategy-test").orElseThrow();
+        when(tools.query(any(),any(),any())).thenThrow(new IllegalStateException("SYNTHETIC_FAILURE"));var command=engine.prepare(branch,handler.execute(branch));
+        service.withdraw(f.actor(),f.scope().taskId(),reference,UUID.randomUUID());
+        assertThatThrownBy(() -> engine.commit(command)).hasMessage("STALE_VERSION");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM field_evidence WHERE run_id=?",Integer.class,root.fence().runId())).isZero();
+    }
+
 }

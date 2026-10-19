@@ -34,7 +34,7 @@ public final class PostgresResearchStore implements ResearchStore {
     @Override public Research.Context context(ExecutionFence fence) {
         var task = tasks.task(fence.scope()); check(task != null);
         if (task.constraintRevision() != fence.constraintRevision() || task.executionGeneration() != fence.generation()) throw new TravelStorageFailure(TravelStorageFailure.Code.STALE_VERSION);
-        return new Research.Context(json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), evidence(fence.scope()), mapper.now(), task.currentVersionId());
+        return new Research.Context(json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class), evidence(fence.scope()), mapper.now(), task.currentVersionId(), mapper.preference(fence.scope().userId()));
     }
     /** {@inheritDoc} 缺失和越权统一 NOT_FOUND；旧值完整保留并显式显示未知／冲突／失效。 */
     @Override public List<Research.View> evidence(TaskScope scope) {
@@ -75,17 +75,27 @@ public final class PostgresResearchStore implements ResearchStore {
         if (inserted) { mapper.invalidate(scope, reference.id()); String run = engine.currentRun(scope); if (run != null) engine.event(scope, UUID.fromString(run), null, "EVIDENCE_INVALIDATED"); }
         return inserted;
     }
-    /** {@inheritDoc} 不持有偏好用户锁；任务锁由引擎统一取得。 */
-    @Override public void beforeTaskLock(ExecutionFence fence, StageOutput output) { }
+    /** {@inheritDoc} 策略先取得偏好共享锁，任务锁由引擎随后统一取得，维持用户→任务锁序。 */
+    @Override public void beforeTaskLock(ExecutionFence fence, StageOutput output) {
+        var body = json.decode(output.checkpoint(), Map.class);
+        if (body.containsKey("strategyPreferenceRevision")) mapper.lockPreference(fence.scope().userId());
+    }
     /** {@inheritDoc} 任何字段或后继错误均与阶段进度一起回滚，迟到结果由引擎先拒绝。 */
     @Override public Result project(ExecutionFence fence, StageType type, StageOutput output) {
         var envelope = json.decode(output.checkpoint(), Map.class); if (!envelope.containsKey("research")) return null;
         if (!TransactionSynchronizationManager.isActualTransactionActive() || type != StageType.RESEARCH) throw new IllegalArgumentException("RESEARCH_TRANSACTION_REQUIRED");
+        if (envelope.get("strategyPreferenceRevision") instanceof Number preference && preference.longValue() != mapper.preference(fence.scope().userId())) throw new TravelStorageFailure(TravelStorageFailure.Code.STALE_VERSION);
         var prepared = json.decode(json.encode(envelope.get("research")), Research.Prepared.class);
         var revision = json.decode(tasks.revision(fence.scope(), fence.constraintRevision()), ConstraintRevision.class);
         if (!prepared.dependencyHash().equals(EvidencePolicy.dependency(revision, json::encode)) || prepared.queryKey() == null || !prepared.queryKey().matches("seed|[a-f0-9]{64}")
                 || prepared.facts() == null || prepared.facts().size() > 50 || prepared.reused() == null) throw new IllegalArgumentException("RESEARCH_BINDING_INVALID");
         var now = mapper.now();
+        // 委派来源也是结果依赖：阶段处理后、提交前的撤回或过期不能靠旧上下文放行。
+        if(envelope.containsKey("handoff")) {
+            var handoff=json.decode(json.encode(envelope.get("handoff")),Research.Handoff.class);
+            if(!handoff.scope().equals(fence.scope()) || !handoff.run().equals(fence.runId()) || handoff.generation()!=fence.generation() || handoff.revision()!=fence.constraintRevision()
+                    || handoff.preferenceRevision()!=mapper.preference(fence.scope().userId()) || !dependencies(fence.scope(),handoff.sources(),now,now.plusSeconds(1)).allCurrent()) throw new TravelStorageFailure(TravelStorageFailure.Code.STALE_VERSION);
+        }
         for (var reference : prepared.reused()) {
             var row = mapper.read(fence.scope(), reference.id()); check(row != null);
             var fact = fact(row);

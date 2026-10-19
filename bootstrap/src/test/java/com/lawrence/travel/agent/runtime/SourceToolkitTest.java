@@ -69,4 +69,16 @@ class SourceToolkitTest {
             assertThat(agent.getToolkit().getToolNames()).containsExactlyInAnyOrder("ListDocuments", "SearchDocument", "ReadDocumentSection", "ReadConversationSource", "read_file");
         }
     }
+    /** 已失败工具边界必须留下失败轨迹，不能因未进入计量就记录为完成。 */
+    @Test void rejectedReadClosesFailedTraceBeforeAnyBudgetUse() {
+        var service=mock(SourceReadService.class);var boundary=mock(SourceToolkit.class);
+        org.mockito.Mockito.doThrow(new IllegalStateException("SYNTHETIC_BOUNDARY_REJECTED")).when(boundary).check();
+        var trace=mock(com.lawrence.travel.application.port.ExecutionTrace.class);var span=mock(com.lawrence.travel.application.port.ExecutionTrace.Span.class);
+        when(trace.open(any(),any(),any())).thenReturn(span);
+        var tools=new SourceTools(service,UUID.randomUUID(),1,null,null,boundary,trace);
+        assertThatThrownBy(tools::list).hasMessage("SOURCE_READ_REJECTED");
+        org.mockito.Mockito.verify(span).fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);
+        org.mockito.Mockito.verify(span).close();org.mockito.Mockito.verifyNoInteractions(service);
+    }
+
 }

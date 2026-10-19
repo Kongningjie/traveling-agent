@@ -37,6 +37,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final com.lawrence.travel.application.document.SourceReadService sourceReads;
     private final com.lawrence.travel.application.port.BudgetLedger sourceLedger;
     private final com.lawrence.travel.domain.execution.control.RunLimits sourceLimits;
+    private final com.lawrence.travel.application.port.ExecutionTrace trace;
     private final OkHttpClient client = new OkHttpClient();
 
     /** smoke 仅提供状态，没有请求发送能力。 */
@@ -85,6 +86,16 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions,
             com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.document.SourceReadService sourceReads,
             com.lawrence.travel.application.port.BudgetLedger sourceLedger, com.lawrence.travel.domain.execution.control.RunLimits sourceLimits) {
+        this(admission,models,keySupplier,workspaceRoot,toolkits,contexts,json,sessions,safety,sourceReads,sourceLedger,sourceLimits,com.lawrence.travel.application.port.ExecutionTrace.disabled());
+    }
+    /** @param admission 准入 @param models 型号 @param keySupplier 凭据 @param workspaceRoot 工作区 @param toolkits 白名单 @param contexts 权威源 @param json JSON @param sessions 会话 @param safety 安全 @param sourceReads 资料 @param sourceLedger 计量 @param sourceLimits 限制 @param trace 执行事实 */
+    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
+            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.document.SourceReadService sourceReads,
+            com.lawrence.travel.application.port.BudgetLedger sourceLedger, com.lawrence.travel.domain.execution.control.RunLimits sourceLimits,
+            com.lawrence.travel.application.port.ExecutionTrace trace) {
+        this.trace=trace;
         this.sourceReads=sourceReads; this.sourceLedger=sourceLedger; this.sourceLimits=sourceLimits;
         this.contexts = contexts; this.json = json; this.sessions=sessions; this.safety=safety==null?com.lawrence.travel.application.safety.SafetyGate.local():safety;
         this.admission = admission;
@@ -130,7 +141,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         if (key == null || key.isBlank()) throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
         // 只为有原领取身份的协调请求开放资料工具；原文提取、审核及普通探针仍无资料读取权。
         Toolkit toolkit = basis != null && basis.attemptToken() != null && role.equals("coordinator") && sourceReads != null
-                ? new SourceToolkit(sourceReads, runId, basis.attemptToken(), sourceLedger, sourceLimits)
+                ? new SourceToolkit(sourceReads, runId, basis.attemptToken(), sourceLedger, sourceLimits, trace)
                 : allowTools ? toolkits.apply(runId, role) : new Toolkit();
         var source = new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.AgentContext.Source>();
         var sessionSource=new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.SessionContext.Source>();
@@ -148,22 +159,29 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         var invocation = new ActiveInvocation(harness, transport, safety);
         var firstHarness=new AtomicBoolean(true);
         Supplier<HarnessAgent> factory=() -> firstHarness.compareAndSet(true,false)?harness:RestrictedHarnessFactory.create(model,toolkit,workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()),role);
-        var correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current(); var parent=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
+        var correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current(); var parent=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan(); var traceParent=com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent();
         Thread.startVirtualThread(() -> {
-            try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent)) {
+            try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent); var traceBinding=com.lawrence.travel.application.execution.ExecutionCorrelation.bindTrace(traceParent);
+                    var roleSpan=trace.open(runId,role.equals("reviewer")?com.lawrence.travel.application.port.ExecutionTrace.Kind.REVIEW:role.equals("planner")?com.lawrence.travel.application.port.ExecutionTrace.Kind.PLAN:role.equals("research")?com.lawrence.travel.application.port.ExecutionTrace.Kind.DELEGATE:com.lawrence.travel.application.port.ExecutionTrace.Kind.COORDINATE,Map.of("role",role,"schema","structured-reply-v1"))) {
+                transport.traceParent(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());
                 java.util.function.Function<Boolean,List<Msg>> prepare=emergency -> {
+                    try(var contextSpan=trace.open(runId,com.lawrence.travel.application.port.ExecutionTrace.Kind.CONTEXT,Map.of("role",role,"schema","session-context-v1"))) {
+                    try {
                     if(sessions!=null && basis!=null) {
-                        var prepared=sessions.prepare(runId,role,prompt,basis,new HarnessContextCompression(model,json,source::set),emergency,sessionSource::set);
+                        var prepared=sessions.prepare(runId,role,prompt,basis,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport),emergency,sessionSource::set);
                         return prepared.messages().stream().map(m -> Msg.builder().name(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?"assistant":"user").role(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?MsgRole.ASSISTANT:MsgRole.USER).content(TextBlock.builder().text(m.text()).build()).build()).toList();
                     }
-                    String text=basis==null?prompt:contexts.prepare(runId,role,basis,prompt,new HarnessContextCompression(model,json,source::set)).prompt();
+                    String text=basis==null?prompt:contexts.prepare(runId,role,basis,prompt,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport)).prompt();
                     return List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text(text).build()).build());
+                    } catch(RuntimeException failure) {contextSpan.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);throw failure;}
+                    } finally {transport.traceParent(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());}
                 };
                 invocation.execute(() -> prepare.apply(false),() -> {
                     if(sessions==null || basis==null) throw new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
                     return prepare.apply(true);
                 },factory,() -> { if(firstHarness.compareAndSet(true,false)) harness.close(); });
-            }
+                if(invocation.result.isCompletedExceptionally())roleSpan.fail(invocation.cancelled.get()?com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED:com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);
+            } catch(RuntimeException failure) {try {transport.close();harness.close();}finally{invocation.result.completeExceptionally(new IllegalStateException("TRACE_EXECUTION_FAILED"));invocation.exited.countDown();}}
         });
         return invocation;
     }

@@ -28,6 +28,9 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     public static final String ENDPOINT =
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
     private final com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+    private final java.util.concurrent.atomic.AtomicReference<UUID> traceParent=new java.util.concurrent.atomic.AtomicReference<>(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());
+    /** @param id 当前调用内部节点，业务attempt身份不变；串行模型发送前显式绑定 */
+    void traceParent(UUID id) {traceParent.set(id);}
     private final UUID parentSpan=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
     private final ModelCallAdmission admission;
     private final UUID runId;
@@ -92,7 +95,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     @Override
     public HttpResponse execute(HttpRequest request) {
         enterRequest();
-        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { return executeRequest(request); }
+        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan);var traceBinding=com.lawrence.travel.application.execution.ExecutionCorrelation.bindTrace(traceParent.get())) { return executeRequest(request); }
         finally { exitRequest(); }
     }
     /** @param request 已格式化文本请求 @return 发送及已结束计量的响应；关联由外层显式恢复 */
@@ -286,7 +289,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                 boolean started=false;
                 try {
                     enterRequest(); started=true;
-                    try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { readStream(request, sink, cancelled, connection); }
+                    try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan);var traceBinding=com.lawrence.travel.application.execution.ExecutionCorrelation.bindTrace(traceParent.get())) { readStream(request, sink, cancelled, connection); }
                     if (!sink.isCancelled()) sink.complete();
                 } catch (RuntimeException failure) {
                     // 只允许本边界定义的分类，不把 SDK、JSON 或网络异常正文传出去。

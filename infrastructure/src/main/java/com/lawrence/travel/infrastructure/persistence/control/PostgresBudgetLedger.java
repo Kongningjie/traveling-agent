@@ -70,7 +70,7 @@ public final class PostgresBudgetLedger implements BudgetLedger {
                 var owner = quotas.operation(runId); if (owner == null) owner = quotas.run(runId);
                 // 没有业务归属的旧离线探针维持原契约；业务输入即使已取消也不能降级为匿名预算。
                 if (owner != null) {
-                    if (owner.runId() != null) owner = owner.withParent(com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan());
+                    if (com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent() != null) owner = owner.withParent(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());
                     if (!owner.active()) throw new IllegalStateException("STALE_JOB");
                     var day = now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate();
                     quotas.create(owner.userId(), day, kind.name());

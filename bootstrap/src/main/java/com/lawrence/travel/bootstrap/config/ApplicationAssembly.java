@@ -25,13 +25,13 @@ public class ApplicationAssembly {
      * @param contexts local上下文装配，smoke不存在 @param json local严格编解码，smoke不存在
      * @param sessions 统一PG会话与受控压缩，smoke不存在
      * @param safety 输入输出安全边界，smoke不存在
-     * @param sources 本地资料工具，smoke不存在 @param ledger 同一工具预算
+     * @param sources 本地资料工具，smoke不存在 @param ledger 同一工具预算 @param trace 无正文事实轨迹
      * @return 不主动调用外部服务的运行端口
      */
     @Bean
     AgentRuntimePort agentRuntimePort(ObjectProvider<ModelCallAdmission> admission,
                                      ExecutionControlProperties properties, Environment environment,
-                                     ObjectProvider<TravelToolService> travelTools, ObjectProvider<com.lawrence.travel.application.memory.ContextAssembler> contexts, ObjectProvider<com.lawrence.travel.application.port.InteractionCodec> json, ObjectProvider<com.lawrence.travel.application.memory.SessionContextService> sessions, ObjectProvider<com.lawrence.travel.application.safety.SafetyGate> safety, ObjectProvider<com.lawrence.travel.application.document.SourceReadService> sources, ObjectProvider<com.lawrence.travel.application.port.BudgetLedger> ledger) {
+                                     ObjectProvider<TravelToolService> travelTools, ObjectProvider<com.lawrence.travel.application.memory.ContextAssembler> contexts, ObjectProvider<com.lawrence.travel.application.port.InteractionCodec> json, ObjectProvider<com.lawrence.travel.application.memory.SessionContextService> sessions, ObjectProvider<com.lawrence.travel.application.safety.SafetyGate> safety, ObjectProvider<com.lawrence.travel.application.document.SourceReadService> sources, ObjectProvider<com.lawrence.travel.application.port.BudgetLedger> ledger, ObjectProvider<com.lawrence.travel.application.port.ExecutionTrace> trace) {
         var gate = admission.getIfAvailable();
         return gate == null ? new HarnessAgentRuntimeAdapter()
                 : new HarnessAgentRuntimeAdapter(gate, properties.models(),
@@ -42,7 +42,7 @@ public class ApplicationAssembly {
                             toolkit.registerTool(new TravelAgentTools(run, travelTools.getObject(), safety.getIfAvailable(),toolkit));
                         }
                         return toolkit;
-                    }, contexts.getIfAvailable(), json.getIfAvailable(), sessions.getIfAvailable(), safety.getIfAvailable(), sources.getIfAvailable(), ledger.getIfAvailable(), properties.limits().runLimits());
+                    }, contexts.getIfAvailable(), json.getIfAvailable(), sessions.getIfAvailable(), safety.getIfAvailable(), sources.getIfAvailable(), ledger.getIfAvailable(), properties.limits().runLimits(), trace.getIfAvailable());
     }
 
     /**

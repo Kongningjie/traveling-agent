@@ -19,8 +19,12 @@ public final class SourceToolkit extends SafetyToolkit {
 
     /** @param service 权威读取 @param budget 输入预算 @param token 原领取身份 @param ledger 同一工具计量 @param limits 初始限制 */
     public SourceToolkit(SourceReadService service, UUID budget, long token, BudgetLedger ledger, RunLimits limits) {
+        this(service,budget,token,ledger,limits,com.lawrence.travel.application.port.ExecutionTrace.disabled());
+    }
+    /** @param service 权威资料 @param budget 原预算 @param token 原尝试 @param ledger 计量 @param limits 上限 @param trace 事实轨迹 */
+    public SourceToolkit(SourceReadService service, UUID budget, long token, BudgetLedger ledger, RunLimits limits, com.lawrence.travel.application.port.ExecutionTrace trace) {
         this.service = service; this.budget = budget; this.token = token;
-        registerTool(new SourceTools(service, budget, token, ledger, limits, this));
+        registerTool(new SourceTools(service, budget, token, ledger, limits, this, trace));
     }
 
     /** 失败不可由模型或框架吞错后清除。 */

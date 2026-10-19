@@ -21,6 +21,7 @@ public final class TravelToolService {
     private final boolean enabled;
     private final Clock clock;
     private final com.lawrence.travel.application.safety.SafetyGate safety;
+    private final com.lawrence.travel.application.port.ExecutionTrace trace;
 
     /**
      * 绑定工具与持久化应用端口，默认开关由装配提供。
@@ -38,7 +39,11 @@ public final class TravelToolService {
     }
     /** @param tools 供应商端口 @param journal 证据 @param ledger 计量 @param limits 运行上限 @param grants 免费保护 @param enabled 当前授权 @param clock 时间 @param safety 共用文本边界，覆盖直接调查和Agent工具 */
     public TravelToolService(TravelToolPort tools,ToolEvidenceJournal journal,BudgetLedger ledger,RunLimits limits,Map<String,Grant> grants,boolean enabled,Clock clock,com.lawrence.travel.application.safety.SafetyGate safety) {
-        this.safety=safety;
+        this(tools,journal,ledger,limits,grants,enabled,clock,safety,com.lawrence.travel.application.port.ExecutionTrace.disabled());
+    }
+    /** @param tools 外部适配 @param journal 证据 @param ledger 原预算 @param limits 上限 @param grants 免费保护 @param enabled 当前授权 @param clock 时钟 @param safety 安全 @param trace 固定事实轨迹 */
+    public TravelToolService(TravelToolPort tools,ToolEvidenceJournal journal,BudgetLedger ledger,RunLimits limits,Map<String,Grant> grants,boolean enabled,Clock clock,com.lawrence.travel.application.safety.SafetyGate safety,com.lawrence.travel.application.port.ExecutionTrace trace) {
+        this.trace=trace;this.safety=safety;
         this.tools = tools;
         this.journal = journal;
         this.ledger = ledger;
@@ -58,6 +63,8 @@ public final class TravelToolService {
     public TravelToolPort.Evidence query(UUID runId, TravelToolPort.Operation operation, Map<String, String> arguments) {
         if (!enabled) throw new IllegalStateException("TOOLS_DISABLED");
         safety.require("TOOL_INPUT",arguments.toString());
+        try(var span=trace.open(runId,com.lawrence.travel.application.port.ExecutionTrace.Kind.TOOL,Map.of("schema",operation.name(),"sourceHash",com.lawrence.travel.application.memory.AgentContext.hash(new java.util.TreeMap<>(arguments).toString())))) {
+        try {
         String group = switch (operation) {
             case PLACE -> "amap-search";
             case ROUTE -> "amap-lbs";
@@ -87,6 +94,8 @@ public final class TravelToolService {
             } finally {
                 if (meter != null) ledger.finish(meter.id(), null, Duration.ofNanos(System.nanoTime() - started));
             }
+        }
+        } catch(RuntimeException failure) {span.fail(Thread.currentThread().isInterrupted()?com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED:com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);throw failure;}
         }
     }
 
