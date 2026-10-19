@@ -11,4 +11,6 @@ public interface ArtifactFiles {
     byte[] read(String key);
     /** @param references 有效引用 @param before 保留期之前的文件才可回收 @return 删除的孤儿数；不得跟随链接或删除未知文件 */
     int collect(Set<String> references, Instant before);
+    /** @param key 墓碑已提交的原件；只删除受管键，重复删除幂等 */
+    default void delete(String key) { throw new UnsupportedOperationException("DELETE_NOT_CONFIGURED"); }
 }

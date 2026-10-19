@@ -100,5 +100,5 @@ export function useDialogue(user: Ref<User | null>, selectTask: (id: string) => 
     const saved = sessionStorage.getItem(`travel.chat.${id}`); if (saved) await open(saved);
   });
   onUnmounted(clear);
-  return { chats, current, selected, busy, error, retryable, offset, open, start, send, attach, act, refresh, retryCommand, page };
+  return { chats, current, selected, busy, error, retryable, offset, open, start, send, attach, act, refresh, retryCommand, page, list };
 }

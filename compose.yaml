@@ -51,10 +51,22 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?请设置 REDIS_PASSWORD}
       TRAVEL_ARTIFACTS_ROOT: /var/lib/traveling-agent/artifacts
+      TRAVEL_DOCUMENTS_ROOT: /var/lib/traveling-agent/documents
+      DOCUMENT_RUNNER_URL: http://host.docker.internal:8766
+      DOCUMENT_PARSER_SECRET: ${DOCUMENT_PARSER_SECRET:-}
+      DOCUMENT_MAX_BYTES: ${DOCUMENT_MAX_BYTES:-10485760}
+      DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-100}
+      DOCUMENT_MAX_TEXT: ${DOCUMENT_MAX_TEXT:-200000}
+      DOCUMENT_MAX_EXPANDED: ${DOCUMENT_MAX_EXPANDED:-52428800}
+      DOCUMENT_MAX_SECONDS: ${DOCUMENT_MAX_SECONDS:-60}
+      DOCUMENT_MAX_PER_CHAT: ${DOCUMENT_MAX_PER_CHAT:-10}
+      DOCUMENT_MAX_USER_BYTES: ${DOCUMENT_MAX_USER_BYTES:-209715200}
+      DOCUMENT_MAX_USER_TEXT: ${DOCUMENT_MAX_USER_TEXT:-1000000}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
       - agent-files:/var/lib/traveling-agent
+      - ./.runtime/documents:/var/lib/traveling-agent/documents
     depends_on:
       postgres:
         condition: service_healthy

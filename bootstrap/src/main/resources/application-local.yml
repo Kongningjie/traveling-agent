@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DB:traveling_agent}?currentSchema=traveling_agent
     username: ${POSTGRES_USER:traveling_agent}
@@ -36,3 +40,8 @@ server:
     session:
       cookie:
         secure: false
+
+travel:
+  documents:
+    root: ${TRAVEL_DOCUMENTS_ROOT:.runtime/documents}
+    runner: ${DOCUMENT_RUNNER_URL:http://127.0.0.1:8766}

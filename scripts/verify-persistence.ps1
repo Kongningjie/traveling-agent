@@ -17,6 +17,7 @@ $probeId = [Guid]::NewGuid().ToString('N')
 $tableName = 'm0_probe_' + $probeId
 $redisKey = 'traveling-agent:verification:' + $probeId
 $fileProbe = '/var/lib/traveling-agent/verification-' + $probeId
+$documentProbe = '/var/lib/traveling-agent/documents/verification-' + $probeId
 
 <#
 .SYNOPSIS
@@ -45,7 +46,8 @@ try {
     Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'sh', '-c',
         'printf %s "$2" > "$1"', 'probe', $fileProbe, $probeId)
 
-    # 重新创建本项目四个容器，保留命名卷，比仅重启进程更严格。
+    Invoke-Compose -DockerArguments @('exec','-T','backend','sh','-c','printf %s "$2" > "$1"','probe',$documentProbe,$probeId)
+    # 重新创建本项目四个容器，保留命名卷和附件bind目录，比仅重启进程更严格。
     Invoke-Compose -DockerArguments @('--profile', 'app', 'up', '-d', '--force-recreate', '--wait')
     $pgValue = Invoke-Compose -DockerArguments @('exec', '-T', 'postgres', 'sh', '-c',
         'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"',
@@ -56,10 +58,12 @@ try {
     if (($redisValue -join '').Trim() -ne $probeId) { throw 'Redis 探针未恢复。' }
     $fileValue = Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'cat', $fileProbe)
     if (($fileValue -join '').Trim() -ne $probeId) { throw '必要文件卷探针未恢复。' }
+    $documentValue=Invoke-Compose -DockerArguments @('exec','-T','backend','cat',$documentProbe)
+    if (($documentValue -join '').Trim() -ne $probeId) {throw '附件原件目录探针未恢复。'}
     Write-Output 'PASS: PostgreSQL, Redis and required file data survive container recreation with named volumes.'
 } finally {
     try {
-        Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'rm', '-f', $fileProbe) | Out-Null
+        Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'rm', '-f', $fileProbe,$documentProbe) | Out-Null
         # 仅清理本轮生成的随机探针，保留所有业务数据与命名卷。
         Invoke-Compose -DockerArguments @('exec', '-T', 'postgres', 'sh', '-c',
             'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"',

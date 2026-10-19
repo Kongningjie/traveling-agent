@@ -9,4 +9,6 @@ public interface JobHandler {
     BackgroundJob.Kind kind();
     /** @param claim 原资格与参数 @return 产物／后继；运行在数据库事务外 */
     Jobs.Output execute(Jobs.Claim claim);
+    /** @param claim 原资格 @param output 事务外结果 @param finish 默认作业提交；大产物处理器可在同一短事务内扩展，不能省略围栏 */
+    default void commit(Jobs.Claim claim,Jobs.Output output,Runnable finish) { finish.run(); }
 }

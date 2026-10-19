@@ -203,7 +203,7 @@ DEV-0025提供14项真实SDK／本地模型探针，验证状态恢复、自动�
 
 DEV-0026将自由输入接入持久化作业：聊天可独立存在，每条输入使用稳定operation预算，失败重试沿用原预算。旅行阶段继续使用原run预算；实际模型／工具请求只登记一次调用归属。初始输入上限8次模型、12次工具、5分钟主动执行，用户每日上限100次模型、200次工具、50次解析，按Asia/Shanghai预占日期结算；UNKNOWN不返还次数或清除免费门禁。
 
-`travel.jobs`可配置`model-limit`、`tool-limit`、`active-seconds`、`daily-models`、`daily-tools`、`daily-parses`。输入创建时保存限制快照，修改配置不为旧输入补发预算。解析／文档分析／记忆维护目前仅有JobHandler端口，没有生产解析或文件上传实现；无处理器的类型保持排队。
+`travel.jobs`可配置`model-limit`、`tool-limit`、`active-seconds`、`daily-models`、`daily-tools`、`daily-parses`。输入创建时保存限制快照，修改配置不为旧输入补发预算。文件上传与隔离解析已接入同一JobHandler；文档分析／记忆维护仍待后续阶段实现，无处理器的类型保持排队。
 
 作业领取、失联恢复、依赖和用户等待、取消、水位及token围栏共用现有Worker；解析使用独立单槽，取消后物理执行退出才释放容量。HTTP响应包含服务端生成的X-Request-ID和X-Trace-ID，PG保存输入、作业、阶段、调用的关联与固定分类问题记录，不保存诊断正文或凭据。诊断运营查询界面在后续阶段实现。
 
@@ -221,3 +221,25 @@ DEV-0027使聊天与旅行调用共用PG会话上下文：权威需求、当前�
 基础SafetyGate检查输入、上下文、摘要、工具参数／结果和最终模型正文，拒绝脚本／危险链接和已配置凭据的原值泄露；检查异常失败关闭，诊断只存固定原因、策略版本及问题ID。应用调查和Agent工具共用边界；SDK吞掉工具异常时仍阻止后续调用及最终提交。该确定性策略不是完整语义内容审核，也不承诺识别全部提示注入，公开上线安全验收仍待后续完成。页面保持只显示进度及检查后的最终回复，没有开放原始Token直通。明确停止指令在服务端直接完成，不排队等待模型；含糊／否定表达继续走原澄清流程。
 
 `./scripts/verify-local.ps1 -Scope Session`覆盖本机PG／Redis、50轮上下文、服务重建、偏好删除、取消、工具schema预算与安全拒绝等本地回归；工具边界补充用例为TravelToolContractTest。真实供应商调用仍默认关闭，现有Docker后端镜像未自动重建。附件上传、隔离解析、引用检索及文件工作记忆仍待DEV-0028／0029，完整质量验收继续按既定安排延期。
+
+
+## 二期附件上传与隔离解析
+
+DEV-0028提供聊天内PDF文本层、DOCX、UTF-8 TXT／Markdown上传、状态、原件下载、显式停止／重试／删除。文件可以作为新聊天的第一项资料，不创建旅行占位。此阶段只保存和提取，文件检索／引用和优化分析分别在后续DEV-0029／0031接入，不能将附件READY理解为已经完成旅行分析。
+
+原件默认位于`.runtime/documents`，Compose以独立持久化目录挂载；PG的uploaded_document保存不可变原件ID、归属、哈希和报告／页段全文。文件名仅展示，服务器生成键；10MiB、100页、20万字符、50MiB展开量、60秒墙钟为初始上限。聊天10份、用户200MiB原件／100万字符，待处理文本预占，完成后按实际字符结算。`.env.example`列出DOCUMENT_MAX_*配置，首轮只允许收紧当前安全协议上限；调高需相应Review、测试及必要迁移。磁盘85%停止接纳、80%恢复，读取和删除仍可用。
+
+先在专用终端执行：
+
+```powershell
+.\scripts\document-parser.ps1 -Action Build
+.\scripts\document-parser.ps1 -Action Run
+```
+
+Build打包并构建固定解析镜像，将镜像sha256和缺失的随机runner认证配置写入本地.env，不打印秘密。Run使用本机Docker权限，默认只监听127.0.0.1:8766；IDEA后端需在环境中加载同一DOCUMENT_PARSER_SECRET。不要把该值粘贴到对话或命令行。Compose后端通过host.docker.internal访问宿主机，仅此受限技术进程持Docker权限，后端不挂Docker socket。其他平台如需更改监听，必须先限制宿主机防火墙，不能直接公开runner端口。
+
+每作业容器固定镜像、无网络、只读根、原件只读挂载、UID65532、cap-drop ALL、no-new-privileges、1CPU／512MiB／64PID及64MiB tmpfs。HMAC绑定启动挑战、路径和完整请求，检查时间及一次性nonce；重启拒绝旧签名并在接受工作前清理专用标签的旧解析容器。runner不连接PG、不领取业务作业、不调用模型。不可用时暂停，绝不退回Web进程解析。扫描／加密／损坏／超限文件没有READY；复杂表格、版式及未做OCR的限制在页面明确展示。
+
+删除立即撤销读取、清除PG正文及原文件名、取消该附件的在途资格；每分钟尝试清理原件，物理失败保留墓碑和容量并重试。当前没有文件派生摘要／分析结果；其依赖删除和备份删除清单重放仍随后续阶段交付，不宣称已经完成全生命周期或公开上线验收。backup-local.ps1的v2备份额外包含documents.tar并在临时库／卷按引用核对；自定义原件根须传-DocumentsDirectory，旧v1备份只验证原有范围。
+
+附件本地回归使用`./scripts/verify-local.ps1 -Scope Document`。真实容器测试另需本机Docker及DOCUMENT_CONTAINER_TESTS=true、DOCUMENT_PARSER_IMAGE为已构建镜像sha256，运行DocumentContainerTest；该测试只用合成文件和本地HTTP，不调用任何真实业务供应商。verify-persistence.ps1还核对原件目录在容器重建后保留。验证过程中不归档控制台／Docker日志。

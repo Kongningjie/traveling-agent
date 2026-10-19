@@ -3,6 +3,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import PreferencePanel from "./components/PreferencePanel.vue";
 import ChatComposer from "./components/ChatComposer.vue";
+import DocumentPanel from "./components/DocumentPanel.vue";
 import DecisionCard from "./components/DecisionCard.vue";
 import ItineraryPanel from "./components/ItineraryPanel.vue";
 import {
@@ -718,6 +719,7 @@ onMounted(initialize);
           </div>
         </div>
         <div class="chat-bottom">
+          <DocumentPanel :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
           <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
             <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
             <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>

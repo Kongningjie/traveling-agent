@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -29,7 +29,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
 $allowedKeys = @('POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER',
     'POSTGRES_PASSWORD', 'REDIS_HOST', 'REDIS_PORT', 'REDIS_PASSWORD')
 $previousValues = @{}
-foreach ($key in $allowedKeys + @('TRAVEL_INTEGRATION_TESTS', 'TRAVEL_ENGINE_ENABLED', 'TRAVEL_EXTERNAL_CALLS_ENABLED')) {
+foreach ($key in $allowedKeys + @('TRAVEL_INTEGRATION_TESTS', 'TRAVEL_ENGINE_ENABLED', 'TRAVEL_EXTERNAL_CALLS_ENABLED','TRAVEL_DOCUMENTS_CLEANUP_ENABLED')) {
     # 同时保存原值和未配置状态，finally 中可精确还原，而不是把测试配置留给后续任务。
     $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
@@ -46,6 +46,8 @@ try {
     # 集成测试手动推进发现和恢复，避免后台周期与故障注入争抢随机测试事件。
     $env:TRAVEL_ENGINE_ENABLED = 'false'
     $env:TRAVEL_EXTERNAL_CALLS_ENABLED = 'false'
+    # 本轮测试只清理自身随机用户，禁止维护线程处理其他账号的真实附件。
+    $env:TRAVEL_DOCUMENTS_CLEANUP_ENABLED = 'false'
     Set-Location -LiteralPath $projectRoot
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
@@ -54,7 +56,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'Session') { '-Dtest=BackgroundJobTest,TravelToolContractTest,SessionContextIntegrationTest,DialogueIntegrationTest,ContextIntegrationTest,JobIntegrationTest,SafetyGateTest,ControlledHarnessCallTest,DialogueIntentContractTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,ModuleArchitectureTest' }
+    $selectedTest = if ($Scope -eq 'Document') { '-Dtest=DocumentLimitsTest,DocumentIntegrationTest,DocumentParserTest,JobIntegrationTest,ArtifactIntegrationTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Session') { '-Dtest=BackgroundJobTest,TravelToolContractTest,SessionContextIntegrationTest,DialogueIntegrationTest,ContextIntegrationTest,JobIntegrationTest,SafetyGateTest,ControlledHarnessCallTest,DialogueIntentContractTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Job') { '-Dtest=PreferenceIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,IdentityIntegrationTest,JobIntegrationTest,DialogueIntegrationTest,BudgetLedgerIntegrationTest,DialogueWorkerTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,ModuleArchitectureTest,ModelCallAdmissionTest,BackgroundJobTest' }
         elseif ($Scope -eq 'Dialogue') { '-Dtest=DialogueIntegrationTest,CandidateAcceptanceIntegrationTest,NegotiationIntegrationTest,RunEventIntegrationTest,ModuleArchitectureTest,DialogueIntentContractTest,DialogueWorkerTest' }
         elseif ($Scope -eq 'Evaluation') { '-Dtest=EvaluationRunnerTest,EvaluationBaselineTest,ModuleArchitectureTest' }
@@ -76,6 +79,7 @@ try {
     if ($TestMethod) {
         if ($Scope -eq 'Dialogue') { $selectedTest = '-Dtest=DialogueIntegrationTest' }
         if ($Scope -eq 'Job') { $selectedTest = '-Dtest=JobIntegrationTest' }
+        if ($Scope -eq 'Document') { $selectedTest = '-Dtest=DocumentIntegrationTest' }
         if ($Scope -eq 'Session') { $selectedTest = '-Dtest=SessionContextIntegrationTest' }
         $selectedTest += "#$TestMethod"
     }

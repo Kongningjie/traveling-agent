@@ -31,7 +31,7 @@ public final class BackgroundJobService implements BackgroundWorkSource {
         /** 处理器异常只写固定分类；过期／撤销后保留原权威状态。 */
         @Override public void run() {
             try (var ignored = ExecutionCorrelation.bind(new ExecutionCorrelation.Ids(c.job().requestId(), c.job().traceId()))) {
-                try { store.finish(c, handlers.get(c.job().kind()).execute(c)); }
+                try { var handler=handlers.get(c.job().kind()); var output=handler.execute(c); handler.commit(c,output,() -> store.finish(c,output)); }
                 catch (RuntimeException failure) {
                     Thread.interrupted();
                     if (store.live(c.fence())) store.finish(c, new Jobs.Output(BackgroundJob.State.PAUSED, null, List.of(), "JOB_PROCESSING_FAILED"));

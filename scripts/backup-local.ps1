@@ -16,6 +16,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('Backup', 'Verify')][string]$Action,
     [Parameter(Mandatory)][string]$Directory,
     [string]$FilesDirectory,
+    [string]$DocumentsDirectory = ".runtime/documents",
     [switch]$Quiesced
 )
 $ErrorActionPreference = 'Stop'
@@ -97,12 +98,17 @@ try {
             Invoke-Docker @('run','--rm','--network','none','--mount','type=volume,source=traveling-agent_agent-files,target=/source,readonly','--mount',"type=bind,source=$destination,target=/backup",'postgres:17.11-bookworm','sh','-c',
                 'if [ -d /source/artifacts/users ]; then exec tar -C /source --exclude="*.pending" --exclude=".env" --exclude=".env.*" -cf /backup/files.tar artifacts/users; else exec tar -cf /backup/files.tar -T /dev/null; fi') | Out-Null
         }
-        $manifest = [ordered]@{ version = 1; fileLayout = $(if ($FilesDirectory) { 'root' } else { 'artifacts' }); tables = (Get-Fingerprints); dumpHash = (Get-FileHash (Join-Path $destination 'postgres.dump') -Algorithm SHA256).Hash; filesHash = (Get-FileHash (Join-Path $destination 'files.tar') -Algorithm SHA256).Hash }
+        $documentSource = [IO.Path]::GetFullPath($DocumentsDirectory,$root)
+        if ($destination.Equals($documentSource,[StringComparison]::OrdinalIgnoreCase) -or $destination.StartsWith($documentSource+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {throw 'INVALID_DOCUMENT_BACKUP_ROOT'}
+        [IO.Directory]::CreateDirectory($documentSource) | Out-Null
+        Invoke-Docker @('run','--rm','--network','none','--mount',"type=bind,source=$documentSource,target=/source,readonly",'--mount',"type=bind,source=$destination,target=/backup",'postgres:17.11-bookworm','sh','-c','if [ -d /source/documents ]; then exec tar -C /source --exclude="*.pending" --exclude=".env" --exclude=".env.*" -cf /backup/documents.tar documents; else exec tar -cf /backup/documents.tar -T /dev/null; fi') | Out-Null
+        $manifest = [ordered]@{ version = 2; documentsHash = (Get-FileHash (Join-Path $destination 'documents.tar') -Algorithm SHA256).Hash; fileLayout = $(if ($FilesDirectory) { 'root' } else { 'artifacts' }); tables = (Get-Fingerprints); dumpHash = (Get-FileHash (Join-Path $destination 'postgres.dump') -Algorithm SHA256).Hash; filesHash = (Get-FileHash (Join-Path $destination 'files.tar') -Algorithm SHA256).Hash }
         $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $destination 'manifest.json') -Encoding utf8
         Write-Output 'PASS: 本地静止备份完成，数据库与必要文件已记录完整性指纹。'
     } else {
         $manifest = Get-Content -LiteralPath (Join-Path $destination 'manifest.json') -Raw | ConvertFrom-Json
-        if ($manifest.version -ne 1 -or $manifest.fileLayout -notin @('root','artifacts') -or (Get-FileHash (Join-Path $destination 'postgres.dump') -Algorithm SHA256).Hash -ne $manifest.dumpHash -or (Get-FileHash (Join-Path $destination 'files.tar') -Algorithm SHA256).Hash -ne $manifest.filesHash) { throw 'BACKUP_HASH_MISMATCH' }
+        if ($manifest.version -notin @(1,2) -or $manifest.fileLayout -notin @('root','artifacts') -or (Get-FileHash (Join-Path $destination 'postgres.dump') -Algorithm SHA256).Hash -ne $manifest.dumpHash -or (Get-FileHash (Join-Path $destination 'files.tar') -Algorithm SHA256).Hash -ne $manifest.filesHash) { throw 'BACKUP_HASH_MISMATCH' }
+        if ($manifest.version -eq 2 -and (Get-FileHash (Join-Path $destination 'documents.tar') -Algorithm SHA256).Hash -ne $manifest.documentsHash) {throw 'DOCUMENT_BACKUP_HASH_MISMATCH'}
         Invoke-Sql "CREATE DATABASE $temporaryDatabase" | Out-Null; $databaseCreated = $true
         Invoke-Docker @('compose','cp',(Join-Path $destination 'postgres.dump'),"postgres:${dumpInContainer}") | Out-Null
         Invoke-Docker @('compose','exec','-T','postgres','sh','-c',
@@ -119,6 +125,15 @@ try {
             if ($parts.Count -ne 3 -or $parts[0] -notmatch '^users/([0-9a-f-]{36})/tasks/([0-9a-f-]{36})/runs/([0-9a-f-]{36})/([0-9a-f-]{36})\.bin$' -or $parts[1] -notmatch '^[0-9a-f]{64}$' -or $parts[2] -notmatch '^\d+$') { throw 'RESTORE_REFERENCE_INVALID' }
             $file = '/restored/' + $(if ($manifest.fileLayout -eq 'artifacts') { 'artifacts/' } else { '' }) + $parts[0]
             $hashResult = Invoke-Docker @('run','--rm','--network','none','--mount',"type=volume,source=$temporaryVolume,target=/restored,readonly",'postgres:17.11-bookworm','sh','-c','test "$(wc -c < "$1")" = "$3" && test "$(sha256sum "$1" | cut -d " " -f1)" = "$2"', 'verify', $file, $parts[1], $parts[2])
+        }
+        if ($manifest.version -eq 2) {
+            Invoke-Docker @('run','--rm','--network','none','--mount',"type=volume,source=$temporaryVolume,target=/restored",'--mount',"type=bind,source=$destination,target=/backup,readonly",'postgres:17.11-bookworm','sh','-c','mkdir -p /restored/documents-root && tar -C /restored/documents-root -xf /backup/documents.tar') | Out-Null
+            $documentReferences=Invoke-Sql "SELECT file_key||'|'||hash||'|'||size::text FROM traveling_agent.uploaded_document WHERE NOT deleted ORDER BY id" $temporaryDatabase
+            foreach ($reference in $documentReferences) {
+                $parts=$reference.ToString().Split('|')
+                if ($parts.Count -ne 3 -or $parts[0] -notmatch '^documents/([0-9a-f-]{36})/([0-9a-f-]{36})/([0-9a-f-]{36})\.bin$' -or $parts[1] -notmatch '^[0-9a-f]{64}$' -or $parts[2] -notmatch '^\d+$') {throw 'DOCUMENT_RESTORE_REFERENCE_INVALID'}
+                Invoke-Docker @('run','--rm','--network','none','--mount',"type=volume,source=$temporaryVolume,target=/restored,readonly",'postgres:17.11-bookworm','sh','-c','test "$(wc -c < "$1")" = "$3" && test "$(sha256sum "$1" | cut -d " " -f1)" = "$2"','verify',('/restored/documents-root/'+$parts[0]),$parts[1],$parts[2]) | Out-Null
+            }
         }
         Write-Output 'PASS: 临时数据库逐表内容与恢复文件逐引用哈希一致；源库和原文件卷未覆盖。'
     }
