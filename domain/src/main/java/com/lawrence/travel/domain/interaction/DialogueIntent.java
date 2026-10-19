@@ -12,7 +12,7 @@ public final class DialogueIntent {
     public enum Kind { /** 只读交流。 */ CONVERSATION, /** 规划协作。 */ PLANNING, /** 显式操作请求。 */ OPERATION, /** 需澄清。 */ UNCLEAR }
     /** 有界内部动作；危险动作必须进入应用确认流程。 */
     public enum Action {
-        /** 闲聊。 */ CHAT, /** 旅行问答。 */ TRAVEL_QA, /** 解释。 */ EXPLAIN_PLAN, /** 比较。 */ COMPARE_OPTIONS,
+        /** 闲聊。 */ CHAT, /** 旅行问答。 */ TRAVEL_QA, /** 解释。 */ EXPLAIN_PLAN, /** 比较。 */ COMPARE_OPTIONS, /** 检查原计划。 */ CHECK_PLAN, /** 提出优化建议。 */ OPTIMIZE_PLAN,
         /** 开始规划。 */ START_PLAN, /** 补充。 */ SUPPLEMENT, /** 变更需求。 */ CHANGE_REQUIREMENTS, /** 调整行程。 */ REVISE_ITINERARY,
         /** 停止。 */ STOP, /** 继续。 */ CONTINUE, /** 接受。 */ ACCEPT, /** 拒绝。 */ REJECT, /** 未决定。 */ UNDECIDED,
         /** 授权。 */ AUTHORIZE, /** 恢复版本。 */ RESTORE_VERSION, /** 保存偏好。 */ SAVE_PREFERENCE, /** 删除偏好。 */ DELETE_PREFERENCE,
@@ -24,7 +24,7 @@ public final class DialogueIntent {
         public Intent {
             if (kind == null || action == null || quote == null || quote.isBlank() || quote.length() > 4000) invalid();
             boolean valid = switch (kind) {
-                case CONVERSATION -> Set.of(Action.CHAT, Action.TRAVEL_QA, Action.EXPLAIN_PLAN, Action.COMPARE_OPTIONS).contains(action);
+                case CONVERSATION -> Set.of(Action.CHAT, Action.TRAVEL_QA, Action.EXPLAIN_PLAN, Action.COMPARE_OPTIONS, Action.CHECK_PLAN, Action.OPTIMIZE_PLAN).contains(action);
                 case PLANNING -> Set.of(Action.START_PLAN, Action.SUPPLEMENT, Action.CHANGE_REQUIREMENTS, Action.REVISE_ITINERARY).contains(action);
                 case OPERATION -> Set.of(Action.STOP, Action.CONTINUE, Action.ACCEPT, Action.REJECT, Action.UNDECIDED, Action.AUTHORIZE, Action.RESTORE_VERSION, Action.SAVE_PREFERENCE, Action.DELETE_PREFERENCE).contains(action);
                 case UNCLEAR -> action == Action.CLARIFY;
@@ -38,8 +38,10 @@ public final class DialogueIntent {
         public Fact { if (field == null || value == null || value.isBlank() || value.length() > 500 || quote == null || quote.isBlank()) invalid(); }
     }
     /** @param intents 有序诉求 @param facts 需求增量 @param reply 普通回复 @param clarification 待澄清原因
-     * @param targetId 已知操作目标，可空 @param category 偏好类别 @param value 偏好原文内容 @param city 偏好适用城市 @param resolvedInputs 本轮明确澄清的旧输入，仅可引用服务端提供的待澄清身份 */
-    public record Result(List<Intent> intents, List<Fact> facts, String reply, String clarification, UUID targetId, String category, String value, String city, List<UUID> resolvedInputs) {
+     * @param targetId 已知操作目标，可空 @param category 偏好类别 @param value 偏好原文内容 @param city 偏好适用城市 @param resolvedInputs 本轮明确澄清的旧输入，仅可引用服务端提供的待澄清身份 @param advice 只读文件分析建议，可空表示无分析 */
+    public record Result(List<Intent> intents, List<Fact> facts, String reply, String clarification, UUID targetId, String category, String value, String city, List<UUID> resolvedInputs, List<PlanAdvice.Draft> advice) {
+        /** @param intents 诉求 @param facts 增量 @param reply 回复 @param clarification 歧义 @param targetId 目标 @param category 类别 @param value 内容 @param city 范围 @param resolvedInputs 旧问题；兼容无分析结果的调用 */
+        public Result(List<Intent> intents,List<Fact> facts,String reply,String clarification,UUID targetId,String category,String value,String city,List<UUID> resolvedInputs){this(intents,facts,reply,clarification,targetId,category,value,city,resolvedInputs,List.of());}
         /** @param intents 诉求 @param facts 增量 @param reply 回复 @param clarification 歧义 @param targetId 目标 @param category 偏好类型 @param value 内容 @param city 范围；无历史澄清时使用空集合 */
         public Result(List<Intent> intents, List<Fact> facts, String reply, String clarification, UUID targetId, String category, String value, String city) { this(intents, facts, reply, clarification, targetId, category, value, city, List.of()); }
         /** 咨询不能携带需求增量，多操作或操作与修改混合时由应用要求拆清范围。 */
@@ -50,6 +52,8 @@ public final class DialogueIntent {
             intents = List.copyOf(intents); facts = List.copyOf(facts);
             resolvedInputs = resolvedInputs == null ? List.of() : List.copyOf(resolvedInputs);
             if (resolvedInputs.size() > 5 || Set.copyOf(resolvedInputs).size() != resolvedInputs.size()) invalid();
+            advice=advice==null?List.of():List.copyOf(advice);
+            if(advice.size()>8 || !advice.isEmpty() && intents.stream().anyMatch(i -> i.kind()!=Kind.CONVERSATION)) invalid();
             if (!facts.isEmpty() && intents.stream().noneMatch(i -> i.kind() == Kind.PLANNING)) invalid();
         }
         /** @param text 原始消息，模型不能以历史或摘要中的片段伪造本轮用户授权 */

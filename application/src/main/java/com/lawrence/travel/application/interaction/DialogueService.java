@@ -24,6 +24,7 @@ import java.util.UUID;
 
 /** 统一聊天用例；事务外理解，事务内确认路由与业务提交，不另建调度器。 */
 public final class DialogueService implements BackgroundWorkSource {
+    private final com.lawrence.travel.application.document.AdviceService advice;
     private final DialogueStore store;
     private final DialogueInterpreter interpreter;
     private final BusinessTransactions transactions;
@@ -46,6 +47,11 @@ public final class DialogueService implements BackgroundWorkSource {
     }
     /** @param store 聊天 @param interpreter 受控理解 @param transactions 事务 @param accounts 身份 @param negotiation 需求 @param runs 运行 @param itineraries 接受 @param versions 历史 @param preferences 偏好 @param travel 权威旅行 @param json JSON @param engine 执行 @param externalEnabled 原授权 @param safety 展示前检查 */
     public DialogueService(DialogueStore store,DialogueInterpreter interpreter,BusinessTransactions transactions,AccountStore accounts,NegotiationService negotiation,RunService runs,ItineraryService itineraries,VersionService versions,PreferenceService preferences,TravelStore travel,InteractionCodec json,ExecutionEngineStore engine,boolean externalEnabled,com.lawrence.travel.application.safety.SafetyGate safety) {
+        this(store,interpreter,transactions,accounts,negotiation,runs,itineraries,versions,preferences,travel,json,engine,externalEnabled,safety,null);
+    }
+    /** @param store 聊天 @param interpreter 理解 @param transactions 事务 @param accounts 身份 @param negotiation 协商 @param runs 运行 @param itineraries 候选 @param versions 版本 @param preferences 偏好 @param travel 旅行 @param json JSON @param engine 执行 @param externalEnabled 当前许可 @param safety 文本检查 @param advice 建议应用用例，旧离线调用可空 */
+    public DialogueService(DialogueStore store,DialogueInterpreter interpreter,BusinessTransactions transactions,AccountStore accounts,NegotiationService negotiation,RunService runs,ItineraryService itineraries,VersionService versions,PreferenceService preferences,TravelStore travel,InteractionCodec json,ExecutionEngineStore engine,boolean externalEnabled,com.lawrence.travel.application.safety.SafetyGate safety,com.lawrence.travel.application.document.AdviceService advice) {
+        this.advice=advice;
         this.safety=safety;
         this.store = store; this.interpreter = interpreter; this.transactions = transactions; this.accounts = accounts; this.negotiation = negotiation;
         this.runs = runs; this.itineraries = itineraries; this.versions = versions; this.preferences = preferences; this.travel = travel; this.json = json;
@@ -161,7 +167,8 @@ public final class DialogueService implements BackgroundWorkSource {
             if (c.basis().taskId() == null) store.link(c, task);
             store.finish(c, "DONE", result.reply().isBlank() ? "已记录你的规划要求，将继续核对缺项并生成候选。" : result.reply(), null, ""); return;
         }
-        store.finish(c, "DONE", result.reply().isBlank() ? "你可以继续聊旅行想法，也可以让我开始规划。" : result.reply(), null, "");
+        if(!result.advice().isEmpty()){if(advice==null)throw new IllegalStateException("ADVICE_NOT_CONFIGURED");advice.capture(c,result.advice());}
+        store.finish(c, "DONE", (result.reply().isBlank() ? "你可以继续聊旅行想法，也可以让我开始规划。" : result.reply())+(result.advice().isEmpty()?"":"\n以上仅为分析建议，尚未采纳或修改生效行程。请逐项核对来源和影响后确认。"), null, "");
     }
     /** @param actor 用户 @param c 当前业务基础 @param r 模型参数 @param action 动作 @return 服务端构造的精确确认，不能定位时为空 */
     private Dialogue.Operation prepare(UserIdentity actor, Dialogue.Claim c, DialogueIntent.Result r, DialogueIntent.Action action) {

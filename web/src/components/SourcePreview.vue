@@ -5,7 +5,7 @@ import { Api } from "../workspace/client";
 import { decodeSourceFragment as fragment } from "../workspace/sources";
 import type { SourceFragment as Fragment } from "../workspace/sources";
 /** 私有聊天及文档或消息ID；组件不接受服务端存储路径。 */
-const props = defineProps<{ chat: string; document?: string; message?: string; revision?: string }>();
+const props = defineProps<{ chat: string; document?: string; message?: string; reference?: string; revision?: string }>();
 const api = new Api(), query = ref(""), fragments = ref<Fragment[]>([]), notice = ref(""), busy = ref(false);
 let generation = 0;
 /** @param event 同页删除完成信号；只携带逻辑聊天ID，立即清掉已打开的原文预览。 */
@@ -14,7 +14,7 @@ function invalidate(event: Event): void {
 }
 window.addEventListener("travel:sources-invalidated", invalidate);
 onUnmounted(() => { generation++; window.removeEventListener("travel:sources-invalidated", invalidate); });
-watch(() => [props.chat, props.document, props.message, props.revision], () => { generation++; fragments.value = []; notice.value = ""; query.value = ""; });
+watch(() => [props.chat, props.document, props.message, props.reference, props.revision], () => { generation++; fragments.value = []; notice.value = ""; query.value = ""; });
 /** 检索指定文件或按需查看成功回复实际读取的引用；没有引用不伪造来源。 */
 async function load(): Promise<void> {
   if (busy.value) return;
@@ -26,6 +26,8 @@ async function load(): Promise<void> {
       const result = await api.post<{ fragments: unknown[]; notice: string; complete: boolean }>(`/api/v1/chats/${chat}/documents/${props.document}/search`, { query: query.value });
       if (!Array.isArray(result.fragments) || result.fragments.length > 5 || typeof result.notice !== "string" || result.notice.length > 500 || typeof result.complete !== "boolean") throw new Error("SOURCE_RESPONSE_INVALID");
       items = result.fragments.map(fragment); explanation = result.notice + (result.complete ? "" : " 返回达到上限，请缩小关键词范围。");
+    } else if(props.reference) {
+      items=[fragment(await api.get(`/api/v1/chats/${chat}/references/${props.reference}`))]; explanation="这项建议绑定的实际原文，用户材料并非官方核实。";
     } else {
       const ids = await api.get<unknown>(`/api/v1/chats/${chat}/messages/${props.message}/references`);
       if (!Array.isArray(ids) || ids.length > 10 || ids.some(id => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))) throw new Error("SOURCE_RESPONSE_INVALID");

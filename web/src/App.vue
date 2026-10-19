@@ -5,6 +5,7 @@ import PreferencePanel from "./components/PreferencePanel.vue";
 import ChatComposer from "./components/ChatComposer.vue";
 import SourcePreview from "./components/SourcePreview.vue";
 import DocumentPanel from "./components/DocumentPanel.vue";
+import AdvicePanel from "./components/AdvicePanel.vue";
 import DecisionCard from "./components/DecisionCard.vue";
 import ItineraryPanel from "./components/ItineraryPanel.vue";
 import {
@@ -717,10 +718,11 @@ onMounted(initialize);
                 查看行程 ↗
               </button>
             </article>
+          <AdvicePanel v-if="chatSelected" :key="chatSelected" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @applied="() => { void dialogue.refresh(); }" />
           </div>
         </div>
         <div class="chat-bottom">
-          <DocumentPanel :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
+          <DocumentPanel :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="text => { void dialogue.send(text); }" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
           <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
             <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
             <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>

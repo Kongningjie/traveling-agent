@@ -35,6 +35,8 @@ public interface DialogueStore {
     boolean guard(Dialogue.Claim claim);
     /** @param claim 已锁领取 @param inputs 本轮明确解决的旧澄清；只允许同聊天CLARIFY消息，普通新消息不自动解除旧屏障 */
     void resolve(Dialogue.Claim claim, List<UUID> inputs);
+    /** @param user 已确认身份 @param chat 当前聊天 @param task 本次明确采纳新建的私有任务；不伪造聊天执行租约 */
+    void linkConfirmed(UUID user,UUID chat,UUID task);
     /** @param claim 已通过guard的领取 @param task 新任务 @return 关联结果；已有任务不得替换 */
     Dialogue.Chat link(Dialogue.Claim claim, UUID task);
     /** @param claim 已通过guard @param state DONE、CONFIRM、CLARIFY或PAUSED @param reply 可信协议中的回复 @param operation 待确认动作，可空 @param error 固定错误码 */

@@ -34,6 +34,15 @@ public final class NegotiationService {
             store.interpreted(scope, input, facts); return task;
         });
     }
+    /** @param actor 明确确认的用户 @param taskId 当前旅行，可空 @param input 建议稳定ID @param text 确认后的规范原文 @param facts 已校验字段
+     * @return 原变更流程的唯一任务；不将采纳猜成旧问题答案，也不直接提交行程 */
+    public UUID applyAdvice(UserIdentity actor,UUID taskId,UUID input,String text,List<Negotiation.Fact> facts){
+        return transactions.required(() -> {
+            UUID task=taskId;
+            if(task==null)task=travel.create(actor,input.toString(),"从旅行资料开始规划",new TravelStore.RevisionContent(List.of(),List.of(),"用户明确采纳建议","尚未形成行程")).task().scope().taskId();
+            var scope=new TaskScope(actor.id(),task);sendInternal(actor,scope,input,text,facts);store.interpreted(scope,input,facts);return task;
+        });
+    }
     private final NegotiationStore store;
     private final TravelStorageService travel;
     private final RunService runs;

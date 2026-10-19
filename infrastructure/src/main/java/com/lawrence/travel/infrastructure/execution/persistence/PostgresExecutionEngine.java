@@ -228,7 +228,9 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             var artifact = mapper.artifact(f.scope(), f.runId(), f.stepId(), command.artifactId()); require(artifact != null, NOT_FOUND);
             require(artifact.attemptId().equals(f.attemptId()) && artifact.contentHash().equals(command.contentHash()), IDEMPOTENCY_CONFLICT);
             StageOutput output = json.decode(artifact.body(), StageOutput.class);
-            require(json.hash(json.encode(output)).equals(command.contentHash())
+            // 哈希核对保存的原始规范JSON；领域Set反序列化后顺序可变，不得让其重编码制造假冲突。
+            // 原文、内容哈希、attempt归属和后继dispatch仍全部核对，不修改旧产物或重签历史哈希。
+            require(json.hash(json.encode(json.decode(artifact.body(),Object.class))).equals(command.contentHash())
                     && dispatches(f.runId(), f.stepId(), output.next()).equals(command.nextStages()), IDEMPOTENCY_CONFLICT);
             String receipt = json.hash(json.encode(List.of(f.attemptId(), command.contentHash(), command.nextStages())));
             if (stepRow.committedAttemptId() != null) {

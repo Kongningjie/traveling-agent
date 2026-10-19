@@ -34,6 +34,12 @@ let cardRevision = 1,
     budgetAnswered = false;
 const savedMessages = new Map();
 const dialogueChats = new Map();
+// 可选的建议UI场景；所有ID/文本/回执为合成，不是实际模型分析。
+const adviceChat="00000000-0000-4000-8000-000000000060",adviceMessage="00000000-0000-4000-8000-000000000061",adviceId="00000000-0000-4000-8000-000000000062",adviceDocument="00000000-0000-4000-8000-000000000063",adviceReference="00000000-0000-4000-8000-000000000064";
+const adviceFixture=process.env.TRAVEL_UI_FIXTURE_ADVICE==="true";
+const adviceItem={id:adviceId,message:adviceMessage,document:adviceDocument,state:"OPEN",task:null,applied:{},draft:{reference:adviceReference,quote:"打算一天只玩一个景点，住宿尚未预订。",statement:"INTENDED",problem:"留出休息时间",reason:"这是用户材料中的打算，开放时间仍需核实。",proposal:"保留慢游节奏，减少跨区域往返。",impact:"当前旅行的节奏偏好",evidence:"USER_MATERIAL",pending:"",changes:{pace:"慢游"}}};
+if(adviceFixture)dialogueChats.set(adviceChat,{chat:{id:adviceChat,title:"合成计划分析",taskId:null},messages:[{id:adviceMessage,text:"检查我的计划，先不要开始规划",state:"DONE",reply:"以下仅为本地UI夹具建议，尚未采纳或生效。",operation:null,error:""}],blocked:false});
+
 /** @param n 正整数 @returns 固定测试日期，避免依赖真实天气或日历服务。 */
 function date(n) {
     return `2026-11-${String(n).padStart(2, "0")}`;
@@ -143,6 +149,15 @@ const server = createServer(async (request, response) => {
                     authenticated ? syntheticUser : { code: "UNAUTHORIZED" },
                     authenticated ? 200 : 401,
                 );
+            if(adviceFixture && path===`/api/v1/chats/${adviceChat}/advice` && request.method==="GET")return json(response,[adviceItem]);
+            if(adviceFixture && path===`/api/v1/chats/${adviceChat}/advice/${adviceId}/actions` && request.method==="POST"){
+                let raw="";for await(const part of request)raw+=part;const body=JSON.parse(raw);calls.push({path,method:request.method,body});
+                if(!body.confirmed)return json(response,{code:"CONFIRM_REQUIRED"},400);
+                adviceItem.state=body.action==="REJECT"?"REJECTED":"APPLIED";adviceItem.applied=body.action==="CUSTOM"?body.changes:{...adviceItem.draft.changes};return json(response,adviceItem);
+            }
+            if(path.endsWith("/advice")&&request.method==="GET")return json(response,[]);
+            if(adviceFixture&&path===`/api/v1/chats/${adviceChat}/documents`&&request.method==="GET")return json(response,[]);
+            if(adviceFixture&&path===`/api/v1/chats/${adviceChat}/references/${adviceReference}`)return json(response,{reference:adviceReference,locator:{document:adviceDocument,hash:"a".repeat(64),parser:"synthetic-v1",position:1,start:0,end:adviceItem.draft.quote.length},text:adviceItem.draft.quote,truncated:false,notice:"仅本地合成原文。"});
             // 以下为确定的本地UI夹具，模拟结果不代表真实模型分类。
             if (path.startsWith("/api/v1/chats")) {
                 if (!authenticated) return json(response, { code: "UNAUTHORIZED" }, 401);

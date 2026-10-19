@@ -92,6 +92,9 @@ public interface DialogueMapper {
     /** @param c 原领取 @return 是否仍有提交资格 */
     @Select("SELECT EXISTS(SELECT 1 FROM dialogue_input WHERE user_id=#{c.userId} AND chat_id=#{c.chatId} AND id=#{c.messageId} AND state='RUNNING' AND token=#{c.token} AND lease_until>clock_timestamp())")
     boolean live(@Param("c") Dialogue.Claim c);
+    /** @param user 用户 @param chat 已确认聊天 @param task 同事务新建私有任务 @return 关联数，不允许替换已有任务 */
+    @Update("UPDATE dialogue_chat SET task_id=#{task} WHERE user_id=#{user} AND id=#{chat} AND task_id IS NULL")
+    int linkConfirmed(@Param("user") UUID user,@Param("chat") UUID chat,@Param("task") UUID task);
     /** @param c 领取 @param task 关联任务 @return 更新数 */
     @Update("UPDATE dialogue_chat SET task_id=#{task} WHERE user_id=#{c.userId} AND id=#{c.chatId} AND task_id IS NULL")
     int link(@Param("c") Dialogue.Claim c, @Param("task") UUID task);

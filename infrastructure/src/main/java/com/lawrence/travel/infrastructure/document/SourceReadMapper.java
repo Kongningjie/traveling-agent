@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Select;
 
 /** 归属及水位SQL；所有正文仅在私有范围内按绑定参数读取。 */
 public interface SourceReadMapper {
+    /** @param s 活跃读取 @param reference 实际片段 @return 本次预算和token的精确来源 */
+    @Select("SELECT EXISTS(SELECT 1 FROM source_read_result WHERE user_id=#{s.user} AND chat_id=#{s.chat} AND budget_id=#{s.budget} AND token=#{s.token} AND id=#{reference} AND document_id IS NOT NULL)")
+    boolean fromAttempt(@Param("s") SourceRead.Scope s,@Param("reference") UUID reference);
     /** @param user 用户 @return 锁定有效身份后的偏好水位 */
     @Select("SELECT preference_revision FROM app_user WHERE id=#{user} AND account_status='ACTIVE' FOR NO KEY UPDATE")
     Long preference(@Param("user") UUID user);

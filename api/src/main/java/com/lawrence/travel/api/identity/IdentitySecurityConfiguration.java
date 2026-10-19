@@ -106,6 +106,8 @@ public class IdentitySecurityConfiguration {
                         .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/chats/*/messages", "/api/v1/chats/*/messages/*/actions", "/api/v1/chats/*/link").authenticated()
                         .requestMatchers("/api/v1/chats/*/documents", "/api/v1/chats/*/documents/**").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/chats/*/references/*", "/api/v1/chats/*/messages/*/references").authenticated()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/chats/*/advice").authenticated()
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/chats/*/advice/*/actions").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/artifacts/*").authenticated()
                         .anyRequest().denyAll())
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contexts))

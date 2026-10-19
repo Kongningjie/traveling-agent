@@ -74,6 +74,19 @@ class PlanningIntegrationTest {
     @Autowired private BusinessTransactions transactions;
     @Autowired private TravelJson json;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.lawrence.travel.application.document.DocumentService documents;
+    @Autowired private com.lawrence.travel.application.port.DocumentStore documentStore;
+    @Autowired private com.lawrence.travel.application.port.JobStore jobs;
+    @Autowired private com.lawrence.travel.application.interaction.DialogueService dialogue;
+    @Autowired private com.lawrence.travel.application.document.SourceReadService sources;
+    @Autowired private com.lawrence.travel.application.document.AdviceService advice;
+    @MockitoBean private com.lawrence.travel.application.port.ParserProcessPort parser;
+    @MockitoBean private com.lawrence.travel.application.port.DialogueInterpreter interpreter;
+    private static final java.nio.file.Path DOCUMENT_ROOT=documentRoot();
+    /** @return 仅本地合成文档目录，不触及真实附件 */
+    private static java.nio.file.Path documentRoot(){try{return java.nio.file.Files.createTempDirectory("planning-advice-test-");}catch(java.io.IOException failure){throw new IllegalStateException("TEST_ROOT_FAILED");}}
+    /** @param registry 隔离本例原件根与清理开关 */
+    @org.springframework.test.context.DynamicPropertySource static void documentProperties(org.springframework.test.context.DynamicPropertyRegistry registry){registry.add("travel.documents.root",DOCUMENT_ROOT::toString);registry.add("travel.documents.cleanup-enabled",()->false);}
     @MockitoBean private PlanningAdvisor advisor;
     @MockitoBean private ResearchAdvisor researcher;
     @MockitoBean private TravelToolService tools;
@@ -89,6 +102,10 @@ class PlanningIntegrationTest {
         sessionIds.forEach(sessions::deleteById);
         transactions.required(() -> {
             for (UUID user : users) {
+                var operationBudgets=jdbc.queryForList("SELECT budget_id FROM operation_context WHERE user_id=? UNION SELECT budget_id FROM dialogue_chat WHERE user_id=?",UUID.class,user,user);
+                for(String key:jdbc.queryForList("SELECT file_key FROM uploaded_document WHERE user_id=?",String.class,user)){try{java.nio.file.Files.deleteIfExists(DOCUMENT_ROOT.resolve(key));}catch(java.io.IOException failure){throw new IllegalStateException("TEST_CLEAN_FAILED");}}
+                jdbc.update("DELETE FROM uploaded_document WHERE user_id=?",user);jdbc.update("DELETE FROM dialogue_input WHERE user_id=?",user);JobTestCleanup.remove(jdbc,user);jdbc.update("DELETE FROM dialogue_chat WHERE user_id=?",user);
+                for(UUID budget:operationBudgets){jdbc.update("DELETE FROM call_meter WHERE run_id=?",budget);jdbc.update("DELETE FROM execution_budget WHERE run_id=?",budget);}
                 var runs = jdbc.queryForList("SELECT id FROM execution_run WHERE user_id=?", UUID.class, user); jdbc.update("UPDATE travel_task SET current_run_id=NULL,current_version_id=NULL WHERE user_id=?", user);
                 for (String table : List.of("evidence_notice", "field_evidence", "itinerary_acceptance_request", "itinerary_acceptance", "itinerary_report", "itinerary_candidate", "negotiation_card", "conversation_message", "decision_response", "decision_request", "run_event", "execution_start_request")) jdbc.update("DELETE FROM " + table + " WHERE user_id=?", user);
                 jdbc.update("DELETE FROM artifact_content WHERE artifact_id IN(SELECT id FROM artifact_record WHERE user_id=?)", user);
@@ -506,6 +523,20 @@ class PlanningIntegrationTest {
         new com.lawrence.travel.application.execution.StageExecutor(engine, List.of(planning)).execute(claim, control);
         assertThat(engine.run(f.scope(), f.run()).state()).isEqualTo(com.lawrence.travel.domain.execution.ExecutionRun.State.PAUSED_BUDGET);
         assertThat(budgets.read(f.run()).repairRounds()).isEqualTo(2); assertThat(jdbc.queryForObject("SELECT current_run_id FROM travel_task WHERE user_id=? AND id=?", UUID.class, f.actor().id(), f.scope().taskId())).isEqualTo(f.run());
+    }
+
+    /** 上传→实际只读对话→逐项采纳→原需求和受限规划→校验/独立审核→显式接受，所有外部端口均本地替身。 */
+    @Test void uploadedPlanAdviceUsesOriginalCandidateAndAcceptanceGates(){
+        var f=fixture();through(f,StageType.PRESENT);UUID chat=UUID.randomUUID();dialogue.attach(f.actor(),chat,f.scope().taskId());
+        when(parser.parse(any())).thenReturn(new com.lawrence.travel.application.document.Documents.Report("pdfbox-3.0.8_poi-5.5.1_v1","OK",List.of(new com.lawrence.travel.application.document.Documents.Section(1,"打算一天只玩一个景点，住宿尚未预订。")),"合成文本，不是官方证据"));
+        var uploaded=documents.upload(f.actor(),chat,UUID.randomUUID(),"合成计划.txt","打算一天只玩一个景点".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var scope=new com.lawrence.travel.application.execution.Jobs.Scope(f.actor().id(),chat);var entry=documentStore.get(scope,uploaded.id());var parse=jobs.claim(scope,entry.jobId()).orElseThrow();documents.commit(parse,documents.execute(parse),()->{});
+        String text="检查并优化这个文件，先不要修改旅行";dialogue.send(f.actor(),chat,UUID.randomUUID(),text);
+        when(interpreter.interpret(any())).thenAnswer(call->{com.lawrence.travel.application.interaction.Dialogue.Claim c=call.getArgument(0);var fragment=sources.section(c.budgetId(),c.token(),uploaded.id(),1,0,1000);var item=new com.lawrence.travel.domain.interaction.PlanAdvice.Draft(fragment.reference(),"一天只玩一个景点",com.lawrence.travel.domain.interaction.PlanAdvice.Statement.INTENDED,"节奏","用户打算减少赶路","采用慢游节奏","当前旅行节奏",com.lawrence.travel.domain.interaction.PlanAdvice.Evidence.USER_MATERIAL,"",Map.of("pace","慢游"));return new com.lawrence.travel.domain.interaction.DialogueIntent.Result(List.of(new com.lawrence.travel.domain.interaction.DialogueIntent.Intent(com.lawrence.travel.domain.interaction.DialogueIntent.Kind.CONVERSATION,com.lawrence.travel.domain.interaction.DialogueIntent.Action.OPTIMIZE_PLAN,text)),List.of(),"只给出建议","",null,"","","",List.of(),List.of(item));});
+        long before=travel.task(f.actor(),f.scope().taskId()).task().constraintRevision();dialogue.claimWork().orElseThrow().run();assertThat(travel.task(f.actor(),f.scope().taskId()).task().constraintRevision()).isEqualTo(before);
+        var item=advice.list(f.actor(),chat).getFirst();advice.act(f.actor(),chat,item.id(),"ADOPT",Map.of(),true);UUID run=UUID.fromString(jdbc.queryForObject("SELECT current_run_id::text FROM travel_task WHERE id=?",String.class,f.scope().taskId()));
+        var next=new Fixture(f.actor(),f.scope(),run);through(next,StageType.PRESENT);var candidate=itineraries.latest(f.actor(),f.scope().taskId());assertThat(candidate.candidate().review().conclusion()).isEqualTo(ItineraryReport.Conclusion.PASS);assertThat(travel.task(f.actor(),f.scope().taskId()).task().currentVersionId()).isNull();
+        assertThat(accept(next).status()).isEqualTo(CandidateStore.Status.ACCEPTED);assertThat(travel.task(f.actor(),f.scope().taskId()).task().currentVersionId()).isEqualTo(candidate.candidate().version().snapshotId());
     }
 
 }

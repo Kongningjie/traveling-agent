@@ -13,6 +13,8 @@ public final class PostgresSourceReadStore implements SourceReadStore {
     /** @param mapper 只读来源和受控工作文件SQL */
     public PostgresSourceReadStore(SourceReadMapper mapper) { this.mapper = mapper; }
 
+    /** {@inheritDoc} 不以可读取旧来源等同本次已读取。 */
+    @Override public boolean fromAttempt(SourceRead.Scope s,UUID reference){return safe(()->mapper.fromAttempt(s,reference));}
     /** {@inheritDoc} 锁序始终user→chat，阻止读取与删除交错发布。 */
     @Override public SourceRead.Scope browser(UUID user, UUID chat) {
         return safe(() -> {

@@ -6,6 +6,8 @@ import java.util.UUID;
 
 /** 资料权限、水位、引用和卸载正文的PG权威端口；所有方法在应用短事务执行。 */
 public interface SourceReadStore {
+    /** @param scope 当前活跃尝试 @param reference 片段ID @return 是否确由本预算/尝试实际读取，不能把浏览器或旧回复引用冒充本轮工具结果 */
+    boolean fromAttempt(com.lawrence.travel.application.document.SourceRead.Scope scope,UUID reference);
     /** @param user 登录用户 @param chat 私有聊天 @return 锁定用户与聊天后的读取范围 */
     SourceRead.Scope browser(UUID user, UUID chat);
     /** @param budget 原输入预算 @param token 调用绑定的原尝试 @return 有效聊天作业范围，不能重读新token为旧调用授权 */

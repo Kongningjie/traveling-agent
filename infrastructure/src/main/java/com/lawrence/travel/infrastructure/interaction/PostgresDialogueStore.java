@@ -106,6 +106,8 @@ public final class PostgresDialogueStore implements DialogueStore {
         transaction();
         for (UUID id : inputs) { var old = mapper.message(claim.userId(), claim.chatId(), id); require(old != null && old.state().equals("CLARIFY") && !id.equals(claim.messageId()), false); changeState(claim.userId(), claim.chatId(), id, "DONE"); }
     }
+    /** {@inheritDoc} 明确确认的新任务关联不使用虚构Claim，不替换旧旅行。 */
+    @Override public void linkConfirmed(UUID user,UUID chat,UUID task){transaction();lock(user,chat);require(tasks.task(new TaskScope(user,task))!=null,true);require(mapper.linkConfirmed(user,chat,task)==1,false);}
     /** {@inheritDoc} 一个聊天只能关联一个任务。 */
     @Override public Dialogue.Chat link(Dialogue.Claim claim, UUID task) { transaction(); require(mapper.link(claim, task) == 1, false); return mapper.chat(claim.userId(), claim.chatId()); }
     /** {@inheritDoc} CAS同时检查租约有效期，迟到结果不得清除屏障。 */

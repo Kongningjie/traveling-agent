@@ -100,6 +100,17 @@ public final class SourceReadService {
         sources.save(s, f.reference(), e.id(), json.encode(f), null); return f;
     }
 
+    /** @param budget 原分析预算 @param token 原尝试 @param reference 实际读取引用 @return 活跃尝试内已验证的原文，不授予浏览器或业务写权限 */
+    public SourceRead.Fragment agentReference(UUID budget,long token,UUID reference){
+        return tx.required(() -> {
+            var s=sources.agent(budget,token);if(!sources.fromAttempt(s,reference))throw invalid();var f=json.decode(sources.read(s,reference),SourceRead.Fragment.class);
+            var e=documents.get(scope(s),f.locator().document());var r=ready(s,e);
+            var part=r.sections().stream().filter(p -> p.position()==f.locator().position()).findFirst().orElseThrow(SourceReadService::invalid);
+            var l=f.locator();if(!e.hash().equals(l.hash()) || !r.parserVersion().equals(l.parser()) || l.start()<0 || l.end()>part.text().length() || !part.text().substring(l.start(),l.end()).equals(f.text()))throw invalid();
+            safety.require("TOOL_OUTPUT",f.text());return f;
+        });
+    }
+
     /** @param user 登录用户 @param chat 当前聊天 @param reference 服务器引用ID @return 删除/版本/水位仍有效的原文 */
     public SourceRead.Fragment reference(UUID user, UUID chat, UUID reference) {
         return tx.required(() -> {

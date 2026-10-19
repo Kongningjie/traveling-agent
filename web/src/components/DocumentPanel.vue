@@ -8,7 +8,7 @@ import type { DocumentView } from "../workspace/documents";
 /** 当前聊天可空；首个附件成功后由父页面打开新聊天。 */
 const props=defineProps<{chat: string;disabled?:boolean}>();
 /** 不创建旅行占位任务，仅通知独立聊天身份。 */
-const emit=defineEmits<{uploaded:[chat:string]}>();
+const emit=defineEmits<{uploaded:[chat:string];analyze:[text:string]}>();
 const api=new Api(),items=ref<DocumentView[]>([]),error=ref(""),busy=ref(false),file=ref<File|null>(null);
 let generation=0,pendingId="",pendingChat="";
 /** 只轮询状态，不自动重试上传／解析；切换聊天后的迟到响应不显示。 */
@@ -31,10 +31,11 @@ async function act(id:string,action:string): Promise<void> {if(busy.value)return
 </script>
 <template>
   <details class="document-panel"><summary>旅行资料 <small>PDF / DOCX / TXT / Markdown · 单份10MiB</small></summary>
-    <p class="muted">可先上传自己的计划。这里只保存和提取文本，分析建议将在后续功能提供；复杂表格需核对原件，不支持扫描件／OCR。</p>
+    <p class="muted">可先上传自己的计划。可让助手解释、检查或优化，建议需逐项确认后才登记变更；复杂表格需核对原件，不支持扫描件／OCR。</p>
     <div class="inline"><input aria-label="上传旅行资料" type="file" accept=".pdf,.docx,.txt,.md" :disabled="busy||disabled" @change="select"/><button :disabled="busy||disabled||!file" @click="upload">{{busy?"处理中…":"保存附件"}}</button><button :disabled="busy" @click="refresh">刷新</button></div>
     <p v-if="error" role="alert" class="error">{{error}}</p>
     <ul><li v-for="item in items" :key="item.id"><strong>{{item.name}}</strong> — {{label(item)}}<p>{{item.notice}}</p>
+      <div v-if="item.state==='READY'"><button :disabled="busy||disabled" @click="emit('analyze',`请解释我上传的旅行计划，文件ID：${item.id}。只分析，先不要创建旅行。`)">解释计划</button><button :disabled="busy||disabled" @click="emit('analyze',`请检查这份旅行计划的问题并标明原文来源，文件ID：${item.id}。只分析，不修改旅行。`)">检查问题</button><button :disabled="busy||disabled" @click="emit('analyze',`请优化我的旅行计划，文件ID：${item.id}。给出可逐项确认的需求建议，确认前不开始规划。`)">优化建议</button></div>
       <SourcePreview v-if="item.state==='READY'" :key="item.id" :chat="chat" :document="item.id" />
       <a :href="`/api/v1/chats/${chat}/documents/${item.id}/download`" download>下载原件</a>
       <button v-if="['QUEUED','RUNNING'].includes(item.state)" :disabled="busy" @click="act(item.id,'STOP')">停止解析</button>
