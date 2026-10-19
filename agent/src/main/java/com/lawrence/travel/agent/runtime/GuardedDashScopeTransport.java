@@ -27,6 +27,8 @@ import reactor.core.publisher.Flux;
 public final class GuardedDashScopeTransport implements HttpTransport, AutoCloseable {
     public static final String ENDPOINT =
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+    private final com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+    private final UUID parentSpan=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
     private final ModelCallAdmission admission;
     private final UUID runId;
     private final String role;
@@ -34,6 +36,8 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     private final Runnable contextGuard;
     private final Set<Call> inFlight = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final Object lifecycle=new Object();
+    private int activeRequests;
 
     /**
      * 固定实际传输策略，不接受调用方指定替代地域或重定向。
@@ -87,6 +91,12 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
      */
     @Override
     public HttpResponse execute(HttpRequest request) {
+        enterRequest();
+        try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { return executeRequest(request); }
+        finally { exitRequest(); }
+    }
+    /** @param request 已格式化文本请求 @return 发送及已结束计量的响应；关联由外层显式恢复 */
+    private HttpResponse executeRequest(HttpRequest request) {
         var prepared = prepare(request);
         String body = prepared.body();
         long upper = prepared.upper();
@@ -141,6 +151,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         if (body == null || body.getBytes(StandardCharsets.UTF_8).length > 65536) {
             throw new HttpTransportException("MODEL_INPUT_TOO_LARGE");
         }
+        com.lawrence.travel.application.safety.SafetyGate.local().require("MODEL_REQUEST",body);
         Map<?, ?> json;
         try { json = JsonUtils.getJsonCodec().fromJson(body, Map.class); }
         catch (RuntimeException invalid) { throw new HttpTransportException("MODEL_INPUT_INVALID"); }
@@ -244,6 +255,13 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     /** @param status 供应商状态 @param body 仅在本边界分类的响应 @return 免费耗尽保留类型化暂停原因，禁止被当成普通失败重试；其余只保留固定错误码 */
     private static RuntimeException providerFailure(int status, String body) {
         String code = safeError(status, body);
+        try {
+            Object providerCode=JsonUtils.getJsonCodec().fromJson(body,Map.class).get("code");
+            if(status==400 && "context_length_exceeded".equals(providerCode)) {
+                var usage=readUsage(body);
+                return new HttpTransportException(usage!=null && usage.inputTokens()==0 && usage.outputTokens()==0 ? "MODEL_CONTEXT_LIMIT_SAFE" : "MODEL_CONTEXT_LIMIT");
+            }
+        } catch(RuntimeException invalid) { /* 非明确协议不得从自由文本推断可恢复超限。 */ }
         return "MODEL_FREE_QUOTA_EXHAUSTED".equals(code)
                 ? new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT)
                 : new HttpTransportException(code);
@@ -265,13 +283,17 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                 if (call != null) call.cancel();
             });
             Thread.startVirtualThread(() -> {
+                boolean started=false;
                 try {
-                    readStream(request, sink, cancelled, connection);
+                    enterRequest(); started=true;
+                    try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { readStream(request, sink, cancelled, connection); }
                     if (!sink.isCancelled()) sink.complete();
                 } catch (RuntimeException failure) {
                     // 只允许本边界定义的分类，不把 SDK、JSON 或网络异常正文传出去。
                     if (!sink.isCancelled()) {
-                        if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) {
+                        if(failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) { sink.error(rejected); }
+                        else if(failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) { sink.error(rejected); }
+                        else if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) {
                             // 保留固定领域类别，应用层才能区分等待并发与额度暂停；不携带原异常链。
                             sink.error(new com.lawrence.travel.domain.execution.control.CallRejectedException(rejected.reason()));
                         } else {
@@ -280,7 +302,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                             sink.error(new HttpTransportException(code));
                         }
                     }
-                }
+                } finally { if(started) exitRequest(); }
             });
         }, reactor.core.publisher.FluxSink.OverflowStrategy.ERROR));
     }
@@ -308,7 +330,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
             inFlight.add(call);
             if (closed.get() || cancelled.get()) call.cancel();
             try {
-                TokenUsage usage;
+                TokenUsage usage=null; String failureBody=null; int failureStatus=0;
                 try (var response = call.execute()) {
                     if (!response.isSuccessful()) {
                         String error = "";
@@ -319,14 +341,16 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                             int length = reader.read(chars);
                             error = length < 0 ? "" : new String(chars, 0, length);
                         }
-                        throw providerFailure(response.code(), error);
-                    }
+                        failureBody=error; failureStatus=response.code();
+                    } else {
                     if (response.body() == null || !response.header("Content-Type", "").toLowerCase(java.util.Locale.ROOT)
                             .startsWith("text/event-stream")) throw new HttpTransportException("MODEL_STREAM_INVALID");
                     usage = DashScopeSseReader.read(response.body().charStream(), data -> {
                         if (!cancelled.get() && !closed.get()) sink.next(data);
                     }, () -> cancelled.get() || closed.get());
+                    }
                 }
+                if(failureStatus!=0) { permit.complete(readUsage(failureBody)); throw providerFailure(failureStatus,failureBody); }
                 // 最终累计用量只在流正常结束、关闭响应后生效；取消或截断保持 UNKNOWN。
                 if (cancelled.get() || closed.get()) throw new HttpTransportException("MODEL_CANCELLED");
                 permit.complete(usage);
@@ -337,13 +361,23 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         }
     }
 
+    /** 实际请求登记与关闭互斥，避免取消检查与登记间窗口被当成空闲。 */
+    private void enterRequest() { synchronized(lifecycle) { if(closed.get()) throw new HttpTransportException("MODEL_CANCELLED"); activeRequests++; } }
+    /** 响应、许可及回调实际退出后归还登记，不以Future提前结束替代。 */
+    private void exitRequest() { synchronized(lifecycle) { activeRequests--; lifecycle.notifyAll(); } }
+    /** 调用方已取消后等待真实传输退出；中断只是取消信号，不能提前释放运行容量。 */
+    public void awaitIdle() {
+        boolean interrupted=Thread.interrupted();
+        synchronized(lifecycle) { while(activeRequests>0) { try { lifecycle.wait(); } catch(InterruptedException signal) { interrupted=true; } } }
+        if(interrupted) Thread.currentThread().interrupt();
+    }
     /** 返回模型产物前再次检查权威版本；不发起外部请求，不代替C事务资格检查。 */
     public void checkContext() { contextGuard.run(); }
 
     /** 停止新的发送并取消实际连接；许可仍由 execute 的退出路径结算，不提前释放。 */
     @Override
     public void close() {
-        closed.set(true);
+        synchronized(lifecycle) { closed.set(true); }
         inFlight.forEach(Call::cancel);
     }
 }

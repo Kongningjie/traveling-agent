@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -54,7 +54,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'Job') { '-Dtest=PreferenceIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,IdentityIntegrationTest,JobIntegrationTest,DialogueIntegrationTest,BudgetLedgerIntegrationTest,DialogueWorkerTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,ModuleArchitectureTest,ModelCallAdmissionTest,BackgroundJobTest' }
+    $selectedTest = if ($Scope -eq 'Session') { '-Dtest=BackgroundJobTest,TravelToolContractTest,SessionContextIntegrationTest,DialogueIntegrationTest,ContextIntegrationTest,JobIntegrationTest,SafetyGateTest,ControlledHarnessCallTest,DialogueIntentContractTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Job') { '-Dtest=PreferenceIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,IdentityIntegrationTest,JobIntegrationTest,DialogueIntegrationTest,BudgetLedgerIntegrationTest,DialogueWorkerTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,ModuleArchitectureTest,ModelCallAdmissionTest,BackgroundJobTest' }
         elseif ($Scope -eq 'Dialogue') { '-Dtest=DialogueIntegrationTest,CandidateAcceptanceIntegrationTest,NegotiationIntegrationTest,RunEventIntegrationTest,ModuleArchitectureTest,DialogueIntentContractTest,DialogueWorkerTest' }
         elseif ($Scope -eq 'Evaluation') { '-Dtest=EvaluationRunnerTest,EvaluationBaselineTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Fault') { '-Dtest=ExecutionEngineIntegrationTest,BudgetLedgerIntegrationTest,RunEventIntegrationTest,CandidateAcceptanceIntegrationTest,TravelStorageIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest,ExecutionResourcesTest,GuardedTransportTest,GuardedStreamTest,HarnessContractTest,LocalModelFaultTest' }
@@ -75,6 +76,7 @@ try {
     if ($TestMethod) {
         if ($Scope -eq 'Dialogue') { $selectedTest = '-Dtest=DialogueIntegrationTest' }
         if ($Scope -eq 'Job') { $selectedTest = '-Dtest=JobIntegrationTest' }
+        if ($Scope -eq 'Session') { $selectedTest = '-Dtest=SessionContextIntegrationTest' }
         $selectedTest += "#$TestMethod"
     }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `

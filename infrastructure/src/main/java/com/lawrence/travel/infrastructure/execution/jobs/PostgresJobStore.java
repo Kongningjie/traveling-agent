@@ -20,6 +20,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 业务ID不可变，归属／作业行使用NO KEY UPDATE串行变更，允许计量FK的KEY SHARE，避免预算锁与归属锁反向等待。
  */
 public final class PostgresJobStore implements JobStore {
+    /** {@inheritDoc} 不领取物理容量、不消耗模型额度；不能将运行中的任意模型结果伪造成直接完成。 */
+    @Override public void completeCommand(Jobs.Scope scope,UUID id) { transaction(() -> {
+        lock(scope); var row=required(scope,id); if(row.state()==BackgroundJob.State.COMPLETED) return null;
+        if(row.kind()!=BackgroundJob.Kind.CHAT_INPUT || row.state()!=BackgroundJob.State.QUEUED) throw new IllegalStateException("INVALID_COMMAND_STATE");
+        move(scope,row,BackgroundJob.State.COMPLETED,"",false,null); finishOperation(row.operationId()); return null;
+    }); }
     private final JobMapper mapper;
     private final DiagnosticMapper diagnostics;
     private final QuotaMapper quotas;

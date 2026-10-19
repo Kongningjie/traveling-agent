@@ -39,6 +39,33 @@ import static org.mockito.Mockito.when;
 
 /** 真实门禁和传输路径配可控 SSE 响应；不读密钥、不访问供应商。 */
 class GuardedStreamTest {
+    /** 运行句柄关闭后的drain必须等实际请求退出，不能只等待Future取消。 */
+    @Test void drainWaitsForActualTransportExitAfterCancellation() throws Exception {
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);var finished=new CountDownLatch(1);
+        try(var transport=transport(true)) {
+            when(call.execute()).thenAnswer(invocation -> { entered.countDown(); if(!release.await(3,TimeUnit.SECONDS)) throw new IOException("LOCAL_TEST_TIMEOUT"); throw new IOException("LOCAL_CANCELLED"); });
+            var subscription=transport.stream(request()).subscribe(data -> { },error -> { }); assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
+            transport.close();var drain=Thread.ofVirtual().start(() -> { transport.awaitIdle();finished.countDown(); });
+            try { assertThat(finished.await(100,TimeUnit.MILLISECONDS)).isFalse(); }
+            finally { release.countDown(); }
+            assertThat(finished.await(3,TimeUnit.SECONDS)).isTrue(); drain.join();subscription.dispose();verify(ledger).finish(eq(reservation),isNull(),any());
+        } finally { release.countDown(); }
+    }
+    /** 明确零用量超限在响应关闭后结算，才可向上层报告一次恢复资格。 */
+    @Test void zeroUsageContextOverflowHasExplicitRecoveryCode() throws Exception {
+        try(var transport=transport(true)) {
+            when(call.execute()).thenReturn(response(ResponseBody.create("{\"code\":\"context_length_exceeded\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}",MediaType.get("application/json"))).newBuilder().code(400).build());
+            assertThatThrownBy(() -> transport.stream(request()).blockLast(Duration.ofSeconds(3))).hasMessage("MODEL_CONTEXT_LIMIT_SAFE");
+            verify(ledger).finish(eq(reservation),eq(new TokenUsage(0,0)),any());
+        }
+    }
+    /** 同样超限没有用量证明时保留UNKNOWN，不能自动压缩重试。 */
+    @Test void unknownUsageOverflowIsNotRecoverable() throws Exception {
+        try(var transport=transport(true)) {
+            when(call.execute()).thenReturn(response(ResponseBody.create("{\"code\":\"context_length_exceeded\"}",MediaType.get("application/json"))).newBuilder().code(400).build());
+            assertThatThrownBy(() -> transport.stream(request()).blockLast(Duration.ofSeconds(3))).hasMessage("MODEL_CONTEXT_LIMIT"); verify(ledger).finish(eq(reservation),isNull(),any());
+        }
+    }
     @org.junit.jupiter.api.io.TempDir java.nio.file.Path workspace;
     private final BudgetLedger ledger = mock(BudgetLedger.class);
     private final SemaphoreModelRequestSlots slots = new SemaphoreModelRequestSlots(1);

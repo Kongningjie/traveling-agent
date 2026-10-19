@@ -182,7 +182,7 @@ class DialogueIntegrationTest {
         service.send(user, chat, UUID.randomUUID(), "改为苏州"); process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.CHANGE_REQUIREMENTS, "改为苏州", List.of(new DialogueIntent.Fact("cities", "苏州", "苏州"))));
         assertThat(engine.run(new TaskScope(user.id(), task), oldRun).state().name()).isEqualTo("SUPERSEDED");
         var newRun = jdbc.queryForObject("SELECT current_run_id FROM travel_task WHERE id=?", UUID.class, task);
-        service.send(user, chat, UUID.randomUUID(), "停止规划"); process(result(DialogueIntent.Kind.OPERATION, DialogueIntent.Action.STOP, "停止规划", List.of()));
+        service.send(user, chat, UUID.randomUUID(), "停止规划"); assertThat(service.claimWork()).isEmpty();
         assertThat(engine.run(new TaskScope(user.id(), task), newRun).state().name()).isEqualTo("CANCELLED");
     }
     /** 两个真实数据库领取事务竞争时，同一聊天仅一方获得租约。 */

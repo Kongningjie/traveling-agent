@@ -16,18 +16,18 @@ class DialogueIntentContractTest {
         assertThatThrownBy(() -> adapter.interpret(input("{}"))).isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class);
         org.mockito.Mockito.verifyNoInteractions(runtime);
     }
-    /** 大上下文降级不截断本轮原文，调用仍沿用指定预算且不启用工具；结构化回复来自离线句柄。 */
+    /** 大上下文保留完整原文并交统一会话预算处理，调用仍沿用指定预算且不启用工具；结构化回复来自离线句柄。 */
     @Test void boundedInterpretationUsesOriginalBudgetWithoutTools() {
         var runtime = org.mockito.Mockito.mock(com.lawrence.travel.application.port.AgentRuntimePort.class);
         var invocation = org.mockito.Mockito.mock(com.lawrence.travel.application.port.AgentRuntimePort.Invocation.class);
         var json = new TravelJson(); var expected = new DialogueIntent.Result(List.of(new DialogueIntent.Intent(DialogueIntent.Kind.CONVERSATION, DialogueIntent.Action.CHAT, "你好")), List.of(), "你好", "", null, "", "", "");
         org.mockito.Mockito.when(invocation.result()).thenReturn(java.util.concurrent.CompletableFuture.completedFuture(json.encode(expected)));
         var claim = input(json.encode(java.util.Map.of("large", "x".repeat(10000))));
-        org.mockito.Mockito.when(runtime.startWithoutTools(org.mockito.ArgumentMatchers.eq(claim.budgetId()), org.mockito.ArgumentMatchers.eq("coordinator"), org.mockito.ArgumentMatchers.anyString())).thenReturn(invocation);
+        org.mockito.Mockito.when(runtime.startContextual(org.mockito.ArgumentMatchers.eq(claim.budgetId()), org.mockito.ArgumentMatchers.eq("coordinator"), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any())).thenReturn(invocation);
         var adapter = new com.lawrence.travel.agent.runtime.DialogueIntentInterpreter(runtime, new com.lawrence.travel.infrastructure.interaction.InteractionJson(json), true);
         assertThat(adapter.interpret(claim)).isEqualTo(expected);
-        var prompt = org.mockito.ArgumentCaptor.forClass(String.class); org.mockito.Mockito.verify(runtime).startWithoutTools(org.mockito.ArgumentMatchers.eq(claim.budgetId()), org.mockito.ArgumentMatchers.eq("coordinator"), prompt.capture());
-        assertThat(prompt.getValue()).hasSizeLessThanOrEqualTo(8192).contains("你好"); org.mockito.Mockito.verify(invocation).close();
+        var prompt = org.mockito.ArgumentCaptor.forClass(String.class); org.mockito.Mockito.verify(runtime).startContextual(org.mockito.ArgumentMatchers.eq(claim.budgetId()), org.mockito.ArgumentMatchers.eq("coordinator"), prompt.capture(), org.mockito.ArgumentMatchers.any());
+        assertThat(prompt.getValue()).contains("你好", "x".repeat(10000)); org.mockito.Mockito.verify(invocation).close();
     }
     /** @param context 显式测试上下文 @return 不含真实账号或任务的离线领取数据 */
     private com.lawrence.travel.application.interaction.Dialogue.Claim input(String context) {

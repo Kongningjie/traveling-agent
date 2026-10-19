@@ -32,13 +32,11 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
                 + "缺少规划字段由应用追问，不把普通缺项当clarification；clarification用于语义歧义和冲突。不确定修改范围就先解释并澄清。"
                 + "unresolved是尚未完成的原始诉求。本轮明确澄清其中某条时在resolvedInputs返回该ID，同时保留它仍有效的全部要求，facts可引用这些原文。无关聊天不能解除旧问题，操作及偏好授权只能来自本轮。"
                 + json.encode(Map.of("context", json.decode(c.context(), Object.class), "text", c.text(), "receivedAt", c.receivedAt().atZone(java.time.ZoneId.of("Asia/Shanghai")).toString()));
-        // 沿用适配器现有8192字符限制，超大上下文不截断用户原文；退回仅本轮并要求定位歧义。
-        if (prompt.length() > 8192) prompt = prompt.substring(0, prompt.indexOf("{\"context\"")) + json.encode(Map.of("context", Map.of("omitted", true), "text", c.text(), "receivedAt", c.receivedAt().toString()));
-        try (var call = runtime.startWithoutTools(c.budgetId(), "coordinator", prompt)) {
-            try { return json.decode(call.result().toCompletableFuture().get(180, TimeUnit.SECONDS), DialogueIntent.Result.class); }
+        try (var call = runtime.startContextual(c.budgetId(), "coordinator", prompt, new com.lawrence.travel.application.memory.AgentContext.Basis(0,null,c.token()))) {
+            try { return json.decode(call.result().toCompletableFuture().get(305, TimeUnit.SECONDS), DialogueIntent.Result.class); }
             catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException("DIALOGUE_INTERRUPTED"); }
             catch (java.util.concurrent.TimeoutException timeout) { throw new IllegalStateException("DIALOGUE_TIMEOUT"); }
-            catch (java.util.concurrent.ExecutionException failure) { if (failure.getCause() instanceof CallRejectedException rejected) throw rejected; throw new IllegalStateException("DIALOGUE_MODEL_FAILED"); }
+            catch (java.util.concurrent.ExecutionException failure) { if (failure.getCause() instanceof CallRejectedException rejected) throw rejected; if(failure.getCause() instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) throw rejected; if(failure.getCause() instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) throw rejected; throw new IllegalStateException("DIALOGUE_MODEL_FAILED"); }
         }
     }
 }

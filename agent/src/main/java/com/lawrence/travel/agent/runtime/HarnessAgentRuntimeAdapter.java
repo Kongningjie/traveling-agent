@@ -32,6 +32,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final java.util.function.BiFunction<UUID, String, Toolkit> toolkits;
     private final com.lawrence.travel.application.memory.ContextAssembler contexts;
     private final com.lawrence.travel.application.port.InteractionCodec json;
+    private final com.lawrence.travel.application.memory.SessionContextService sessions;
+    private final com.lawrence.travel.application.safety.SafetyGate safety;
     private final OkHttpClient client = new OkHttpClient();
 
     /** smoke 仅提供状态，没有请求发送能力。 */
@@ -66,7 +68,13 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     }
     /** @param admission 门禁 @param models 型号 @param keySupplier 本机凭据 @param workspaceRoot 隔离目录 @param toolkits 白名单工具 @param contexts 业务上下文用例 @param json 严格JSON */
     public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models, Supplier<String> keySupplier, Path workspaceRoot, java.util.function.BiFunction<UUID, String, Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts, com.lawrence.travel.application.port.InteractionCodec json) {
-        this.contexts = contexts; this.json = json;
+        this(admission,models,keySupplier,workspaceRoot,toolkits,contexts,json,null,com.lawrence.travel.application.safety.SafetyGate.local());
+    }
+    /** @param admission 同一计量 @param models 型号 @param keySupplier 本机凭据 @param workspaceRoot 隔离工作区 @param toolkits 白名单 @param contexts 兼容权威源 @param json JSON @param sessions 统一会话 @param safety 基础安全检查 */
+    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
+            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions, com.lawrence.travel.application.safety.SafetyGate safety) {
+        this.contexts = contexts; this.json = json; this.sessions=sessions; this.safety=safety==null?com.lawrence.travel.application.safety.SafetyGate.local():safety;
         this.admission = admission;
         this.models = Map.copyOf(models);
         this.keySupplier = keySupplier;
@@ -93,7 +101,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     /** {@inheritDoc} 原文提取等场景禁用所有框架工具，网页不能诱导额外付费动作。 */
     @Override public Invocation startWithoutTools(UUID runId, String role, String prompt) { return startInvocation(runId, role, prompt, false); }
     /** {@inheritDoc} 业务入口强制使用数据库版本化上下文，不降级为原始调用。 */
-    @Override public Invocation startContextual(UUID runId, String role, String prompt, com.lawrence.travel.application.memory.AgentContext.Basis basis) { if (contexts == null || json == null || basis == null) throw new IllegalStateException("CONTEXT_NOT_CONFIGURED"); return startInvocation(runId, role, prompt, false, basis); }
+    @Override public Invocation startContextual(UUID runId, String role, String prompt, com.lawrence.travel.application.memory.AgentContext.Basis basis) { if ((sessions == null && contexts == null) || json == null || basis == null) throw new IllegalStateException("CONTEXT_NOT_CONFIGURED"); return startInvocation(runId, role, prompt, false, basis); }
     /** @param runId 原运行 @param role 模型配置角色 @param prompt 有界文本 @param allowTools 是否允许既有白名单工具 @return 隔离调用，全部经过相同门禁 */
     private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) { return startInvocation(runId, role, prompt, allowTools, null); }
     /** @param runId 原运行 @param role 角色 @param prompt 当前请求 @param allowTools 工具权限 @param basis 业务输入版本，原始探针可空 @return 压缩与主调用共用传输及预算 */
@@ -102,22 +110,46 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
         }
-        if (prompt == null || prompt.isBlank() || prompt.length() > (basis == null ? (role.equals("planner") || role.equals("reviewer") ? 24000 : 8192) : 131072)) {
+        if (prompt == null || prompt.isBlank() || prompt.length() > 131072) {
             throw new IllegalArgumentException("MODEL_INPUT_INVALID");
         }
+        safety.require("INPUT",prompt);
         String key = keySupplier.get();
         if (key == null || key.isBlank()) throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
+        var toolkit=allowTools?toolkits.apply(runId,role):new Toolkit();
         var source = new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.AgentContext.Source>();
-        var transport = new GuardedDashScopeTransport(admission, runId, role, client, () -> { if (source.get() != null) contexts.guard(source.get()); });
+        var sessionSource=new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.SessionContext.Source>();
+        var transport = new GuardedDashScopeTransport(admission, runId, role, client, () -> {
+            if(toolkit instanceof SafetyToolkit boundary) boundary.check();
+            if(sessionSource.get()!=null) sessions.guard(sessionSource.get()); else if (source.get() != null) contexts.guard(source.get());
+        });
         var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
                 .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
                 .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
                 .defaultOptions(GenerateOptions.builder().maxTokens(role.equals("planner") ? 12288 : 4096)
                         .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
-        var harness = RestrictedHarnessFactory.create(model, allowTools ? toolkits.apply(runId, role) : new Toolkit(),
+        var harness = RestrictedHarnessFactory.create(model, toolkit,
                 workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);
-        var invocation = new ActiveInvocation(harness, transport);
-        Thread.startVirtualThread(() -> invocation.execute(() -> basis == null ? prompt : contexts.prepare(runId, role, basis, prompt, new HarnessContextCompression(model, json, source::set)).prompt()));
+        var invocation = new ActiveInvocation(harness, transport, safety);
+        var firstHarness=new AtomicBoolean(true);
+        Supplier<HarnessAgent> factory=() -> firstHarness.compareAndSet(true,false)?harness:RestrictedHarnessFactory.create(model,toolkit,workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()),role);
+        var correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current(); var parent=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
+        Thread.startVirtualThread(() -> {
+            try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent)) {
+                java.util.function.Function<Boolean,List<Msg>> prepare=emergency -> {
+                    if(sessions!=null && basis!=null) {
+                        var prepared=sessions.prepare(runId,role,prompt,basis,new HarnessContextCompression(model,json,source::set),emergency,sessionSource::set);
+                        return prepared.messages().stream().map(m -> Msg.builder().name(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?"assistant":"user").role(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?MsgRole.ASSISTANT:MsgRole.USER).content(TextBlock.builder().text(m.text()).build()).build()).toList();
+                    }
+                    String text=basis==null?prompt:contexts.prepare(runId,role,basis,prompt,new HarnessContextCompression(model,json,source::set)).prompt();
+                    return List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text(text).build()).build());
+                };
+                invocation.execute(() -> prepare.apply(false),() -> {
+                    if(sessions==null || basis==null) throw new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
+                    return prepare.apply(true);
+                },factory,() -> { if(firstHarness.compareAndSet(true,false)) harness.close(); });
+            }
+        });
         return invocation;
     }
 
@@ -132,7 +164,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             if (current instanceof HttpTransportException) {
                 String code = current.getMessage();
                 if (code != null && (java.util.Set.of("MODEL_CANCELLED", "MODEL_FREE_QUOTA_EXHAUSTED",
-                        "MODEL_ACCESS_DENIED", "MODEL_INVALID_PARAMETER", "MODEL_NOT_FOUND",
+                        "MODEL_ACCESS_DENIED", "MODEL_INVALID_PARAMETER", "MODEL_CONTEXT_LIMIT_SAFE", "MODEL_CONTEXT_LIMIT", "MODEL_NOT_FOUND",
                         "MODEL_RATE_LIMITED", "MODEL_TRANSPORT_FAILED", "MODEL_OPTIONS_REJECTED",
                         "MODEL_ENDPOINT_REJECTED", "MODEL_INPUT_TOO_LARGE", "MODEL_INPUT_INVALID",
                         "MODEL_MEDIA_NOT_ALLOWED", "MODEL_ID_REJECTED", "MODEL_STREAM_INVALID",
@@ -146,40 +178,47 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     /** 本次调用独占的资源句柄，取消不提前释放传输层许可。 */
     private static final class ActiveInvocation implements Invocation {
         private final HarnessAgent harness;
+        private final java.util.concurrent.atomic.AtomicReference<HarnessAgent> activeHarness=new java.util.concurrent.atomic.AtomicReference<>();
         private final GuardedDashScopeTransport transport;
+        private final com.lawrence.travel.application.safety.SafetyGate safety;
         private final CompletableFuture<String> result = new CompletableFuture<>();
         private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final java.util.concurrent.CountDownLatch exited=new java.util.concurrent.CountDownLatch(1);
+        private volatile Thread executionThread;
 
         /**
          * 保存一次调用的隔离资源。
          * @param harness 独立上下文
          * @param transport 独立取消范围
+         * @param safety 完整输出基础检查
          */
-        private ActiveInvocation(HarnessAgent harness, GuardedDashScopeTransport transport) {
-            this.harness = harness;
-            this.transport = transport;
+        private ActiveInvocation(HarnessAgent harness, GuardedDashScopeTransport transport, com.lawrence.travel.application.safety.SafetyGate safety) {
+            this.harness = harness; this.activeHarness.set(harness);
+            this.transport = transport; this.safety=safety;
         }
 
         /**
          * 后台等待框架，只公开校验后的结构化产物或固定失败码。
          * @param prompt 本次完整输入提供器，先压缩与校验再调用模型
+         * @param recovery 同预算唯一超限恢复
+         * @param factory 每轮隔离框架实例
+         * @param cleanupUnused 取消发生在建轮前时释放预建资源
          */
-        private void execute(Supplier<String> prompt) {
-            try (harness; transport) {
-                if (cancelled.get()) throw new IllegalStateException("MODEL_CANCELLED");
-                var message = Msg.builder().name("user").role(MsgRole.USER)
-                        .content(TextBlock.builder().text(prompt.get()).build()).build();
-                var response = harness.call(List.of(message), RestrictedHarnessFactory.StructuredReply.class).block();
-                if (response == null) throw new IllegalStateException("MODEL_OUTPUT_INVALID");
-                String answer = response.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer();
-                transport.checkContext();
-                if (!cancelled.get()) result.complete(answer);
+        private void execute(Supplier<List<Msg>> prompt,Supplier<List<Msg>> recovery,Supplier<HarnessAgent> factory,Runnable cleanupUnused) {
+            executionThread=Thread.currentThread();
+            try (transport) {
+                String answer=ControlledHarnessCall.execute(factory,prompt,recovery,transport::checkContext,safety,cancelled::get,activeHarness::set);
+                if(!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
                 if (!cancelled.get()) {
-                    for (Throwable cause = failure; cause != null; cause = cause.getCause()) if (cause instanceof CallRejectedException rejected) { result.completeExceptionally(rejected); return; }
+                    for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+                        if (cause instanceof CallRejectedException rejected) { result.completeExceptionally(rejected); return; }
+                        if(cause instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) { result.completeExceptionally(rejected); return; }
+                        if (cause instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) { result.completeExceptionally(rejected); return; }
+                    }
                 }
                 result.completeExceptionally(new IllegalStateException(cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure)));
-            }
+            } finally { try { cleanupUnused.run(); } finally { exited.countDown(); } }
         }
 
         /** {@inheritDoc} 只读视图防止调用方绕过 close 取消内部 Future。 */
@@ -194,7 +233,13 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             cancelled.set(true);
             result.completeExceptionally(new IllegalStateException("MODEL_CANCELLED"));
             transport.close();
-            harness.interrupt();
+            activeHarness.get().interrupt();
+            transport.awaitIdle();
+            if(Thread.currentThread()!=executionThread) {
+                boolean interrupted=Thread.interrupted();
+                while(exited.getCount()!=0) { try { exited.await(); } catch(InterruptedException signal) { interrupted=true; } }
+                if(interrupted) Thread.currentThread().interrupt();
+            }
         }
     }
 }

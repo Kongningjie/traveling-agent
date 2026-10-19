@@ -33,7 +33,7 @@ public final class BackgroundJob {
     public static boolean allows(State before, State after) {
         if (before == after) return true;
         return switch (before) {
-            case QUEUED -> Set.of(State.RUNNING, State.CANCELLED, State.SUPERSEDED, State.PAUSED).contains(after);
+            case QUEUED -> Set.of(State.RUNNING, State.COMPLETED, State.CANCELLED, State.SUPERSEDED, State.PAUSED).contains(after);
             case RUNNING -> after != State.RUNNING;
             case WAITING_DEPENDENCY -> Set.of(State.QUEUED, State.CANCELLED, State.SUPERSEDED, State.PAUSED).contains(after);
             case WAITING_USER -> Set.of(State.QUEUED, State.COMPLETED, State.CANCELLED, State.SUPERSEDED).contains(after);

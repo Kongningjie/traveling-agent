@@ -16,6 +16,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /** 聊天和理解请求共用PostgreSQL事务；加锁从用户到任务，不与候选接受形成反向锁序。 */
 public final class PostgresDialogueStore implements DialogueStore {
+    /** {@inheritDoc} 与停止命令共用归属锁，不能定位其他聊天的运行。 */
+    @Override public UUID currentRun(UUID user,UUID chat) { transaction(); return basis(user,lock(user,chat)).runId(); }
+    /** {@inheritDoc} 用户锁使停止命令的幂等判断和副作用同事务。 */
+    @Override public boolean containsInput(UUID user,UUID chat,UUID input,String text) { transaction(); lock(user,chat); var row=mapper.message(user,chat,input); if(row!=null) require(row.text().equals(text),false); return row!=null; }
+    /** {@inheritDoc} 原文及已生效行程保留，只撤销未完成执行权。 */
+    @Override public void stopPending(UUID user,UUID chat) { transaction(); lock(user,chat); jobs.invalidate(new com.lawrence.travel.application.execution.Jobs.Scope(user,chat)); }
+    /** {@inheritDoc} 直接命令与回复、作业完成同事务，不借此接受候选或新增授权。 */
+    @Override public void completeCommand(UUID user,UUID chat,UUID input,String reply) { transaction(); lock(user,chat); jobs.completeCommand(new com.lawrence.travel.application.execution.Jobs.Scope(user,chat),jobId(user,chat,input)); require(mapper.directReply(user,chat,input,reply)==1,false); }
     private final DialogueMapper mapper;
     private final TravelMapper tasks;
     private final BudgetMapper budgets;
@@ -78,11 +86,8 @@ public final class PostgresDialogueStore implements DialogueStore {
             mapper.project(hint.userId(), hint.id(), row.id(), jobId);
             long token = work.get().fence().token();
             var basis = basis(hint.userId(), chat); var context = new LinkedHashMap<String, Object>();
-            // 只保留本轮之前的少量对话，不把后到消息当作本轮授权依据。
-            var history = mapper.messages(hint.userId(), hint.id()); int index = 0;
-            while (index < history.size() && !history.get(index).id().equals(row.id())) index++;
-            context.put("history", history.subList(Math.max(0, index - 4), index).stream().map(m -> java.util.Map.of("user", shortText(m.text(), 300), "assistant", shortText(m.reply(), 300))).toList());
-            context.put("unresolved", history.subList(0, index).stream().filter(m -> m.state().equals("CLARIFY")).limit(5).map(m -> java.util.Map.of("id", m.id().toString(), "text", m.text(), "question", m.reply())).toList());
+            // 权威问题按本轮水位读取；完整历史由统一SessionContextService装载。
+            context.put("unresolved", mapper.contextQuestions(hint.userId(),hint.id(),row.id()).stream().map(m -> java.util.Map.of("id",m.id().toString(),"text",m.text(),"question",m.reply())).toList());
             if (chat.taskId() != null) {
                 var scope = new TaskScope(hint.userId(), chat.taskId());
                 context.put("requirements", json.decode(tasks.revision(scope, basis.revision()), Object.class));
@@ -90,9 +95,6 @@ public final class PostgresDialogueStore implements DialogueStore {
                 if (basis.currentVersion() != null) context.put("itinerary", json.decode(tasks.snapshot(scope, basis.currentVersion()).payload(), Object.class));
             }
             String data = json.encode(context);
-            // 不能截断JSON造成语义错乱；大行程降为需求＋说明，具体对象由用户定位。
-            if (data.length() > 14000) { context.remove("itinerary"); context.put("itineraryOmitted", true); data = json.encode(context); }
-            if (data.length() > 14000) data = "{\"contextOmitted\":true}";
             return Optional.of(new Dialogue.Claim(hint.userId(), chat.id(), row.id(), token, work.get().job().budgetId(), row.text(), row.receivedAt(), basis, data));
         }
         return Optional.empty();
@@ -171,8 +173,6 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
     /** @param row 数据行 @return 不暴露租约内部信息的界面消息 */
     private Dialogue.Message message(DialogueMapper.Row row) { return new Dialogue.Message(row.id(), row.text(), row.state(), row.reply(), row.operation() == null ? null : json.decode(row.operation(), Dialogue.Operation.class), row.error()); }
-    /** @param text 历史 @param maximum 显示上限 @return 有界历史片段，原文仍完整保存 */
-    private static String shortText(String text, int maximum) { return text.length() <= maximum ? text : text.substring(0, maximum); }
     /** 必须参加应用短事务，禁止隐式自动提交产生部分结果。 */
     private static void transaction() { if (!TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("TRANSACTION_REQUIRED"); }
     /** @param condition 检查 @param missing 是否归属不存在，错误不能包含私有正文 */

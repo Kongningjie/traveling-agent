@@ -24,6 +24,25 @@ import static org.mockito.Mockito.when;
 
 /** 无网络验证工具免费门禁、原文域名权限及按实际预报日期匹配。 */
 class TravelToolContractTest {
+    /** 直接应用调查路径也要在预占前拒绝危险参数，不能只保护Agent包装。 */
+    @Test void unsafeToolInputNeverReservesOrCalls() {
+        var tools=mock(TravelToolPort.class);var journal=mock(ToolEvidenceJournal.class);var ledger=mock(BudgetLedger.class);
+        var service=new TravelToolService(tools,journal,ledger,new RunLimits(30,60,2,Duration.ofSeconds(180),Duration.ofMinutes(15)),Map.of(),true,Clock.systemUTC());
+        assertThatThrownBy(() -> service.query(UUID.randomUUID(),TravelToolPort.Operation.SEARCH,Map.of("query","<script>unsafe</script>"))).isInstanceOf(com.lawrence.travel.application.safety.SafetyGate.Failure.class);
+        verifyNoInteractions(tools,journal,ledger);
+    }
+    /** 工具调用已发生但结果拒绝时不能保存为可用证据；仍保留原预算结算，不自动重试。 */
+    @Test void unsafeToolOutputCannotBecomeUsableEvidence() {
+        var tools=mock(TravelToolPort.class);var journal=mock(ToolEvidenceJournal.class);var ledger=mock(BudgetLedger.class);UUID call=UUID.randomUUID(),meter=UUID.randomUUID();
+        when(journal.reserve(any(),any(),any(),any(),anyLong())).thenReturn(call);
+        when(ledger.reserve(any(),any(),any(),any(),anyLong(),any())).thenReturn(new BudgetLedger.Reservation(meter,null));
+        when(tools.query(any(),any())).thenReturn(new TravelToolPort.Evidence(java.net.URI.create("https://example.invalid/evidence"),Instant.now(),"<script>unsafe</script>"));
+        var grant=new TravelToolService.Grant(Instant.now().minusSeconds(10),Instant.now().plusSeconds(60),1,true);
+        var service=new TravelToolService(tools,journal,ledger,new RunLimits(30,60,2,Duration.ofSeconds(180),Duration.ofMinutes(15)),Map.of("tavily",grant),true,Clock.systemUTC());
+        assertThatThrownBy(() -> service.query(UUID.randomUUID(),TravelToolPort.Operation.SEARCH,Map.of("query","风景"))).isInstanceOf(com.lawrence.travel.application.safety.SafetyGate.Failure.class);
+        org.mockito.Mockito.verify(journal).reserve(any(),any(),any(),any(),anyLong());org.mockito.Mockito.verify(journal).finish(call,null);org.mockito.Mockito.verifyNoMoreInteractions(journal);
+        org.mockito.Mockito.verify(ledger).finish(org.mockito.ArgumentMatchers.eq(meter),org.mockito.ArgumentMatchers.isNull(),any());
+    }
     /** 错误协议、相似域名、认证信息和任意目标不能借原文提取访问。 */
     @Test
     void onlySelectedHttpsEvidenceHostsAreAllowed() {

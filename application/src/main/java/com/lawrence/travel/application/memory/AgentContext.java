@@ -11,10 +11,12 @@ public final class AgentContext {
     private AgentContext() { }
     /** @param text 规范文本 @return SHA256内容绑定；不依赖框架 */
     public static String hash(String text) { try { return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))); } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException("SHA256_UNAVAILABLE"); } }
-    /** @param constraintRevision 调用方实际读取需求版本；0仅供独立只读字段摘录 @param preferenceRevision 已使用偏好的版本，未使用时可空 */
-    public record Basis(long constraintRevision, Long preferenceRevision) {
+    /** @param constraintRevision 调用方实际读取需求版本；0仅供独立只读字段摘录 @param preferenceRevision 已使用偏好的版本，未使用时可空 @param attemptToken 聊天实际领取token；旅行由阶段attempt另行围栏 */
+    public record Basis(long constraintRevision, Long preferenceRevision,Long attemptToken) {
+        /** @param constraintRevision 实际需求版本 @param preferenceRevision 实际偏好；既有旅行调用由阶段attempt关联验证 */
+        public Basis(long constraintRevision,Long preferenceRevision) { this(constraintRevision,preferenceRevision,null); }
         /** 拒绝负版本，0只代表独立摘录，不代表忽略已提供的正版本。 */
-        public Basis { if (constraintRevision < 0 || preferenceRevision != null && preferenceRevision < 0) throw new IllegalArgumentException("CONTEXT_BASIS_INVALID"); }
+        public Basis { if (constraintRevision < 0 || preferenceRevision != null && preferenceRevision < 0 || attemptToken!=null && attemptToken<1) throw new IllegalArgumentException("CONTEXT_BASIS_INVALID"); }
     }
     /** @param id 原消息 @param sequence 有序水位 @param text 原文 @param hash 来源正文及状态摘要 */
     public record Message(UUID id, long sequence, String text, String hash) { }

@@ -11,6 +11,13 @@ import org.apache.ibatis.annotations.Update;
 
 /** 独立聊天SQL；用户、任务、聊天、输入依次加锁，所有私有查询限定用户。 */
 public interface DialogueMapper {
+    /** @param user 用户 @param chat 聊天 @param input 当前输入 @return 同偏好版本的待澄清原文，不从旧版本复活已删除偏好 */
+    @Select("SELECT id,text,state,reply,operation::text,error,token,received_at FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND sequence<(SELECT sequence FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{input}) AND state='CLARIFY' AND preference_revision=(SELECT preference_revision FROM app_user WHERE id=#{user}) ORDER BY sequence LIMIT 20")
+    List<Row> contextQuestions(@Param("user") UUID user,@Param("chat") UUID chat,@Param("input") UUID input);
+
+    /** @param user 归属 @param chat 聊天 @param input 明确命令 @param reply 应用事实 @return 未运行输入的完成投影数 */
+    @Update("UPDATE dialogue_input SET state='DONE',reply=#{reply},error='',token=token+1 WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{input} AND state='QUEUED'")
+    int directReply(@Param("user") UUID user,@Param("chat") UUID chat,@Param("input") UUID input,@Param("reply") String reply);
     /** @param user 用户 @param id 聊天 @return 调用者已持user锁，继续按chat→task顺序加锁 */
     @Select("SELECT id,title,task_id FROM dialogue_chat WHERE user_id=#{user} AND id=#{id} FOR NO KEY UPDATE")
     Dialogue.Chat lockChat(@Param("user") UUID user, @Param("id") UUID id);
@@ -56,7 +63,7 @@ public interface DialogueMapper {
     @Select("SELECT id,text,state,reply,operation::text,error,token,received_at FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id}")
     Row message(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id);
     /** @param user 用户 @param chat 聊天 @param id 消息 @param text 不可变原文 @return 插入数 */
-    @Insert("INSERT INTO dialogue_input(user_id,chat_id,id,text) VALUES(#{user},#{chat},#{id},#{text})")
+    @Insert("INSERT INTO dialogue_input(user_id,chat_id,id,text,preference_revision) SELECT #{user},#{chat},#{id},#{text},preference_revision FROM app_user WHERE id=#{user}")
     int insert(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id, @Param("text") String text);
     /** @param user 用户 @param task 关联任务 @return 未解释输入或明确等待澄清，屏障不能因刷新或失败消失 */
     @Select("SELECT EXISTS(SELECT 1 FROM dialogue_chat c JOIN dialogue_input i ON i.chat_id=c.id AND i.user_id=c.user_id WHERE c.user_id=#{user} AND c.task_id=#{task} AND i.state IN ('QUEUED','RUNNING','CLARIFY','PAUSED'))")

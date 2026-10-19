@@ -8,6 +8,8 @@ import java.util.UUID;
 
 /** 短事务作业仓库；处理器在事务外执行，恢复与正常领取走同一入口。 */
 public interface JobStore {
+    /** @param scope 归属 @param id 尚未执行的CHAT_INPUT；仅用于用户明确停止等应用短命令 */
+    void completeCommand(Jobs.Scope scope,UUID id);
     /** @param input 稳定输入和归属 @return 已保存作业；同键异内容拒绝 */
     Jobs.View submit(Jobs.Submit input);
     /** @param scope 私有范围 @param id 作业 @return 本人的状态，跨用户与缺失一致拒绝 */

@@ -68,12 +68,13 @@ public class TravelToolsConfiguration {
      * @param ledger 原运行计量
      * @param execution 冻结预算配置
      * @param properties 工具免费资源配置
+     * @param safety 共用输入输出基础检查
      * @return 默认关闭真实调用的应用服务
      */
     @Bean
     TravelToolService travelToolService(TravelToolPort tools, ToolEvidenceJournal journal, BudgetLedger ledger,
-                                      ExecutionControlProperties execution, Properties properties) {
+                                      ExecutionControlProperties execution, Properties properties, com.lawrence.travel.application.safety.SafetyGate safety) {
         return new TravelToolService(tools, journal, ledger, execution.limits().runLimits(),
-                properties.grants(), properties.enabled(), Clock.systemUTC());
+                properties.grants(), properties.enabled(), Clock.systemUTC(),safety);
     }
 }

@@ -37,22 +37,37 @@ public final class DialogueService implements BackgroundWorkSource {
     private final InteractionCodec json;
     private final ExecutionEngineStore engine;
     private final boolean externalEnabled;
+    private final com.lawrence.travel.application.safety.SafetyGate safety;
     /** @param store 聊天权威 @param interpreter 一次协调理解 @param transactions 短事务 @param accounts 身份权威 @param negotiation 需求用例
      * @param runs 运行控制 @param itineraries 候选接受 @param versions 历史恢复 @param preferences 长期偏好 @param travel 旅行只读端口 @param json JSON @param engine 原运行恢复 @param externalEnabled 现有调用授权开关 */
     public DialogueService(DialogueStore store, DialogueInterpreter interpreter, BusinessTransactions transactions, AccountStore accounts,
             NegotiationService negotiation, RunService runs, ItineraryService itineraries, VersionService versions, PreferenceService preferences, TravelStore travel, InteractionCodec json, ExecutionEngineStore engine, boolean externalEnabled) {
+        this(store,interpreter,transactions,accounts,negotiation,runs,itineraries,versions,preferences,travel,json,engine,externalEnabled,com.lawrence.travel.application.safety.SafetyGate.local());
+    }
+    /** @param store 聊天 @param interpreter 受控理解 @param transactions 事务 @param accounts 身份 @param negotiation 需求 @param runs 运行 @param itineraries 接受 @param versions 历史 @param preferences 偏好 @param travel 权威旅行 @param json JSON @param engine 执行 @param externalEnabled 原授权 @param safety 展示前检查 */
+    public DialogueService(DialogueStore store,DialogueInterpreter interpreter,BusinessTransactions transactions,AccountStore accounts,NegotiationService negotiation,RunService runs,ItineraryService itineraries,VersionService versions,PreferenceService preferences,TravelStore travel,InteractionCodec json,ExecutionEngineStore engine,boolean externalEnabled,com.lawrence.travel.application.safety.SafetyGate safety) {
+        this.safety=safety;
         this.store = store; this.interpreter = interpreter; this.transactions = transactions; this.accounts = accounts; this.negotiation = negotiation;
         this.runs = runs; this.itineraries = itineraries; this.versions = versions; this.preferences = preferences; this.travel = travel; this.json = json;
         this.engine = engine; this.externalEnabled = externalEnabled;
     }
     /** @param actor 认证 @param chat 可重试的创建ID @param input 消息幂等键 @param text 自由文本 @return 可靠保存的聊天，无旅行占位任务 */
     public Dialogue.View send(UserIdentity actor, UUID chat, UUID input, String text) {
-        require(actor != null && chat != null && input != null && text != null && !text.isBlank() && text.length() <= 4000);
+        require(actor != null && chat != null && input != null && text != null && !text.isBlank() && text.length() <= 4000 && text.indexOf(0)<0);
         return transactions.required(() -> {
             // 创建和首条消息同事务；后续消息不能用新标题覆盖旧标题。
             boolean exists = store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chat));
             if (!exists) { try { store.read(actor.id(), chat); exists = true; } catch (TravelStorageFailure missing) { if (missing.code() != TravelStorageFailure.Code.NOT_FOUND) throw missing; } }
             if (!exists) store.create(actor.id(), chat, text.substring(0, Math.min(60, text.length())));
+            if(java.util.Set.of("停止","停止规划","停止当前规划","停止当前执行").contains(text.trim().replaceAll("[。！!]$",""))) {
+                if(store.containsInput(actor.id(),chat,input,text)) return store.receive(actor.id(),chat,input,text);
+                store.stopPending(actor.id(),chat); var current=store.read(actor.id(),chat).chat();
+                if(current.taskId()!=null) {
+                    var run=store.currentRun(actor.id(),chat);
+                    if(run!=null && !engine.run(new TaskScope(actor.id(),current.taskId()),run).state().terminal()) runs.cancel(actor,current.taskId(),run);
+                }
+                store.receive(actor.id(),chat,input,text); store.completeCommand(actor.id(),chat,input,"已处理停止请求，已有行程和对话保留。"); return store.read(actor.id(),chat);
+            }
             return store.receive(actor.id(), chat, input, text);
         });
     }
@@ -76,24 +91,27 @@ public final class DialogueService implements BackgroundWorkSource {
     /** @param c 原领取；任何模型或协议失败保存固定原因，屏障必须等待重试或撤回 */
     private void process(Dialogue.Claim c) {
         try {
+            safety.require("INPUT",c.text());
             var pref = preferences.read(actor(c.userId()));
             var augmented = new java.util.LinkedHashMap<String, Object>(); augmented.put("travel", json.decode(c.context(), Object.class)); augmented.put("preferences", pref.entries().stream().limit(20).toList());
             if (c.basis().taskId() != null) { var card = negotiation.card(actor(c.userId()), c.basis().taskId()); if (card != null) augmented.put("questions", card); }
             var modelContext = new Dialogue.Claim(c.userId(), c.chatId(), c.messageId(), c.token(), c.budgetId(), c.text(), c.receivedAt(), c.basis(), json.encode(augmented));
             var result = interpreter.interpret(modelContext);
+            safety.require("OUTPUT",json.encode(result));
             var unresolved = json.decode(c.context(), java.util.Map.class).get("unresolved");
             var sources = new java.util.LinkedHashMap<UUID, String>();
             if (unresolved instanceof List<?> entries) for (Object entry : entries) if (entry instanceof java.util.Map<?, ?> item) sources.put(UUID.fromString((String) item.get("id")), (String) item.get("text"));
             require(sources.keySet().containsAll(result.resolvedInputs()));
             result.validateSources(c.text(), result.resolvedInputs().stream().map(sources::get).toList());
-            transactions.required(() -> { if (!store.guard(c)) { store.finish(c, "CLARIFY", "旅行状态已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED"); return null; } route(c, result); return null; });
+            transactions.required(() -> { if (!store.guard(c) || preferences.read(actor(c.userId())).version().revision()!=pref.version().revision()) { store.finish(c, "CLARIFY", "旅行状态已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED"); return null; } route(c, result); return null; });
         } catch (RuntimeException failure) {
             Thread.interrupted();
             boolean disabled = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected && rejected.reason() == com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.EXTERNAL_DISABLED;
-            String reason = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected ? rejected.reason().name() : "DIALOGUE_PROCESSING_FAILED";
+            String reason = failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException ? "PREFERENCE_CHANGED" : failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected ? "SAFETY_"+rejected.result().status().name() : failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected ? rejected.reason().name() : "DIALOGUE_PROCESSING_FAILED";
             String explanation = disabled ? "真实外部调用尚未开启，输入已保存，暂未进行模型理解。此提示不表示免费额度用完；可以保留或撤回这条输入。" : "输入已保存，理解尚未完成。可重试或撤回；不会自动修改行程。";
+            String safeReply=failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected ? "本次检查未通过或暂不可用，输入已保留。可修改内容或撤回。问题编号："+rejected.result().problemId() : explanation;
             try {
-                transactions.required(() -> { store.guard(c); store.finish(c, "PAUSED", explanation, null, reason); return null; });
+                transactions.required(() -> { store.guard(c); store.finish(c, "PAUSED", safeReply, null, reason); return null; });
             } catch (RuntimeException obsolete) { System.getLogger(getClass().getName()).log(System.Logger.Level.INFO, "DIALOGUE_FAILURE_NOT_COMMITTED"); }
         }
     }

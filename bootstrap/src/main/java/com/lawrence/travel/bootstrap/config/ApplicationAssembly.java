@@ -11,7 +11,6 @@ import com.lawrence.travel.application.execution.ModelCallAdmission;
 import java.nio.file.Path;
 import com.lawrence.travel.application.execution.TravelToolService;
 import com.lawrence.travel.agent.runtime.TravelAgentTools;
-import io.agentscope.core.tool.Toolkit;
 
 /** 统一绑定应用端口及运行配置，使 api 和 application 不依赖具体 Agent 实现。 */
 @Configuration(proxyBeanMethods = false)
@@ -24,23 +23,25 @@ public class ApplicationAssembly {
      * @param environment 仅用于按需读取本机密钥
      * @param travelTools local 工具应用服务，smoke 不存在
      * @param contexts local上下文装配，smoke不存在 @param json local严格编解码，smoke不存在
+     * @param sessions 统一PG会话与受控压缩，smoke不存在
+     * @param safety 输入输出安全边界，smoke不存在
      * @return 不主动调用外部服务的运行端口
      */
     @Bean
     AgentRuntimePort agentRuntimePort(ObjectProvider<ModelCallAdmission> admission,
                                      ExecutionControlProperties properties, Environment environment,
-                                     ObjectProvider<TravelToolService> travelTools, ObjectProvider<com.lawrence.travel.application.memory.ContextAssembler> contexts, ObjectProvider<com.lawrence.travel.application.port.InteractionCodec> json) {
+                                     ObjectProvider<TravelToolService> travelTools, ObjectProvider<com.lawrence.travel.application.memory.ContextAssembler> contexts, ObjectProvider<com.lawrence.travel.application.port.InteractionCodec> json, ObjectProvider<com.lawrence.travel.application.memory.SessionContextService> sessions, ObjectProvider<com.lawrence.travel.application.safety.SafetyGate> safety) {
         var gate = admission.getIfAvailable();
         return gate == null ? new HarnessAgentRuntimeAdapter()
                 : new HarnessAgentRuntimeAdapter(gate, properties.models(),
                     () -> environment.getProperty("DASHSCOPE_API_KEY"), Path.of(".runtime/harness"), (run, role) -> {
-                        var toolkit = new Toolkit();
+                        var toolkit = new com.lawrence.travel.agent.runtime.SafetyToolkit();
                         // 调查角色负责外部证据，规划／审核不获得搜索或网页工具权限。
                         if (role.equals("research") && travelTools.getIfAvailable() != null) {
-                            toolkit.registerTool(new TravelAgentTools(run, travelTools.getObject()));
+                            toolkit.registerTool(new TravelAgentTools(run, travelTools.getObject(), safety.getIfAvailable(),toolkit));
                         }
                         return toolkit;
-                    }, contexts.getIfAvailable(), json.getIfAvailable());
+                    }, contexts.getIfAvailable(), json.getIfAvailable(), sessions.getIfAvailable(), safety.getIfAvailable());
     }
 
     /**

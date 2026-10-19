@@ -7,6 +7,9 @@ import org.apache.ibatis.annotations.Update;
 
 /** 只保存关联身份与固定分类，禁止保存正文、异常消息和凭据。 */
 public interface DiagnosticMapper {
+    /** @param id 问题编号 @param trace 可信链路 @param request 入口 @param code 固定安全原因 @param version 策略版本 @param point 固定检查点，非白名单归为SAFETY */
+    @Insert("INSERT INTO problem_event(id,trace_id,request_id,component,code,severity,policy_version) VALUES(#{id},#{trace},#{request},CASE WHEN #{point} IN ('INPUT','OUTPUT','CONTEXT','SUMMARY','TOOL_INPUT','TOOL_OUTPUT','MODEL_REQUEST') THEN 'SAFETY_'||#{point} ELSE 'SAFETY' END,#{code},'ERROR',#{version})")
+    void safety(@Param("id") UUID id,@Param("trace") UUID trace,@Param("request") UUID request,@Param("code") String code,@Param("version") String version,@Param("point") String point);
     /** @param id span @param trace 链路 @param parent 父级 @param user 用户 @param request 请求 @param chat 聊天 @param operation 输入 @param run 旅行运行 @param job 作业 @param token 围栏 @param kind 类型 */
     @Insert("INSERT INTO execution_trace_span(id,trace_id,parent_id,user_id,request_id,chat_id,operation_id,run_id,job_id,token,kind,state) VALUES(#{id},#{trace},#{parent},#{user},#{request},#{chat},#{operation},#{run},#{job},#{token},#{kind},'RUNNING') ON CONFLICT DO NOTHING")
     void span(@Param("id") UUID id, @Param("trace") UUID trace, @Param("parent") UUID parent,

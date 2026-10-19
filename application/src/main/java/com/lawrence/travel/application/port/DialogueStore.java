@@ -7,6 +7,14 @@ import java.util.UUID;
 
 /** PostgreSQL聊天收件与租约；所有写入在应用短事务执行，模型调用必须在事务外。 */
 public interface DialogueStore {
+    /** @param user 归属 @param chat 聊天 @return 真实旅行当前运行，可空，不从摘要推断 */
+    default UUID currentRun(UUID user,UUID chat) { return null; }
+    /** @param user 归属 @param chat 聊天 @param input 输入 @param text 原文 @return 精确幂等检查；同ID异原文拒绝 */
+    default boolean containsInput(UUID user,UUID chat,UUID input,String text) { return false; }
+    /** @param user 归属 @param chat 聊天；明确停止使旧输入失去提交权，保留原文 */
+    default void stopPending(UUID user,UUID chat) { throw new IllegalStateException("DIRECT_STOP_UNSUPPORTED"); }
+    /** @param user 归属 @param chat 聊天 @param input 本次明确停止命令 @param reply 应用执行事实，不经过模型 */
+    default void completeCommand(UUID user,UUID chat,UUID input,String reply) { throw new IllegalStateException("DIRECT_STOP_UNSUPPORTED"); }
     /** @param claim 原输入资格 @return 是否仍可续租，不复活撤回或过期输入 */
     default boolean renew(Dialogue.Claim claim) { return true; }
     /** @param claim 原输入 @return 持久化入口关联，异步执行不生成另一条无关trace */

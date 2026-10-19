@@ -20,6 +20,7 @@ public final class TravelToolService {
     private final Map<String, Grant> grants;
     private final boolean enabled;
     private final Clock clock;
+    private final com.lawrence.travel.application.safety.SafetyGate safety;
 
     /**
      * 绑定工具与持久化应用端口，默认开关由装配提供。
@@ -33,6 +34,11 @@ public final class TravelToolService {
      */
     public TravelToolService(TravelToolPort tools, ToolEvidenceJournal journal, BudgetLedger ledger,
                              RunLimits limits, Map<String, Grant> grants, boolean enabled, Clock clock) {
+        this(tools,journal,ledger,limits,grants,enabled,clock,com.lawrence.travel.application.safety.SafetyGate.local());
+    }
+    /** @param tools 供应商端口 @param journal 证据 @param ledger 计量 @param limits 运行上限 @param grants 免费保护 @param enabled 当前授权 @param clock 时间 @param safety 共用文本边界，覆盖直接调查和Agent工具 */
+    public TravelToolService(TravelToolPort tools,ToolEvidenceJournal journal,BudgetLedger ledger,RunLimits limits,Map<String,Grant> grants,boolean enabled,Clock clock,com.lawrence.travel.application.safety.SafetyGate safety) {
+        this.safety=safety;
         this.tools = tools;
         this.journal = journal;
         this.ledger = ledger;
@@ -51,6 +57,7 @@ public final class TravelToolService {
      */
     public TravelToolPort.Evidence query(UUID runId, TravelToolPort.Operation operation, Map<String, String> arguments) {
         if (!enabled) throw new IllegalStateException("TOOLS_DISABLED");
+        safety.require("TOOL_INPUT",arguments.toString());
         String group = switch (operation) {
             case PLACE -> "amap-search";
             case ROUTE -> "amap-lbs";
@@ -70,6 +77,7 @@ public final class TravelToolService {
             meter = ledger.reserve(runId, CallKind.TOOL, limits,
                     new BudgetLedger.Target(operation.name(), group, "TOOL_REALTIME"), 0, clock.instant());
             var result = tools.query(operation, Map.copyOf(arguments));
+            safety.require("TOOL_OUTPUT",result.toString());
             journal.finish(id, result);
             return result;
         } finally {
