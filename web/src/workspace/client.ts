@@ -61,6 +61,8 @@ export class Api {
       return (text ? JSON.parse(text) : null) as T;
     } catch (error) {
       if (error instanceof ApiError) throw error;
+      // 仅发送固定故障信号；诊断自身失败不得递归上报，也不带原始错误或路径。
+      if (typeof window !== "undefined" && !path.startsWith("/api/v1/support/") && !path.startsWith("/api/v1/auth/")) window.dispatchEvent(new Event("travel:network-error"));
       throw new ApiError(0);
     }
   }

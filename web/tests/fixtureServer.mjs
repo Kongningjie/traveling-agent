@@ -33,6 +33,7 @@ let created = null;
 let cardRevision = 1,
     budgetAnswered = false;
 const savedMessages = new Map();
+const supportFeedback=new Map();let supportUnavailable=false;
 const dialogueChats = new Map();
 // 可选的建议UI场景；所有ID/文本/回执为合成，不是实际模型分析。
 const adviceChat="00000000-0000-4000-8000-000000000060",adviceMessage="00000000-0000-4000-8000-000000000061",adviceId="00000000-0000-4000-8000-000000000062",adviceDocument="00000000-0000-4000-8000-000000000063",adviceReference="00000000-0000-4000-8000-000000000064";
@@ -129,6 +130,7 @@ const server = createServer(async (request, response) => {
                 state,
                 authenticated,
             });
+        if(path==="/__test/support-unavailable"){supportUnavailable=true;return json(response,{status:"UNAVAILABLE"});}
         if (path === "/__test/expire") {
             authenticated = false;
             return json(response, { status: "EXPIRED" });
@@ -149,6 +151,17 @@ const server = createServer(async (request, response) => {
                     authenticated ? syntheticUser : { code: "UNAUTHORIZED" },
                     authenticated ? 200 : 401,
                 );
+            if(path==="/api/v1/support/access")return json(response,{maintenance:false,sensitive:false});
+            if(path.startsWith("/api/v1/support/maintenance/"))return json(response,{saved:false,code:"SUPPORT_FORBIDDEN"},403);
+            if(path==="/api/v1/support/feedback"&&request.method==="POST"){
+                let raw="";for await(const part of request){raw+=part;if(raw.length>6000)return json(response,{saved:false},413);}const body=JSON.parse(raw);
+                if(supportUnavailable)return json(response,{saved:false,code:"SUPPORT_UNAVAILABLE"},503);
+                calls.push({path,method:request.method,body});const old=supportFeedback.get(body.id);if(old)return json(response,{saved:true,id:old.id,problem:old.problem});
+                const entry={id:body.id,problem:randomUUID(),category:body.category,target:body.target,state:"NEW",description:body.description};supportFeedback.set(body.id,entry);return json(response,{saved:true,id:entry.id,problem:entry.problem});
+            }
+            if(path==="/api/v1/support/feedback"&&request.method==="GET")return json(response,[...supportFeedback.values()].map(({description,...summary})=>summary));
+            if(path.startsWith("/api/v1/support/feedback/")){const id=path.split("/").at(-1),f=supportFeedback.get(id);return f?json(response,{description:f.description}):json(response,{saved:false},404);}
+            if(path==="/api/v1/support/client")return json(response,{saved:true,problem:randomUUID()});
             if(adviceFixture && path===`/api/v1/chats/${adviceChat}/advice` && request.method==="GET")return json(response,[adviceItem]);
             if(adviceFixture && path===`/api/v1/chats/${adviceChat}/advice/${adviceId}/actions` && request.method==="POST"){
                 let raw="";for await(const part of request)raw+=part;const body=JSON.parse(raw);calls.push({path,method:request.method,body});

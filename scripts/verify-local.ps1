@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -56,7 +56,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'AdviceCommit') { '-Dtest=ExecutionEngineIntegrationTest,NegotiationIntegrationTest,AdviceIntegrationTest,AdviceContractTest,PlanningIntegrationTest#uploadedPlanAdviceUsesOriginalCandidateAndAcceptanceGates,CandidateAcceptanceIntegrationTest,TravelJsonTest' }
+    $selectedTest = if ($Scope -eq 'SupportCommit') { '-Dtest=SupportIntegrationTest,SupportServiceTest,ProblemStateTest,DiagnosticBufferTest,ModuleArchitectureTest,ExecutionEngineIntegrationTest,JobIntegrationTest,SessionContextIntegrationTest,DialogueIntegrationTest,DocumentIntegrationTest,AdviceIntegrationTest,SafetyGateTest,IdentityIntegrationTest' }
+        elseif ($Scope -eq 'Support') { '-Dtest=SupportIntegrationTest,SupportServiceTest,ProblemStateTest,DiagnosticBufferTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'AdviceCommit') { '-Dtest=ExecutionEngineIntegrationTest,NegotiationIntegrationTest,AdviceIntegrationTest,AdviceContractTest,PlanningIntegrationTest#uploadedPlanAdviceUsesOriginalCandidateAndAcceptanceGates,CandidateAcceptanceIntegrationTest,TravelJsonTest' }
         elseif ($Scope -eq 'Advice') { '-Dtest=AdviceIntegrationTest,AdviceContractTest,DialogueIntegrationTest,DialogueIntentContractTest,SourceReadIntegrationTest,ModuleArchitectureTest,NegotiationIntegrationTest,CandidateAcceptanceIntegrationTest,SessionContextIntegrationTest,PlanningIntegrationTest#uploadedPlanAdviceUsesOriginalCandidateAndAcceptanceGates' }
         elseif ($Scope -eq 'Trace') { '-Dtest=TracedCompressionTest,SessionContextIntegrationTest,BudgetLedgerIntegrationTest,TravelToolContractTest,SourceToolkitTest,ControlledHarnessCallTest,GuardedTransportTest,GuardedStreamTest,SourceReadIntegrationTest,AgentStrategyTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Strategy') { '-Dtest=AgentStrategyTest,ResearchIntegrationTest,ExecutionEngineIntegrationTest,PlanningIntegrationTest,SessionContextIntegrationTest,BudgetLedgerIntegrationTest,GuardedTransportTest,GuardedStreamTest,ControlledHarnessCallTest,HarnessContractTest,SourceToolkitTest,ModuleArchitectureTest' }
@@ -82,6 +84,8 @@ try {
         elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
         else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
     if ($TestMethod) {
+        if ($Scope -eq 'SupportCommit') { throw 'SupportCommit为多类回归，不接受方法选择。' }
+        if ($Scope -eq 'Support') { $selectedTest = '-Dtest=SupportIntegrationTest' }
         if ($Scope -eq 'Dialogue') { $selectedTest = '-Dtest=DialogueIntegrationTest' }
         if ($Scope -eq 'Job') { $selectedTest = '-Dtest=JobIntegrationTest' }
         if ($Scope -eq 'Document') { $selectedTest = '-Dtest=DocumentIntegrationTest' }

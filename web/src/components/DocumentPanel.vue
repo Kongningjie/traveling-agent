@@ -1,6 +1,7 @@
 <!-- 私有附件交互；上传只表示保存，解析状态和清理由服务端决定，不执行文件内容。 -->
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from "vue";
+import ReportProblem from "./ReportProblem.vue";
 import SourcePreview from "./SourcePreview.vue";
 import { Api } from "../workspace/client";
 import { decodeDocumentList as decode, documentLabel as label } from "../workspace/documents";
@@ -41,7 +42,7 @@ async function act(id:string,action:string): Promise<void> {if(busy.value)return
       <button v-if="['QUEUED','RUNNING'].includes(item.state)" :disabled="busy" @click="act(item.id,'STOP')">停止解析</button>
       <button v-if="item.state==='PAUSED'" :disabled="busy" @click="act(item.id,'RETRY')">重试解析</button>
       <button :disabled="busy" @click="act(item.id,'DELETE')">删除</button>
-    </li></ul>
+    <ReportProblem kind="DOCUMENT" :scope="chat" :target="item.id"/></li></ul>
   </details>
 </template>
 <style scoped>.document-panel{margin:0 auto 12px;padding:10px 14px;max-width:850px;border:1px solid #e5e7eb;border-radius:14px;font-size:13px;background:#fff}.document-panel summary{cursor:pointer}.document-panel small{color:#64748b;margin-left:12px}.document-panel li{margin:12px 0}.document-panel button,.document-panel a{margin:4px}.document-panel p{margin:8px 0;line-height:1.6}</style>

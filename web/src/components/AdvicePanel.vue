@@ -3,6 +3,7 @@
 import {ref,watch,onUnmounted} from "vue";
 import {Api,ApiError} from "../workspace/client";
 import {decodeAdvice,adviceFieldLabel,type AdviceView} from "../workspace/advice";
+import ReportProblem from "./ReportProblem.vue";
 import SourcePreview from "./SourcePreview.vue";
 /** 当前已认证聊天，切换时丢弃所有旧响应和待确认内容。 */
 const props=defineProps<{chat:string;disabled?:boolean}>();
@@ -40,7 +41,7 @@ function label(state:string):string{return ({OPEN:"仅建议，尚未采纳",STA
   <article v-for="item in items" :key="item.id" class="advice-card">
     <small>{{label(item.state)}} · {{({BOOKED:'材料称已订',INTENDED:'打算',OPTIONAL:'可选',UNKNOWN:'性质未知'} as Record<string,string>)[item.draft.statement]}} · {{item.draft.evidence==='UNKNOWN'?'待核实':'仅用户材料'}}</small>
     <h4>{{item.draft.problem}}</h4><blockquote>{{item.draft.quote}}</blockquote><p>{{item.draft.reason}}</p><p><strong>建议：</strong>{{item.draft.proposal}}</p><p><strong>影响：</strong>{{item.draft.impact}}</p><p v-if="item.draft.pending">待确认：{{item.draft.pending}}。请在聊天中补充后重新分析。</p>
-    <SourcePreview :chat="chat" :reference="item.draft.reference" />
+    <ReportProblem kind="ADVICE" :scope="chat" :target="item.id"/><SourcePreview :chat="chat" :reference="item.draft.reference" />
     <dl v-if="Object.keys(item.draft.changes).length"><div v-for="(value,field) in (item.state==='APPLIED' ? item.applied : item.draft.changes)" :key="field"><dt>{{adviceFieldLabel(String(field))}}</dt><dd>{{value}}</dd></div></dl>
     <div v-if="item.state==='OPEN'">
       <button :disabled="busy||disabled||retryable||!Object.keys(item.draft.changes).length||!!item.draft.pending" @click="choose(item,'ADOPT')">采纳这项建议</button>
