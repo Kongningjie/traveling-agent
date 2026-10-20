@@ -647,7 +647,7 @@ onMounted(initialize);
             <template v-if="chatSelected">
               <template v-for="item in chatView?.messages ?? []" :key="item.id">
                 <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已撤回处理，原文保留' : '已保存' }}</small></article>
-                <AssistantReply v-if="item.reply" :key="chatSelected + item.id" :text="item.reply" :chat="chatSelected" :target="item.id" />
+                <AssistantReply v-if="item.reply || ['PAUSED','CLARIFY'].includes(item.state)" :key="chatSelected + item.id" :text="item.reply" :chat="chatSelected" :target="item.id" :can-retry="['PAUSED','CLARIFY'].includes(item.state)" :retry-disabled="chatBusy || chatRetryable" @retry="dialogue.act(item.id, 'RETRY')" />
                 <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
                 <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
                   <h3>请确认这次操作</h3><p>{{ item.operation.description }}</p>
@@ -655,7 +655,6 @@ onMounted(initialize);
                   <button class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">取消</button>
                 </section>
                 <div v-if="['PAUSED','CLARIFY','QUEUED','RUNNING'].includes(item.state)" class="dialogue-actions">
-                  <button v-if="['PAUSED','CLARIFY'].includes(item.state)" class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'RETRY')">重试理解</button>
                   <button class="text-button" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">{{ ['QUEUED','RUNNING'].includes(item.state) ? '停止本次回复' : '撤回这条输入' }}</button>
                 </div>
               </template>
