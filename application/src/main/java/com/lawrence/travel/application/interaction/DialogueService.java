@@ -119,7 +119,7 @@ public final class DialogueService implements BackgroundWorkSource {
             safety.require("INPUT",c.text());
             var pref = preferences.read(actor(c.userId()));
             var augmented = new java.util.LinkedHashMap<String, Object>(); augmented.put("travel", json.decode(c.context(), Object.class)); augmented.put("preferences", pref.entries().stream().limit(20).toList());
-            if (c.basis().taskId() != null) { var card = negotiation.card(actor(c.userId()), c.basis().taskId()); if (card != null) augmented.put("questions", card); }
+            if (c.basis().taskId() != null) { var card = negotiation.card(actor(c.userId()), c.basis().taskId()); if (card != null) augmented.put("questions", DialogueQuestionContext.from(card)); }
             var modelContext = new Dialogue.Claim(c.userId(), c.chatId(), c.messageId(), c.token(), c.budgetId(), c.text(), c.receivedAt(), c.basis(), json.encode(augmented));
             var result = interpreter.interpret(modelContext);
             safety.require("OUTPUT",json.encode(result));

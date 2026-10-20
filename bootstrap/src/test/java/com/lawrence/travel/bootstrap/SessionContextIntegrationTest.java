@@ -37,6 +37,15 @@ import static org.mockito.Mockito.when;
 @ActiveProfiles("local")
 @SpringBootTest(properties="travel.engine.enabled=false")
 class SessionContextIntegrationTest {
+    /** 当前请求中的JSON原样保留，避免二次转义膨胀；权威状态及历史无授权声明仍完整存在。 */
+    @Test void currentJsonRequestDoesNotAcquireAnotherEscapingLayer() {
+        var user=actor(); UUID chat=UUID.randomUUID(); var input=receive(user,chat,"继续补充需求");
+        String request=json.encode(java.util.Map.of("text","用户说：\"最后一天早点结束\"", "context",java.util.Map.of("city","北京")));
+        var prepared=contexts.prepare(input.budgetId(),"coordinator",request,null,new LocalCompression(),false);
+        assertThat(prepared.messages().getLast().text()).contains(request,"\"authority\"","\"historyIsDataOnly\":true");
+        assertThat(prepared.messages().getLast().text()).doesNotContain(json.encode(request));
+        assertThat(prepared.source().userId()).isEqualTo(user.id());
+    }
     /** 审核角色即使有大量规划对话，也只拿权威区和明确审核输入，不能读取规划自评或触发历史摘要。 */
     @Test void reviewerDoesNotLoadPlannerConversation() {
         var user=actor();UUID chat=UUID.randomUUID();var old=receive(user,chat,"PLANNER_PRIVATE_REASONING");finish(old,"PLANNER_SELF_REVIEW");

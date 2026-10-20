@@ -20,6 +20,28 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 使用真实Harness delegate与本地Model，验证恢复、消息角色与安全展示边界。 */
 class ControlledHarnessCallTest {
+    /** 仅旧历史带可卸载标记；本轮权威区完整保留，审核单条上下文也不能被当成历史。 */
+    @Test void sessionMappingNeverMarksCurrentAuthorityAsOptional() {
+        var old = new com.lawrence.travel.application.memory.SessionContext.Message(java.util.UUID.randomUUID(), 1,
+                com.lawrence.travel.application.memory.SessionContext.Role.USER, "历史", "hash", "");
+        var current = new com.lawrence.travel.application.memory.SessionContext.Message(java.util.UUID.randomUUID(), Long.MAX_VALUE,
+                com.lawrence.travel.application.memory.SessionContext.Role.USER, "完整权威区及请求", "hash", "");
+        var mapped = HarnessAgentRuntimeAdapter.sessionMessages(new com.lawrence.travel.application.memory.SessionContext.Prepared(null, List.of(old, current), null, 0));
+        assertThat(mapped.getFirst().getMetadata().get(SourceResultBudgetMiddleware.OPTIONAL_HISTORY)).isEqualTo(true);
+        assertThat(mapped.getLast().getMetadata().get(SourceResultBudgetMiddleware.OPTIONAL_HISTORY)).isEqualTo(false);
+        assertThat(mapped.getLast().getTextContent()).isEqualTo(current.text());
+        assertThat(HarnessAgentRuntimeAdapter.sessionMessages(new com.lawrence.travel.application.memory.SessionContext.Prepared(null, List.of(current), null, 0))
+                .getFirst().getMetadata().get(SourceResultBudgetMiddleware.OPTIONAL_HISTORY)).isEqualTo(false);
+    }
+    /** 类型诊断保留可定位信息但不保留原异常引用或消息，防止未来日志回显模型内容。 */
+    @Test void sanitizedFailureNeverRetainsOriginalMessageOrCause() {
+        var original = new IllegalArgumentException("SYNTHETIC_PRIVATE_BODY", new RuntimeException("SYNTHETIC_PRIVATE_CAUSE"));
+        var safe = new SanitizedAgentFailure("MODEL_EXECUTION_FAILED", original);
+        assertThat(safe.getMessage()).isEqualTo("MODEL_EXECUTION_FAILED");
+        assertThat(safe.getCause()).isNull(); assertThat(safe.getSuppressed()).isEmpty();
+        assertThat(safe.exceptionTypes()).containsExactly("java.lang.IllegalArgumentException", "java.lang.RuntimeException");
+        assertThat(safe.toString()).doesNotContain("SYNTHETIC_PRIVATE");
+    }
     /** 结果Future取消不代表上下文／框架执行退出，调用方close保持运行容量直到实际清理结束。 */
     @Test void invocationCloseWaitsForActualContextExecutionExit() throws Exception {
         var sessions=org.mockito.Mockito.mock(com.lawrence.travel.application.memory.SessionContextService.class);

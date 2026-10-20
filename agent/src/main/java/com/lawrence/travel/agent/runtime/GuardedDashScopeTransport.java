@@ -168,7 +168,12 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                 || Boolean.TRUE.equals(parameters.get("enable_search"))) {
             throw new HttpTransportException("MODEL_OPTIONS_REJECTED");
         }
-        if (HarnessContextCompression.estimateInput(body) > com.lawrence.travel.application.memory.ContextAssembler.limit(role)) throw new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
+        long estimatedInput = HarnessContextCompression.estimateInput(body);
+        long contextLimit = com.lawrence.travel.application.memory.ContextAssembler.limit(role);
+        if (estimatedInput > contextLimit) {
+            var failure = new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
+            failure.initCause(new com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic("TRANSPORT_BODY", estimatedInput, contextLimit)); throw failure;
+        }
         // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
         // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
         long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
@@ -298,7 +303,10 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                         else if(failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) { sink.error(rejected); }
                         else if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) {
                             // 保留固定领域类别，应用层才能区分等待并发与额度暂停；不携带原异常链。
-                            sink.error(new com.lawrence.travel.domain.execution.control.CallRejectedException(rejected.reason()));
+                            var safe = new com.lawrence.travel.domain.execution.control.CallRejectedException(rejected.reason());
+                            if (rejected.getCause() instanceof com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic diagnostic)
+                                safe.initCause(new com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic(diagnostic.boundary(), diagnostic.estimated(), diagnostic.limit()));
+                            sink.error(safe);
                         } else {
                             String code = failure instanceof HttpTransportException
                                     ? failure.getMessage() : "MODEL_TRANSPORT_FAILED";

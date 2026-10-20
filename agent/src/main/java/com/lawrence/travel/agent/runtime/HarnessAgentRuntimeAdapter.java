@@ -169,7 +169,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                     try {
                     if(sessions!=null && basis!=null) {
                         var prepared=sessions.prepare(runId,role,prompt,basis,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport),emergency,sessionSource::set);
-                        return prepared.messages().stream().map(m -> Msg.builder().name(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?"assistant":"user").role(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?MsgRole.ASSISTANT:MsgRole.USER).content(TextBlock.builder().text(m.text()).build()).build()).toList();
+                        return sessionMessages(prepared);
                     }
                     String text=basis==null?prompt:contexts.prepare(runId,role,basis,prompt,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport)).prompt();
                     return List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text(text).build()).build());
@@ -184,6 +184,17 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             } catch(RuntimeException failure) {try {transport.close();harness.close();}finally{invocation.result.completeExceptionally(new IllegalStateException("TRACE_EXECUTION_FAILED"));invocation.exited.countDown();}}
         });
         return invocation;
+    }
+
+    /** @param prepared 已校验权威快照 @return 历史单独标识，发送超限时只可卸载历史；末条完整权威区和本轮请求永不裁剪 */
+    static List<Msg> sessionMessages(com.lawrence.travel.application.memory.SessionContext.Prepared prepared) {
+        return java.util.stream.IntStream.range(0, prepared.messages().size()).mapToObj(index -> {
+            var m = prepared.messages().get(index);
+            return Msg.builder().name(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?"assistant":"user")
+                    .role(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?MsgRole.ASSISTANT:MsgRole.USER)
+                    .content(TextBlock.builder().text(m.text()).build())
+                    .metadata(Map.of(SourceResultBudgetMiddleware.OPTIONAL_HISTORY, index < prepared.messages().size() - 1)).build();
+        }).toList();
     }
 
     /**
@@ -250,7 +261,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                         if (cause instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) { result.completeExceptionally(rejected); return; }
                     }
                 }
-                result.completeExceptionally(new IllegalStateException(cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure)));
+                result.completeExceptionally(new SanitizedAgentFailure(cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure), failure));
             } finally { try { cleanupUnused.run(); } finally { exited.countDown(); } }
         }
 

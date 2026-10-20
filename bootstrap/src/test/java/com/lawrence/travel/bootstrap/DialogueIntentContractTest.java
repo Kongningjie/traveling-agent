@@ -27,7 +27,18 @@ class DialogueIntentContractTest {
         var adapter = new com.lawrence.travel.agent.runtime.DialogueIntentInterpreter(runtime, new com.lawrence.travel.infrastructure.interaction.InteractionJson(json), true);
         assertThat(adapter.interpret(claim)).isEqualTo(expected);
         var prompt = org.mockito.ArgumentCaptor.forClass(String.class); org.mockito.Mockito.verify(runtime).startContextual(org.mockito.ArgumentMatchers.eq(claim.budgetId()), org.mockito.ArgumentMatchers.eq("coordinator"), prompt.capture(), org.mockito.ArgumentMatchers.any());
-        assertThat(prompt.getValue()).contains("你好", "x".repeat(10000)); org.mockito.Mockito.verify(invocation).close();
+        assertThat(prompt.getValue()).contains("你好", "x".repeat(10000), "\"facts\":[]", "无事实时facts必须为[]，不能为{}", "不是替代框架外层结构", "城市名称沿用用户原文"); org.mockito.Mockito.verify(invocation).close();
+    }
+
+    /** 真实验收暴露的空对象facts不能被宽松转换；仅合法空数组可表示咨询无需求增量。 */
+    @Test void emptyFactsObjectRemainsInvalidInsteadOfBeingCoerced() {
+        var json = new TravelJson();
+        String valid = "{\"intents\":[{\"kind\":\"CONVERSATION\",\"action\":\"TRAVEL_QA\",\"quote\":\"先聊聊\"}],"
+                + "\"facts\":[],\"reply\":\"可以聊聊\",\"clarification\":\"\",\"targetId\":null,"
+                + "\"category\":\"\",\"value\":\"\",\"city\":\"\",\"resolvedInputs\":[],\"advice\":[]}";
+        assertThat(json.decode(valid, DialogueIntent.Result.class).facts()).isEmpty();
+        assertThatThrownBy(() -> json.decode(valid.replace("\"facts\":[]", "\"facts\":{}"), DialogueIntent.Result.class))
+                .isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
     }
     /** @param context 显式测试上下文 @return 不含真实账号或任务的离线领取数据 */
     private com.lawrence.travel.application.interaction.Dialogue.Claim input(String context) {

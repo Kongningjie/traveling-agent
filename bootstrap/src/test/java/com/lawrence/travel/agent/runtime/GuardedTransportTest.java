@@ -37,6 +37,22 @@ import static org.mockito.Mockito.when;
 
 /** 使用真实门禁及可控连接验证每次 HTTP 的预占、异常与实际取消边界。 */
 class GuardedTransportTest {
+    /** 最终SDK正文超限在计量及网络前拒绝，只附带固定边界和量测，不泄露合成正文。 */
+    @Test void oversizedInputRetainsOnlySafeBudgetDiagnostic() {
+        String body = "{\"model\":\"test-model\",\"parameters\":{\"max_tokens\":128},\"input\":{\"messages\":[{\"role\":\"user\",\"content\":[{\"text\":\"" + "x".repeat(40000) + "\"}]}]}}";
+        try (var transport = transport(true)) {
+            assertThatThrownBy(() -> transport.execute(HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body(body).build()))
+                    .isInstanceOf(com.lawrence.travel.domain.execution.control.CallRejectedException.class)
+                    .hasMessage("CONTEXT_BUDGET_EXHAUSTED")
+                    .satisfies(failure -> {
+                        var detail = (com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic) failure.getCause();
+                        assertThat(detail.boundary()).isEqualTo("TRANSPORT_BODY");
+                        assertThat(detail.estimated()).isGreaterThan(detail.limit());
+                        assertThat(detail.getMessage()).isEqualTo("CONTEXT_BUDGET_EXHAUSTED");
+                        assertThat(detail.getCause()).isNull();
+                    });
+        }
+    }
     private final BudgetLedger ledger = mock(BudgetLedger.class);
     private final SemaphoreModelRequestSlots slots = new SemaphoreModelRequestSlots(1);
     private final Call call = mock(Call.class);

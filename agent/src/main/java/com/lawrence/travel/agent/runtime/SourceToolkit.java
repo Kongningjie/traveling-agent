@@ -34,6 +34,14 @@ public final class SourceToolkit extends SafetyToolkit {
 
     /** @return 只开放write的AbstractFilesystem适配；原生占位read_file由受控工具按逻辑键分页读取 */
     public ToolResultEvictionMiddleware eviction() {
+        return eviction(6000, 160);
+    }
+
+    /** @return 原生卸载加发送前超限兜底；不会重复执行资料工具或已发送的模型请求 */
+    public SourceResultBudgetMiddleware budgetedEviction() { return new SourceResultBudgetMiddleware(this); }
+
+    /** @param threshold 原生字符阈值 @param preview 首尾预览字符数 @return 仍先写PG再替换的原生组件 */
+    ToolResultEvictionMiddleware eviction(int threshold, int preview) {
         var filesystem = (AbstractFilesystem) Proxy.newProxyInstance(AbstractFilesystem.class.getClassLoader(), new Class<?>[]{AbstractFilesystem.class},
                 (proxy, method, args) -> {
                     if (method.getName().equals("write")) {
@@ -44,7 +52,7 @@ public final class SourceToolkit extends SafetyToolkit {
                     throw new UnsupportedOperationException("SOURCE_FILESYSTEM_OPERATION_DENIED");
                 });
         return new ToolResultEvictionMiddleware(filesystem, ToolResultEvictionConfig.builder()
-                .evictionPath("/work").maxResultChars(6000).previewChars(160)
+                .evictionPath("/work").maxResultChars(threshold).previewChars(preview)
                 .excludedToolNames(java.util.Set.of("read_file", "ReadDocumentSection")).build());
     }
 }
