@@ -7,11 +7,13 @@ const props = defineProps<{
   disabled: boolean;
   placeholder?: string;
   answering?: boolean;
+  attachmentDisabled?: boolean;
 }>();
 /** 仅显式提交触发业务命令，编辑及高度变化不发送网络请求。 */
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [];
+  attach: [];
 }>();
 const input = ref<HTMLTextAreaElement>();
 const remaining = computed(() => 4000 - props.modelValue.length);
@@ -72,6 +74,9 @@ defineExpose({ focus });
         @keydown="keydown"
       />
       <div class="composer-toolbar">
+        <button class="attach-button" type="button" aria-label="上传旅行资料" title="上传旅行资料（PDF、DOCX、TXT、Markdown）" :disabled="attachmentDisabled" @click="emit('attach')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
         <span>{{
           answering
             ? "回答这轮问题，也可以提出自己的想法"

@@ -1245,3 +1245,7 @@ summary {
 .dialogue-actions { display: flex; gap: 12px; margin: 8px 0 20px; }
 .operation-confirmation { margin: 12px 0 24px; }
 .operation-confirmation button + button { margin-left: 10px; }
+/* 上传与发送并列，辅助提示不挤占按钮的点击空间。 */
+.attach-button{display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;border:0;border-radius:50%;background:transparent;color:#344d44;padding:8px}
+.attach-button:hover{background:#edf3ef}.attach-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.composer-toolbar > span{flex:1}.feedback-dialog{width:min(720px,calc(100vw - 32px))}

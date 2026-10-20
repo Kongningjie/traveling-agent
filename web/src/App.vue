@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import PreferencePanel from "./components/PreferencePanel.vue";
+import AccountMenu from "./components/AccountMenu.vue";
 import ChatComposer from "./components/ChatComposer.vue";
 import SourcePreview from "./components/SourcePreview.vue";
 import DocumentPanel from "./components/DocumentPanel.vue";
@@ -92,7 +93,16 @@ const detailsTab = ref("行程"),
 const composer = ref<InstanceType<typeof ChatComposer>>(),
   decisionEditor = ref<InstanceType<typeof DecisionCard>>(),
   scrollArea = ref<HTMLElement>(),
-  preferenceDialog = ref<HTMLDialogElement>();
+  preferenceDialog = ref<HTMLDialogElement>(),
+  feedbackDialog = ref<HTMLDialogElement>(),
+  documentPanel = ref<InstanceType<typeof DocumentPanel>>();
+const feedbackOpen = ref(false);
+/** 用户主动打开反馈窗口才读取私有记录，关闭即卸载。 */
+async function openFeedback(): Promise<void> {
+  feedbackOpen.value = true;
+  await nextTick();
+  feedbackDialog.value?.showModal();
+}
 let creating = false,
   submittedText = "";
 /** 示例只填入草稿，不提交、不提取字段、不默认授权。 */
@@ -318,6 +328,7 @@ function closeOverlays(): void {
   sidebarOpen.value = false;
   detailsOpen.value = false;
   preferenceDialog.value?.close();
+  feedbackDialog.value?.close();
 }
 /** @param item 服务端消息 @returns 原文或明确字段摘要，不虚构助手回复。 */
 function messageText(item: Message): string {
@@ -367,6 +378,8 @@ watch(
     if (now[0] !== before[0]) {
       preferenceDialog.value?.close();
       preferencesOpen.value = false;
+      feedbackDialog.value?.close();
+      feedbackOpen.value = false;
       sidebarOpen.value = false;
     }
   },
@@ -551,19 +564,7 @@ onMounted(initialize);
             下一页
           </button>
         </div>
-        <div class="sidebar-account">
-          <button class="account-button" @click="openPreferences">
-            <span class="avatar">{{
-              user.loginName.slice(0, 1).toUpperCase()
-            }}</span
-            ><span
-              ><strong>{{ user.loginName }}</strong
-              ><small>我的旅行偏好</small></span
-            ><span aria-hidden="true">⚙</span></button
-          ><button class="logout-button" :disabled="busy" @click="logout">
-            退出登录
-          </button>
-        </div>
+        <AccountMenu :name="user.loginName" :busy="busy" @preferences="openPreferences" @feedback="openFeedback" @logout="logout" />
       </aside>
       <section class="chat-main" aria-label="旅行对话">
         <header class="chat-header">
@@ -613,6 +614,8 @@ onMounted(initialize);
               ref="composer"
               v-model="message"
               :disabled="inputDisabled"
+              :attachment-disabled="chatBusy || chatRetryable"
+              @attach="documentPanel?.choose()"
               @submit="submitMessage"
             />
             <div class="starter-grid">
@@ -733,8 +736,7 @@ onMounted(initialize);
         </div>
         <div class="chat-bottom">
           <ReportProblem v-if="view?.runId && selected" kind="RUN" :key="view.runId" :scope="selected" :target="view.runId"/>
-          <SupportPanel :key="user.id"/>
-          <DocumentPanel :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="text => { void dialogue.send(text); }" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
+          <DocumentPanel ref="documentPanel" :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="text => { void dialogue.send(text); }" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
           <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
             <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
             <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>
@@ -789,6 +791,8 @@ onMounted(initialize);
                 ? '说说你的选择，或给出自己的安排…'
                 : '继续聊聊，或者告诉我你想调整哪里…'
             "
+            :attachment-disabled="chatBusy || chatRetryable"
+            @attach="documentPanel?.choose()"
             @submit="submitMessage"
           />
         </div>
@@ -1139,6 +1143,10 @@ onMounted(initialize);
         </div>
       </aside>
     </main>
+    <dialog v-if="feedbackOpen && user" ref="feedbackDialog" class="preferences-dialog feedback-dialog" aria-labelledby="feedback-heading" @close="feedbackOpen = false">
+      <div class="details-heading"><h2 id="feedback-heading">反馈与问题记录</h2><button class="icon-button" autofocus aria-label="关闭反馈记录" @click="feedbackDialog?.close()">×</button></div>
+      <SupportPanel :key="user.id" />
+    </dialog>
     <dialog
       v-if="preferencesOpen && user"
       ref="preferenceDialog"
