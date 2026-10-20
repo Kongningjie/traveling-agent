@@ -37,6 +37,15 @@ import static org.mockito.Mockito.when;
 @ActiveProfiles("local")
 @SpringBootTest(properties="travel.engine.enabled=false")
 class SessionContextIntegrationTest {
+    /** 48K协调预算允许完整保留超过旧16K的本轮输入，不能借扩容删除原文或制造摘要调用。 */
+    @Test void largerCoordinatorRequestFits48KWithoutTruncation() {
+        var user = actor(); var claim = receive(user, UUID.randomUUID(), "补充自己的旅行想法");
+        String request = "完整旅行想法：" + "x".repeat(36000); var compression = new LocalCompression();
+        var prepared = contexts.prepare(claim.budgetId(), "coordinator", request, null, compression, false);
+        assertThat(prepared.estimatedTokens()).isGreaterThan(16384).isLessThanOrEqualTo(49152);
+        assertThat(prepared.messages().getLast().text()).contains(request); assertThat(compression.calls.get()).isZero();
+        assertThat(prepared.source().userId()).isEqualTo(user.id());
+    }
     /** 当前请求中的JSON原样保留，避免二次转义膨胀；权威状态及历史无授权声明仍完整存在。 */
     @Test void currentJsonRequestDoesNotAcquireAnotherEscapingLayer() {
         var user=actor(); UUID chat=UUID.randomUUID(); var input=receive(user,chat,"继续补充需求");
@@ -118,7 +127,7 @@ class SessionContextIntegrationTest {
         for(int round=0;round<50;round++) {
             var claim=receive(user,chat,"第"+round+"轮想去看风景，"+"喜欢轻松步行和本地美食。".repeat(10));
             var prepared=contexts.prepare(claim.budgetId(),"coordinator","本轮完整请求",null,compression,false);
-            assertThat(prepared.estimatedTokens()).isLessThanOrEqualTo(16384); assertThat(json.encode(prepared.messages())).contains("本轮完整请求");
+            assertThat(prepared.estimatedTokens()).isLessThanOrEqualTo(com.lawrence.travel.application.memory.ContextAssembler.limit("coordinator")); assertThat(json.encode(prepared.messages())).contains("本轮完整请求");
             if(round>0) assertThat(prepared.messages()).anyMatch(m -> m.role()==SessionContext.Role.ASSISTANT);
             finish(claim,"上一轮回复"+round+"："+"可以留出休息时间。".repeat(10));
         }

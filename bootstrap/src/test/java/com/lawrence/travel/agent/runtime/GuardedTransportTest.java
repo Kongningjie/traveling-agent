@@ -37,6 +37,21 @@ import static org.mockito.Mockito.when;
 
 /** 使用真实门禁及可控连接验证每次 HTTP 的预占、异常与实际取消边界。 */
 class GuardedTransportTest {
+    /** 扩容协调输入允许原16K以上请求，但超过新48K仍在预占及HTTP前拒绝，输出上限不变。 */
+    @Test void coordinatorAllowsLargerInputAndStillRejectsBeyond48K() throws Exception {
+        when(call.execute()).thenReturn(response(200, "{\"usage\":{\"input_tokens\":10,\"output_tokens\":12}}"));
+        try (var transport = transport(true, "coordinator")) {
+            var json = new com.lawrence.travel.infrastructure.travel.TravelJson();
+            String template = json.encode(Map.of("model", "test-model", "parameters", Map.of("max_tokens", 128),
+                    "input", Map.of("messages", java.util.List.of(Map.of("role", "user", "content", java.util.List.of(Map.of("text", "TEXT_PLACEHOLDER")))))));
+            var accepted = HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body(template.replace("TEXT_PLACEHOLDER", "x".repeat(40000))).build();
+            transport.execute(accepted);
+            var rejected = HttpRequest.builder().url(GuardedDashScopeTransport.ENDPOINT).method("POST").body(template.replace("TEXT_PLACEHOLDER", "x".repeat(50000))).build();
+            assertThatThrownBy(() -> transport.execute(rejected)).hasMessage("CONTEXT_BUDGET_EXHAUSTED")
+                    .satisfies(failure -> assertThat(((com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic) failure.getCause()).limit()).isEqualTo(49152));
+        }
+        verify(call).execute(); verify(ledger).reserve(any(), any(), any(), any(), anyLong(), any());
+    }
     /** 合法完整请求才更新工具页剩余量；计数来自最终SDK正文，不包含正文或供应商数据。 */
     @Test void acceptedRequestPublishesExactConservativeHeadroom() throws Exception {
         when(call.execute()).thenReturn(response(200, "{\"usage\":{\"input_tokens\":10,\"output_tokens\":12}}"));
@@ -74,6 +89,11 @@ class GuardedTransportTest {
      * @return 仅测试使用的传输
      */
     private GuardedDashScopeTransport transport(boolean enabled) {
+        return transport(enabled, "planner");
+    }
+
+    /** @param enabled 测试准入 @param role 实际角色预算 @return 同一受控连接，不访问供应商 */
+    private GuardedDashScopeTransport transport(boolean enabled, String role) {
         var now = Instant.now();
         var evidence = new FreeQuotaEvidence("test-model", "cn-beijing", "DASHSCOPE_NATIVE_REALTIME",
                 100000, now.minusSeconds(5), now.plusSeconds(60), now.plusSeconds(120), true);
@@ -81,10 +101,10 @@ class GuardedTransportTest {
                 .thenReturn(new BudgetLedger.Reservation(reservationId,
                         new RunBudget(1, 0, 0, Duration.ZERO)));
         when(call.timeout()).thenReturn(new Timeout());
-        var gate = new ModelCallAdmission(enabled, Map.of("planner", "test-model"),
+        var gate = new ModelCallAdmission(enabled, Map.of(role, "test-model"),
                 Map.of("test-model", evidence), new RunLimits(30, 60, 2,
                 Duration.ofMillis(100), Duration.ofMinutes(15)), ledger, slots, Clock.systemUTC());
-        return new GuardedDashScopeTransport(gate, UUID.randomUUID(), "planner", (Call.Factory) request -> call);
+        return new GuardedDashScopeTransport(gate, UUID.randomUUID(), role, (Call.Factory) request -> call);
     }
 
     /** @return 合法但不含真实凭证的请求 */

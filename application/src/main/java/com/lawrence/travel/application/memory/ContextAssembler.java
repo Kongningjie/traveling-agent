@@ -59,8 +59,8 @@ public final class ContextAssembler {
     }
     /** @param source 实际发送上下文；变化时让原运行有界重试，不能发送旧记忆 */
     public void guard(AgentContext.Source source) { store.guard(source); }
-    /** @param role 固定角色 @return 应用输入上限，输出额度另行预留且独立限制 */
-    public static long limit(String role) { return switch (role) { case "planner", "reviewer" -> 32768; case "coordinator", "research" -> 16384; default -> throw new IllegalArgumentException("CONTEXT_ROLE_INVALID"); }; }
+    /** @param role 固定角色 @return 应用输入上限；协调角色经用户批准扩为48K，输出额度仍另行预留且独立限制 */
+    public static long limit(String role) { return switch (role) { case "coordinator" -> 49152; case "planner", "reviewer" -> 32768; case "research" -> 16384; default -> throw new IllegalArgumentException("CONTEXT_ROLE_INVALID"); }; }
     /** @param request 当前请求 @param authority 权威保护区JSON @param recent 同版本近期原文 @param summary 可追溯历史摘要或空 @return 按优先级组成的JSON数据；历史没有授权效力 */
     private String pack(String request, String authority, List<AgentContext.Message> recent, AgentContext.Summary summary) {
         var body = new LinkedHashMap<String, Object>(); body.put("currentRequest", request); body.put("authority", json.decode(authority, Map.class));

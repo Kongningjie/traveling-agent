@@ -85,7 +85,8 @@ class SourceToolkitTest {
                     .modelName("test-model").endpointType(io.agentscope.extensions.model.dashscope.EndpointType.MULTIMODAL)
                     .baseUrl("https://dashscope.aliyuncs.com").stream(false).enableThinking(false).enableSearch(false).httpTransport(transport).build();
             String answer = ControlledHarnessCall.execute(() -> RestrictedHarnessFactory.create(model, toolkit, root, "coordinator"),
-                    () -> List.of(HarnessProbeFixture.user("a".repeat(7000))), List::of, toolkit::check,
+                    // 随角色预算移动夹具，使追加结果仍真实跨越门禁，不能因提高上限而失去原恢复覆盖。
+                    () -> List.of(HarnessProbeFixture.user("a".repeat((int) com.lawrence.travel.application.memory.ContextAssembler.limit("coordinator") - 16384 + 7000))), List::of, toolkit::check,
                     com.lawrence.travel.application.safety.SafetyGate.local(), () -> false, a -> { });
             assertThat(answer).isEqualTo("已读取");
         }

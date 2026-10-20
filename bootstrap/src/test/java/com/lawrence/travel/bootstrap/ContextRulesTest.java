@@ -58,7 +58,7 @@ class ContextRulesTest {
     /** 中文、emoji及带引用JSON使用保守估计，不把字符数当作模型Token精确值。 */
     @Test void tokenEstimateBoundsUtf8AndBudgetsAreRoleSpecific() {
         String text = "你好🌧️".repeat(100); assertThat(HarnessContextCompression.estimateInput(text)).isGreaterThanOrEqualTo(text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 4096L);
-        assertThat(ContextAssembler.limit("coordinator")).isEqualTo(16384); assertThat(ContextAssembler.limit("research")).isEqualTo(16384); assertThat(ContextAssembler.limit("planner")).isEqualTo(32768); assertThat(ContextAssembler.limit("reviewer")).isEqualTo(32768);
+        assertThat(ContextAssembler.limit("coordinator")).isEqualTo(49152); assertThat(ContextAssembler.limit("research")).isEqualTo(16384); assertThat(ContextAssembler.limit("planner")).isEqualTo(32768); assertThat(ContextAssembler.limit("reviewer")).isEqualTo(32768);
     }
     /** 关键区本身无法容纳时暂停，不调用摘要器或保存被截断产物。 */
     @Test void oversizedProtectedInputCannotBeCompressedAway() {
