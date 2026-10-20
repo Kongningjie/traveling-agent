@@ -63,13 +63,21 @@ public interface BudgetLedger {
     long tokensSince(Target target, Instant since);
 
     /**
-     * 检查未知用量或实际消耗超出预估的记录，出现时必须重新核实额度。
+     * 诊断未知用量或实际消耗超出预估的记录，不直接决定是否允许后续请求。
      * @param target 精确型号及接入范围
      * @param since 当前额度核实时间
      * @param unresolvedBefore 当前进程准入服务建立时间，此前仍未结束的请求视为不确定
-     * @return 是否存在不能继续信任当前本地额度快照的记录
+     * @return 是否存在不确定记录；UNKNOWN及未决请求仍按上限参与tokensSince计数
      */
     boolean hasUncertainUsage(Target target, Instant since, Instant unresolvedBefore);
+
+    /**
+     * 检查已知实际用量超过预占上限，避免在估算失真后继续放行。
+     * @param target 精确型号及接入范围
+     * @param since 当前额度核实时间
+     * @return 是否存在已完成且实际用量超过预占上限的请求；未知和未决不属于超限证明
+     */
+    boolean hasUsageOverrun(Target target, Instant since);
 
     /**
      * 请求范围，不保存账号、密钥、提示词或原始响应。

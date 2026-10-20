@@ -82,10 +82,30 @@ class ModelCallAdmissionTest {
                 .hasMessage("QUOTA_INSUFFICIENT");
     }
 
-    /** 验证未知或超出 Token 上界的结果会暂停后续调用，不能继续信任旧快照。 */
+    /** 验证历史UNKNOWN在余额足够时按上限扣算，所有已配置角色均可显式继续。 */
     @Test
-    void uncertainUsageRequiresQuotaReverification() {
+    void uncertainUsageIsChargedWithoutBlockingConfiguredRoles() {
         when(ledger.hasUncertainUsage(any(), any(), any())).thenReturn(true);
+        when(ledger.tokensSince(any(), any())).thenReturn(90L);
+        reserveSuccessfully();
+        var quota = new FreeQuotaEvidence("test-model", "cn-beijing", "REALTIME", 100,
+                now.minusSeconds(1), now.plusSeconds(60), now.plusSeconds(120), true);
+        var roles = Map.of("coordinator", "test-model", "planner", "test-model",
+                "research", "test-model", "reviewer", "test-model");
+        var admission = new ModelCallAdmission(true, roles, Map.of("test-model", quota),
+                limits, ledger, slots, Clock.fixed(now, ZoneOffset.UTC));
+        for (String role : roles.keySet()) {
+            try (var permit = admission.begin(runId, role, "cn-beijing", "REALTIME", 10)) {
+                assertThat(permit.target().modelId()).isEqualTo("test-model");
+            }
+        }
+        verify(ledger, times(4)).tokensSince(any(), any());
+    }
+
+    /** 已知实际超出预占上限仍表示估算失真，不能与UNKNOWN按上限扣算混淆。 */
+    @Test
+    void knownUsageOverrunStillBlocksCalls() {
+        when(ledger.hasUsageOverrun(any(), any())).thenReturn(true);
         assertThatThrownBy(() -> gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10))
                 .hasMessage("QUOTA_UNVERIFIED");
     }

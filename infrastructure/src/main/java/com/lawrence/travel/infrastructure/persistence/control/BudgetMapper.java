@@ -105,6 +105,18 @@ public interface BudgetMapper {
                               @Param("unresolvedBefore") Instant unresolvedBefore);
 
     /**
+     * 只查询已知超出上界的事实，UNKNOWN和RESERVED继续按预占上限扣算。
+     * @param target 精确型号、地域及接口
+     * @param since 当前快照核实时间
+     * @return 是否存在超出预占上限的已知用量
+     */
+    @Select("SELECT EXISTS(SELECT 1 FROM traveling_agent.call_meter WHERE kind='MODEL' "
+            + "AND model_id=#{target.modelId} AND region=#{target.region} AND api=#{target.api} "
+            + "AND started_at>=#{since} AND status='COMPLETED' "
+            + "AND input_tokens::numeric + output_tokens > token_upper_bound)")
+    boolean hasUsageOverrun(@Param("target") BudgetLedger.Target target, @Param("since") Instant since);
+
+    /**
      * 数据库预算行，不作为可编辑的领域对象暴露。
      * @param modelCalls 模型预占次数
      * @param toolCalls 工具预占次数

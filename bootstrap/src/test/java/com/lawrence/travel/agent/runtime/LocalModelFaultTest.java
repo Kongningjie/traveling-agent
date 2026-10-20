@@ -54,8 +54,8 @@ class LocalModelFaultTest {
     /** @param server 已绑定回环的本地服务 @param client 真实OkHttp @return 固定回环URL工厂，不采用原请求的外部地址 */
     private Call.Factory loopback(HttpServer server, OkHttpClient client) { return request -> client.newCall(request.newBuilder().url("http://127.0.0.1:" + server.getAddress().getPort() + "/fault").build()); }
 
-    /** 真实网络超时结束后UNKNOWN不补零，物理槽释放；第二次发送在门禁处暂停，不暗中重发或换型号。 */
-    @Test void actualTimeoutRecordsUnknownAndPreventsAnotherSend() throws Exception {
+    /** 回环超时不自动重试；UNKNOWN保留后，显式第二次请求可用原型号和释放的槽继续。 */
+    @Test void actualTimeoutRecordsUnknownAndAllowsExplicitNextSend() throws Exception {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0); var entered = new CountDownLatch(1); var release = new CountDownLatch(1); var calls = new AtomicInteger();
         try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
             server.setExecutor(workers); server.createContext("/fault", exchange -> { calls.incrementAndGet(); entered.countDown(); try { release.await(4, TimeUnit.SECONDS); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); } finally { exchange.close(); } }); server.start();
@@ -63,7 +63,10 @@ class LocalModelFaultTest {
             try (var transport = transport(loopback(server, client))) {
                 long started = System.nanoTime(); assertThatThrownBy(() -> transport.execute(request())).hasMessage("MODEL_TRANSPORT_FAILED").hasNoCause();
                 assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue(); assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(4));
-                verify(ledger).finish(eq(reservation), isNull(), any()); assertThatThrownBy(() -> transport.execute(request())).hasMessage("QUOTA_UNVERIFIED"); assertThat(calls.get()).isOne(); verify(ledger, times(1)).reserve(any(), any(), any(), any(), anyLong(), any());
+                verify(ledger).finish(eq(reservation), isNull(), any()); assertThat(calls.get()).isOne();
+                assertThat(uncertain.get()).isTrue();
+                assertThatThrownBy(() -> transport.execute(request())).hasMessage("MODEL_TRANSPORT_FAILED");
+                assertThat(calls.get()).isEqualTo(2); verify(ledger, times(2)).reserve(any(), any(), any(), any(), anyLong(), any());
                 try (var lease = slots.tryAcquire()) { assertThat(lease).isNotNull(); }
             } finally { release.countDown(); server.stop(0); client.connectionPool().evictAll(); client.dispatcher().executorService().shutdown(); }
         }

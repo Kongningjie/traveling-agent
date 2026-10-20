@@ -129,10 +129,16 @@ public final class PostgresBudgetLedger implements BudgetLedger {
         return mapper.tokensSince(target, since);
     }
 
-    /** {@inheritDoc} 未知或超出上界后暂停该精确范围，不用原始快照继续放行。 */
+    /** {@inheritDoc} 保留不确定记录供诊断，不自动清除或刷新快照。 */
     @Override
     public boolean hasUncertainUsage(Target target, Instant since, Instant unresolvedBefore) {
         return mapper.hasUncertainUsage(target, since, unresolvedBefore);
+    }
+
+    /** {@inheritDoc} 仅已知超上界事实参与准入阻断，未知记录仍保守计费。 */
+    @Override
+    public boolean hasUsageOverrun(Target target, Instant since) {
+        return mapper.hasUsageOverrun(target, since);
     }
 
     /**

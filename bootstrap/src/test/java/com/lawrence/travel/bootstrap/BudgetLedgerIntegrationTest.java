@@ -114,6 +114,7 @@ class BudgetLedgerIntegrationTest {
         recreated.create(runId);
         assertThat(recreated.read(runId).modelCalls()).isEqualTo(3);
         assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(55);
+        assertThat(recreated.hasUsageOverrun(target, started.minusSeconds(1))).isFalse();
         assertThat(recreated.hasUncertainUsage(target, started.minusSeconds(1), started)).isTrue();
         assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?",
                 String.class, unknown.id())).isEqualTo("UNKNOWN");
@@ -129,6 +130,42 @@ class BudgetLedgerIntegrationTest {
         ledger.finish(request.id(), new TokenUsage(1, 1), Duration.ofMillis(1));
         assertThat(ledger.hasUncertainUsage(target, started.minusSeconds(1), started)).isTrue();
         assertThat(ledger.tokensSince(target, started.minusSeconds(1))).isEqualTo(2);
+        assertThat(ledger.hasUsageOverrun(target, started.minusSeconds(1))).isTrue();
+        assertThat(ledger.hasUsageOverrun(target, started.plusSeconds(1))).isFalse();
+        assertThat(ledger.hasUsageOverrun(new BudgetLedger.Target("__other_model__", "test-region", "TEST"),
+                started.minusSeconds(1))).isFalse();
+    }
+
+    /** 真实PG验证重建服务后UNKNOWN/RESERVED仍按上限扣算，余额充足放行、余额不足拒绝且不改历史。 */
+    @Test
+    void admissionAfterRestartChargesUnknownAndReservedWithoutBlanketBlock() {
+        ledger.create(runId);
+        var unknown = ledger.reserve(runId, CallKind.MODEL, limits, target, 20, started);
+        ledger.finish(unknown.id(), null, Duration.ofMillis(1));
+        var pending = ledger.reserve(runId, CallKind.MODEL, limits, target, 30, started);
+        var known = ledger.reserve(runId, CallKind.MODEL, limits, target, 10, started);
+        ledger.finish(known.id(), new TokenUsage(3, 2), Duration.ofMillis(1));
+        var recreated = new PostgresBudgetLedger(mapper, transactions);
+        var quota = new com.lawrence.travel.domain.execution.control.FreeQuotaEvidence(target.modelId(),
+                target.region(), target.api(), 100, started.minusSeconds(1), started.plusSeconds(60),
+                started.plusSeconds(600), true);
+        var gate = new com.lawrence.travel.application.execution.ModelCallAdmission(true,
+                java.util.Map.of("planner", target.modelId()), java.util.Map.of(target.modelId(), quota),
+                limits, recreated, new com.lawrence.travel.infrastructure.execution.SemaphoreModelRequestSlots(1),
+                java.time.Clock.systemUTC());
+        assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(55);
+        try (var permit = gate.begin(runId, "planner", target.region(), target.api(), 45)) {
+            assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(100);
+            permit.complete(new TokenUsage(1, 0));
+        }
+        assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(56);
+        assertThatThrownBy(() -> gate.begin(runId, "planner", target.region(), target.api(), 45))
+                .hasMessage("QUOTA_INSUFFICIENT");
+        assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?", String.class,
+                unknown.id())).isEqualTo("UNKNOWN");
+        assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?", String.class,
+                pending.id())).isEqualTo("RESERVED");
+        assertThat(recreated.read(runId).modelCalls()).isEqualTo(4);
     }
 
     /** 验证不在已有业务事务中返回未提交的请求许可，避免事务回滚后供应商仍已消耗。 */

@@ -22,7 +22,6 @@ public final class ModelCallAdmission {
     private final BudgetLedger ledger;
     private final ModelRequestSlots slots;
     private final Clock clock;
-    private final java.time.Instant processStarted;
     private final java.util.Set<BudgetLedger.Target> unreliableTargets = new java.util.HashSet<>();
 
     /**
@@ -45,7 +44,6 @@ public final class ModelCallAdmission {
         this.ledger = java.util.Objects.requireNonNull(ledger);
         this.slots = java.util.Objects.requireNonNull(slots);
         this.clock = java.util.Objects.requireNonNull(clock);
-        this.processStarted = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     }
 
     /**
@@ -68,9 +66,11 @@ public final class ModelCallAdmission {
         quota.requireUsable(model, region, api, tokenUpperBound, now);
         var target = new BudgetLedger.Target(model, region, api);
         if (unreliableTargets.contains(target)
-                || ledger.hasUncertainUsage(target, quota.verifiedAt(), processStarted)) {
+                || ledger.hasUsageOverrun(target, quota.verifiedAt())) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
         }
+        // 用户批准：UNKNOWN和重启遗留RESERVED保留原预占上限，计入下面的余额扣减，
+        // 不再因历史状态单独封禁整个型号；已知超上界及账本写失败仍须阻断。
         long accounted = ledger.tokensSince(target, quota.verifiedAt());
         if (accounted > quota.remainingTokens() - tokenUpperBound) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT);
@@ -136,7 +136,7 @@ public final class ModelCallAdmission {
         public void complete(TokenUsage usage) {
             if (!finished.compareAndSet(false, true)) return;
             try {
-                // 与准入共享短临界区，未知结果写入后不能让另一个检查穿过旧快照。
+                // 与准入共享短临界区；UNKNOWN继续占用预占上限，不退还次数或额度。
                 // 这里只做数据库结算，不能在持此锁时等待模型或调用任何工具。
                 synchronized (ModelCallAdmission.this) {
                     try {
