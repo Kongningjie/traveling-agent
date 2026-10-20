@@ -6,7 +6,7 @@ import AccountMenu from "./components/AccountMenu.vue";
 import ChatComposer from "./components/ChatComposer.vue";
 import SourcePreview from "./components/SourcePreview.vue";
 import DocumentPanel from "./components/DocumentPanel.vue";
-import LifecycleDelete from "./components/LifecycleDelete.vue";
+import ConversationActions from "./components/ConversationActions.vue";
 import ReportProblem from "./components/ReportProblem.vue";
 import SupportPanel from "./components/SupportPanel.vue";
 import AdvicePanel from "./components/AdvicePanel.vue";
@@ -291,9 +291,11 @@ function startConversation(): void {
   message.value = "";
   void nextTick(() => composer.value?.focus());
 }
-/** 删除后清除聊天、行程及恢复指针；重新读取列表不重新执行规划。 */
-async function deletedConversation(): Promise<void> {
-  dialogue.forget(); forgetDeleted(); detailsOpen.value = false;
+/** 删除当前对象时清除私有缓存和恢复指针；删除其他列表项只刷新列表，不改变当前对话。
+ * @param kind 所点列表项类型 @param target 已删除对象 @param linkedTask 聊天关联旅行。 */
+async function deletedConversation(kind: "CHAT" | "TASK", target: string, linkedTask?: string | null): Promise<void> {
+  const affectsCurrent = kind === "CHAT" ? chatSelected.value === target || Boolean(linkedTask && selected.value === linkedTask) : selected.value === target || chatView.value?.chat.taskId === target;
+  if (affectsCurrent) { dialogue.forget(); forgetDeleted(); detailsOpen.value = false; }
   await dialogue.list(); await pageTasks(0);
 }
 /** @param id 本人任务；切换只读取，不重新执行规划。 */
@@ -519,32 +521,37 @@ onMounted(initialize);
           </button>
         </div>
         <nav class="task-list" aria-label="旅行任务">
-          <button v-for="chat in chats" :key="chat.id" class="task-button"
-            :class="{ active: chatSelected === chat.id }" :disabled="busy || retryable || chatBusy || chatRetryable"
-            @click="openChat(chat.id)">
-            <span class="task-icon" aria-hidden="true">◷</span><span><strong>{{ chat.title }}</strong>
-            <small>{{ chat.taskId ? '旅行规划' : '交流咨询' }}</small></span>
-          </button>
+          <div v-for="chat in chats" :key="chat.id" class="task-row" :class="{ active: chatSelected === chat.id }">
+            <button class="task-button"
+              :class="{ active: chatSelected === chat.id }" :disabled="busy || retryable || chatBusy || chatRetryable"
+              @click="openChat(chat.id)">
+              <span class="task-icon" aria-hidden="true">◷</span><span><strong>{{ chat.title }}</strong>
+              <small>{{ chat.taskId ? '旅行规划' : '交流咨询' }}</small></span>
+            </button>
+            <ConversationActions kind="CHAT" :target="chat.id" :title="chat.title" :disabled="busy || retryable || chatBusy || chatRetryable" @deleted="deletedConversation('CHAT', chat.id, chat.taskId)" />
+          </div>
           <div v-if="chatOffset || chats.length >= 20" class="sidebar-pagination">
             <button :disabled="chatBusy || chatRetryable || !chatOffset" @click="dialogue.page(-1)">上一页对话</button>
             <button :disabled="chatBusy || chatRetryable || chats.length < 20" @click="dialogue.page(1)">下一页对话</button>
           </div>
-          <button
-            v-for="task in tasks.filter((t) => !chats.some((c) => c.taskId === t.task.scope.taskId))"
-            :key="task.task.scope.taskId"
-            class="task-button"
-            :class="{ active: selected === task.task.scope.taskId }"
-            :disabled="busy || retryable || chatBusy || chatRetryable"
-            @click="openTask(task.task.scope.taskId)"
-          >
-            <span class="task-icon" aria-hidden="true">◷</span
-            ><span
-              ><strong>{{ task.title }}</strong
-              ><small>{{
-                task.task.currentVersionId ? "已有确认行程" : "一起完善中"
-              }}</small></span
+          <div v-for="task in tasks.filter((t) => !chats.some((c) => c.taskId === t.task.scope.taskId))"
+            :key="task.task.scope.taskId" class="task-row" :class="{ active: selected === task.task.scope.taskId }">
+            <button
+              class="task-button"
+              :class="{ active: selected === task.task.scope.taskId }"
+              :disabled="busy || retryable || chatBusy || chatRetryable"
+              @click="openTask(task.task.scope.taskId)"
             >
-          </button>
+              <span class="task-icon" aria-hidden="true">◷</span
+              ><span
+                ><strong>{{ task.title }}</strong
+                ><small>{{
+                  task.task.currentVersionId ? "已有确认行程" : "一起完善中"
+                }}</small></span
+              >
+            </button>
+            <ConversationActions kind="TASK" :target="task.task.scope.taskId" :title="task.title" :disabled="busy || retryable || chatBusy || chatRetryable" @deleted="deletedConversation('TASK', task.task.scope.taskId)" />
+          </div>
           <p v-if="!tasks.length && !chats.length" class="sidebar-empty">
             每段旅程，都从一句话开始。<br />聊聊你想去的地方吧。
           </p>
@@ -581,7 +588,6 @@ onMounted(initialize);
             <h1>{{ chatView?.chat.title ?? (selected ? taskTitle : "新对话") }}</h1>
             <span class="header-badge">旅行助手</span>
           </div>
-          <LifecycleDelete v-if="chatSelected || selected" :key="chatSelected || selected" :kind="chatSelected ? 'CHAT' : 'TASK'" :target="chatSelected || selected" @deleted="deletedConversation"/>
           <button
             v-if="selected"
             class="quiet details-toggle"

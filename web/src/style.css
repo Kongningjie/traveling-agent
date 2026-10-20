@@ -314,6 +314,11 @@ summary {
   min-height: 0;
   overflow-y: auto;
 }
+/* 列表选择和更多操作是相邻按钮，不嵌套交互元素或误触切换聊天。 */
+.task-row{display:flex;align-items:center;position:relative;border-radius:10px;margin:3px 0}
+.task-row:hover{background:#edf0f2}.task-row.active{background:#e9eeec}
+.task-row .task-button{flex:1;min-width:0;width:auto;margin:0;background:transparent}
+.task-row:hover .conversation-more,.task-row:focus-within .conversation-more,.task-row.active .conversation-more{opacity:1}
 .task-button {
   display: flex;
   gap: 10px;
