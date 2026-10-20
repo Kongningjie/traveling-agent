@@ -18,6 +18,7 @@ $tableName = 'm0_probe_' + $probeId
 $redisKey = 'traveling-agent:verification:' + $probeId
 $fileProbe = '/var/lib/traveling-agent/verification-' + $probeId
 $documentProbe = '/var/lib/traveling-agent/documents/verification-' + $probeId
+$backupProbe = '/var/lib/traveling-agent/backups/verification-' + $probeId
 
 <#
 .SYNOPSIS
@@ -47,6 +48,9 @@ try {
         'printf %s "$2" > "$1"', 'probe', $fileProbe, $probeId)
 
     Invoke-Compose -DockerArguments @('exec','-T','backend','sh','-c','printf %s "$2" > "$1"','probe',$documentProbe,$probeId)
+    Invoke-Compose -DockerArguments @('exec','-T','backend','sh','-c','printf %s "$2" > "$1"','probe',$backupProbe,$probeId)
+    # 清单不能用探针重写；只比较真实最小删除头的指纹，防止容器重建误创建另一份空清单。
+    $headBefore=Invoke-Compose -DockerArguments @('exec','-T','backend','sha256sum','/var/lib/traveling-agent/lifecycle/head')
     # 重新创建本项目四个容器，保留命名卷和附件bind目录，比仅重启进程更严格。
     Invoke-Compose -DockerArguments @('--profile', 'app', 'up', '-d', '--force-recreate', '--wait')
     $pgValue = Invoke-Compose -DockerArguments @('exec', '-T', 'postgres', 'sh', '-c',
@@ -60,10 +64,13 @@ try {
     if (($fileValue -join '').Trim() -ne $probeId) { throw '必要文件卷探针未恢复。' }
     $documentValue=Invoke-Compose -DockerArguments @('exec','-T','backend','cat',$documentProbe)
     if (($documentValue -join '').Trim() -ne $probeId) {throw '附件原件目录探针未恢复。'}
-    Write-Output 'PASS: PostgreSQL, Redis and required file data survive container recreation with named volumes.'
+    $backupValue=Invoke-Compose -DockerArguments @('exec','-T','backend','cat',$backupProbe)
+    $headAfter=Invoke-Compose -DockerArguments @('exec','-T','backend','sha256sum','/var/lib/traveling-agent/lifecycle/head')
+    if (($backupValue -join '').Trim() -ne $probeId -or ($headBefore -join '') -ne ($headAfter -join '')) {throw '受管备份根或独立最新删除头未保留。'}
+    Write-Output 'PASS: PostgreSQL, Redis, files, documents, managed backups and latest deletion head survive container recreation.'
 } finally {
     try {
-        Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'rm', '-f', $fileProbe,$documentProbe) | Out-Null
+        Invoke-Compose -DockerArguments @('exec', '-T', 'backend', 'rm', '-f', $fileProbe,$documentProbe,$backupProbe) | Out-Null
         # 仅清理本轮生成的随机探针，保留所有业务数据与命名卷。
         Invoke-Compose -DockerArguments @('exec', '-T', 'postgres', 'sh', '-c',
             'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"',

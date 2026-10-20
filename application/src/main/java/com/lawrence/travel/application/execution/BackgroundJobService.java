@@ -25,7 +25,26 @@ public final class BackgroundJobService implements BackgroundWorkSource {
     /** {@inheritDoc} 不把解析CPU容量算作模型容量。 */
     @Override public boolean parserCapacity() { return parser; }
     /** {@inheritDoc} 原领取作为唯一执行与提交身份，恢复不产生新operation。 */
-    @Override public Optional<Runnable> claimWork() { return store.claim(handlers.keySet()).map(c -> new LeasedWork() {
+    @Override public Optional<Runnable> claimWork() { return claimed( store.claim(handlers.keySet()));
+    }
+
+    /** {@inheritDoc} 已取消但仍在途的同用户请求不提前释放物理用户槽。 */
+    @Override
+    public Optional<Runnable> claimWorkExcluding(java.util.Set<java.util.UUID> excluded) {
+        return claimed(store.claim(handlers.keySet(), excluded));
+    }
+
+    /**
+     * @param selected 原持久资格
+     * @return 保留归属和续租的可运行工作
+     */
+    private Optional<Runnable> claimed(Optional<Jobs.Claim> selected) {
+        return selected.map(c -> new LeasedWork() {
+                            /** {@inheritDoc} 归属来自PG资格而不是模型输入。 */
+                            @Override
+                            public java.util.UUID userId() {
+                                return c.fence().scope().userId();
+                            }
         /** 由既有Worker心跳复核版本和lease。 */
         @Override public boolean renew() { return store.renew(c.fence()); }
         /** 处理器异常只写固定分类；过期／撤销后保留原权威状态。 */

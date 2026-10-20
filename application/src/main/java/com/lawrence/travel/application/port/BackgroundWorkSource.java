@@ -10,7 +10,22 @@ public interface BackgroundWorkSource {
     interface LeasedWork extends Runnable {
         /** @return 是否仍具有提交资格；数据库不可用应返回false或抛异常 */
         boolean renew();
+
+        /**
+         * @return 实际执行归属；兼容旧测试源可为空，不赋予数据库提交权
+         */
+        default java.util.UUID userId() {
+            return null;
+    }
     }
     /** @return 已可靠领取的有界工作，空表示当前没有可执行输入 */
     Optional<Runnable> claimWork();
+
+    /**
+     * @param excluded 仍占物理容量的用户，包括已取消但尚未退出者
+     * @return 持久领取仍须复查；旧源兼容默认入口
+     */
+    default Optional<Runnable> claimWorkExcluding(java.util.Set<java.util.UUID> excluded) {
+        return claimWork();
+}
 }

@@ -96,6 +96,8 @@ export function useWorkspace() {
     if (user.value) sessionStorage.removeItem(`travel.task.${user.value.id}`);
     clearTask();
   }
+  /** 明确删除已成功后清除旧页面和未知重试，防止迟到响应恢复已删除内容。 */
+  function forgetDeleted(): void {if (user.value) sessionStorage.removeItem(`travel.task.${user.value.id}`); clearTask(); busy.value = false;}
   /** @param failure 固定异常 @param stamp 请求所属页面代次；过时异常也不能退出新账号 */
   function failed(failure: unknown, stamp: number): void {
     if (stamp !== epoch) return;
@@ -543,6 +545,7 @@ export function useWorkspace() {
     refresh,
     createTask,
     newConversation,
+    forgetDeleted,
     send,
     answer,
     accept,

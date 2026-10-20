@@ -20,6 +20,16 @@ import java.util.UUID;
 
 /** 有界原件、配额和解析用例；所有业务提交由PG围栏决定，不信任runner状态。 */
 public final class DocumentService implements JobHandler {
+    private com.lawrence.travel.application.lifecycle.LifecycleService lifecycle;
+
+    /**
+     * @param service 生产装配的统一删除用例；仅允许启动时设置一次，原测试构造保持兼容
+     */
+    public void deletionService(
+            com.lawrence.travel.application.lifecycle.LifecycleService service) {
+        if (lifecycle != null) throw new IllegalStateException("DELETE_ALREADY_CONFIGURED");
+        lifecycle = java.util.Objects.requireNonNull(service);
+    }
     private final DocumentStore store;
     private final DocumentLimits limits;
     private final ArtifactFiles files;
@@ -68,7 +78,11 @@ public final class DocumentService implements JobHandler {
     /** @param actor 身份 @param chat 私有聊天 @param id 原件 @return 完整性校验后下载；始终作为附件不内联 */
     public byte[] download(UserIdentity actor,UUID chat,UUID id) { return tx.required(() -> { var s=new Jobs.Scope(actor.id(),chat);store.lock(s);var e=visible(s,id);var bytes=files.read(e.key());if(!hash(bytes).equals(e.hash()) || bytes.length!=e.size()) throw new DocumentFailure("DOCUMENT_CORRUPT");return bytes; }); }
     /** @param actor 身份 @param chat 聊天 @param id 原件 @param action STOP／RETRY／DELETE，均为显式用户动作 */
-    public void action(UserIdentity actor,UUID chat,UUID id,String action) { tx.required(() -> {
+    public void action(UserIdentity actor,UUID chat,UUID id,String action) {
+        if ("DELETE".equals(action) && lifecycle != null) {
+            lifecycle.deleteDocument(actor.id(), chat, id);
+            return;
+        } tx.required(() -> {
         var s=new Jobs.Scope(actor.id(),chat);store.lock(s);var e=store.get(s,id);
         if(action.equals("DELETE")) {
             if(!e.deleted()) {

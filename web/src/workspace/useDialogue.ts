@@ -99,6 +99,8 @@ export function useDialogue(user: Ref<User | null>, selectTask: (id: string) => 
     const stamp = ticket; await list(stamp); if (stamp !== ticket || !user.value) return;
     const saved = sessionStorage.getItem(`travel.chat.${id}`); if (saved) await open(saved);
   });
+  /** 删除当前聊天后清除迟到请求、重试闭包和会话恢复指针。 */
+  function forget(): void {if (user.value) sessionStorage.removeItem(`travel.chat.${user.value.id}`); clear();}
   onUnmounted(clear);
-  return { chats, current, selected, busy, error, retryable, offset, open, start, send, attach, act, refresh, retryCommand, page, list };
+  return { chats, current, selected, busy, error, retryable, offset, open, start, send, attach, act, refresh, retryCommand, page, list, forget };
 }

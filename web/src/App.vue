@@ -5,6 +5,7 @@ import PreferencePanel from "./components/PreferencePanel.vue";
 import ChatComposer from "./components/ChatComposer.vue";
 import SourcePreview from "./components/SourcePreview.vue";
 import DocumentPanel from "./components/DocumentPanel.vue";
+import LifecycleDelete from "./components/LifecycleDelete.vue";
 import ReportProblem from "./components/ReportProblem.vue";
 import SupportPanel from "./components/SupportPanel.vue";
 import AdvicePanel from "./components/AdvicePanel.vue";
@@ -49,6 +50,7 @@ const {
   refresh,
   createTask,
   newConversation,
+  forgetDeleted,
   send,
   answer,
   accept,
@@ -278,6 +280,11 @@ function startConversation(): void {
   sidebarOpen.value = false;
   message.value = "";
   void nextTick(() => composer.value?.focus());
+}
+/** 删除后清除聊天、行程及恢复指针；重新读取列表不重新执行规划。 */
+async function deletedConversation(): Promise<void> {
+  dialogue.forget(); forgetDeleted(); detailsOpen.value = false;
+  await dialogue.list(); await pageTasks(0);
 }
 /** @param id 本人任务；切换只读取，不重新执行规划。 */
 async function openTask(id: string): Promise<void> {
@@ -573,6 +580,7 @@ onMounted(initialize);
             <h1>{{ chatView?.chat.title ?? (selected ? taskTitle : "新对话") }}</h1>
             <span class="header-badge">旅行助手</span>
           </div>
+          <LifecycleDelete v-if="chatSelected || selected" :key="chatSelected || selected" :kind="chatSelected ? 'CHAT' : 'TASK'" :target="chatSelected || selected" @deleted="deletedConversation"/>
           <button
             v-if="selected"
             class="quiet details-toggle"

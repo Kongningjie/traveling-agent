@@ -7,8 +7,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -35,6 +33,9 @@ import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+import java.util.List;
 
 /** local 账号认证边界；仅开放明确路由，后续未知业务接口继续默认拒绝。 */
 @Configuration(proxyBeanMethods = false)
@@ -111,7 +112,16 @@ public class IdentitySecurityConfiguration {
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/artifacts/*").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.GET,"/api/v1/support/access","/api/v1/support/feedback","/api/v1/support/feedback/*","/api/v1/support/maintenance/groups","/api/v1/support/maintenance/groups/*","/api/v1/support/maintenance/groups/*/events","/api/v1/support/maintenance/traces/*","/api/v1/support/maintenance/feedback/*","/api/v1/support/maintenance/health").authenticated()
                         .requestMatchers(org.springframework.http.HttpMethod.POST,"/api/v1/support/feedback","/api/v1/support/client","/api/v1/support/maintenance/groups/*").authenticated()
-                        .anyRequest().denyAll())
+                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.GET,
+                                                "/api/v1/lifecycle/preview",
+                                                "/api/v1/lifecycle/health")
+                                        .authenticated()
+                                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.POST,
+                                                "/api/v1/lifecycle/deletions")
+                                        .authenticated()
+                                        .anyRequest().denyAll())
                 .securityContext(context -> context.requireExplicitSave(true).securityContextRepository(contexts))
                 .csrf(csrf -> csrf.csrfTokenRepository(tokens).csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .requestCache(AbstractHttpConfigurer::disable).formLogin(AbstractHttpConfigurer::disable).httpBasic(AbstractHttpConfigurer::disable)

@@ -1,5 +1,8 @@
 package com.lawrence.travel.bootstrap;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import com.lawrence.travel.application.artifact.ArtifactService;
 import com.lawrence.travel.application.interaction.NegotiationService;
 import com.lawrence.travel.application.port.AccountStore;
@@ -9,6 +12,14 @@ import com.lawrence.travel.application.port.ExecutionEngineStore;
 import com.lawrence.travel.domain.identity.UserIdentity;
 import com.lawrence.travel.domain.travel.TaskScope;
 import com.lawrence.travel.infrastructure.artifact.VolumeArtifactFiles;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -20,15 +31,6 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.junit.jupiter.api.io.TempDir;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 真实PostgreSQL与文件系统的索引、锁、完整性、原工作区丢弃以及备份恢复演练；无真实外部调用。 */
 @EnabledIfEnvironmentVariable(named = "TRAVEL_INTEGRATION_TESTS", matches = "true")
@@ -144,7 +146,9 @@ class ArtifactIntegrationTest {
     }
     /** @param script 固定本地脚本 @param action 备份或验证 @param directory 本轮临时目录 @param backup 是否传入宿主机文件根 @param success 是否预期成功；子进程输出丢弃，不含凭据参数 */
     private void runBackup(Path script, String action, Path directory, boolean backup, boolean success) throws Exception {
-        var command = new ArrayList<>(List.of("pwsh", "-NoProfile", "-File", script.toString(), "-Action", action, "-Directory", directory.toString())); if (backup) command.addAll(List.of("-FilesDirectory", root.resolve("files").toString(), "-Quiesced"));
+        var command = new ArrayList<>(List.of("pwsh", "-NoProfile", "-File", script.toString(), "-Action", action, "-Directory", directory.toString(),
+                                "-BackupRoot",
+                                root.toString())); if (backup) command.addAll(List.of("-FilesDirectory", root.resolve("files").toString(), "-Quiesced"));
         var process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
         try { assertThat(process.waitFor(120, TimeUnit.SECONDS)).isTrue(); assertThat(process.exitValue() == 0).as("本地备份/恢复脚本退出状态符合预期").isEqualTo(success); }
         finally { if (process.isAlive()) process.destroyForcibly(); }

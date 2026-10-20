@@ -1,5 +1,8 @@
 package com.lawrence.travel.bootstrap;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import com.lawrence.travel.application.execution.StageOutput;
 import com.lawrence.travel.application.execution.StagePlan;
 import com.lawrence.travel.application.itinerary.ItineraryService;
@@ -24,6 +27,14 @@ import com.lawrence.travel.infrastructure.itinerary.PostgresCandidateStore;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
 import com.lawrence.travel.infrastructure.travel.TravelJson;
 import com.lawrence.travel.infrastructure.travel.TravelMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
@@ -35,15 +46,6 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 真实 PostgreSQL 报告、接受及可靠重校验事务；审核产物为显式本地替身，没有供应商调用。 */
 @EnabledIfEnvironmentVariable(named = "TRAVEL_INTEGRATION_TESTS", matches = "true")
@@ -361,4 +363,46 @@ class CandidateAcceptanceIntegrationTest {
         var f = fixture(false); present(f);
         assertThatThrownBy(() -> jdbc.update("UPDATE itinerary_report SET body=body WHERE user_id=?", f.actor().id())).isInstanceOf(org.springframework.dao.DataAccessException.class);
     }
+
+    @Autowired private com.lawrence.travel.application.lifecycle.LifecycleService lifecycle;
+
+    /** 已接受行程的循环外键、报告、阶段产物和接受幂等记录整体删除；不能只验证空任务。 */
+    @Test
+    void deletingAcceptedTripRemovesFullGraph() {
+        var f = fixture(false);
+        present(f);
+        accept(itineraries, f, UUID.randomUUID());
+        assertThat(current(f)).isEqualTo(f.version().snapshotId());
+        var p =
+                lifecycle.preview(
+                        f.actor().id(),
+                        com.lawrence.travel.application.lifecycle.Lifecycle.Kind.TASK,
+                        f.scope().taskId());
+        lifecycle.delete(
+                f.actor().id(),
+                UUID.randomUUID(),
+                com.lawrence.travel.application.lifecycle.Lifecycle.Kind.TASK,
+                f.scope().taskId(),
+                p.revision(),
+                true);
+        for (var table :
+                List.of(
+                        "travel_task",
+                        "itinerary_snapshot",
+                        "execution_run",
+                        "itinerary_candidate",
+                        "itinerary_report",
+                        "itinerary_acceptance",
+                        "artifact_record",
+                        "execution_step",
+                        "step_attempt",
+                        "outbox_event"))
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM " + table + " WHERE user_id=?",
+                                    Integer.class,
+                                    f.actor().id()))
+                    .as(table)
+                    .isZero();
+}
 }

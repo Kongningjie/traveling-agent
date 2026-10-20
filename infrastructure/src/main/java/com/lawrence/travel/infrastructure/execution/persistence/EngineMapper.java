@@ -1,13 +1,14 @@
 package com.lawrence.travel.infrastructure.execution.persistence;
 
 import com.lawrence.travel.domain.travel.TaskScope;
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * 引擎显式 SQL；提示查询无锁，所有写事务按任务→运行→阶段→事件锁序执行。
@@ -141,11 +142,38 @@ public interface EngineMapper {
      */
     @Update("UPDATE execution_run SET body=CAST(#{body} AS jsonb),active_since=#{activeSince,jdbcType=TIMESTAMP_WITH_TIMEZONE} WHERE user_id=#{scope.userId} AND task_id=#{scope.taskId} AND id=#{id}")
     int updateRun(@Param("scope") TaskScope scope, @Param("id") UUID id, @Param("body") String body, @Param("activeSince") Instant activeSince);
+
     /**
+     *
      * @return 当前活动运行数；领取互斥内使用
      */
-    @Select("SELECT count(*) FROM execution_run WHERE state='RUNNING'") int activeRuns();
+    @Select(
+            "SELECT count(DISTINCT run_id) FROM outbox_event WHERE status='LEASED' AND"
+                + " lease_until>clock_timestamp()") int activeRuns();
+
     /**
+     * @param user 当前归属
+     * @param run 本运行
+     * @return 其他实际有效旅行/聊天工作数
+     */
+    @Select(
+            "SELECT (SELECT count(DISTINCT run_id) FROM outbox_event WHERE user_id=#{user} AND"
+                + " run_id<>#{run} AND status='LEASED' AND lease_until>clock_timestamp())+(SELECT"
+                + " count(*) FROM background_job WHERE user_id=#{user} AND kind<>'DOCUMENT_PARSE'"
+                + " AND state='RUNNING' AND lease_until>clock_timestamp())")
+    int otherUserWork(@Param("user") UUID user, @Param("run") UUID run);
+
+    /**
+     * @return 共享模型工作物理租约数量，解析不占模型槽
+     */
+    @Select(
+            "SELECT (SELECT count(DISTINCT run_id) FROM outbox_event WHERE status='LEASED' AND"
+                + " lease_until>clock_timestamp())+(SELECT count(*) FROM background_job WHERE"
+                + " kind<>'DOCUMENT_PARSE' AND state='RUNNING' AND lease_until>clock_timestamp())")
+    int activeWork();
+
+    /**
+     *
      * @param scope 归属
      * @param input 原因
      * @return 稳定启动结果
@@ -219,14 +247,18 @@ public interface EngineMapper {
      * @param limit 提示数量
      * @return 未领取的到期事件
      */
-    @Select("""
-            SELECT e.user_id,e.task_id,e.run_id,e.step_id,e.id AS event_id,s.type FROM outbox_event e
+    @Select(
+            """
+            WITH p AS(SELECT e.*,s.type,row_number() OVER(PARTITION BY e.user_id ORDER BY e.available_at,e.id) AS rank FROM outbox_event e
             JOIN execution_step s ON s.id=e.step_id JOIN execution_run r ON r.id=e.run_id
-            WHERE e.status IN ('READY','RETRY_WAIT') AND e.available_at<=clock_timestamp()
-            AND r.state IN ('QUEUED','RUNNING') ORDER BY e.available_at,e.id LIMIT #{limit}
+            WHERE e.status IN ('READY','RETRY_WAIT') AND e.available_at<=clock_timestamp() AND r.state IN ('QUEUED','RUNNING'))
+            SELECT p.user_id,p.task_id,p.run_id,p.step_id,p.id AS event_id,p.type FROM p LEFT JOIN dispatch_turn d ON d.user_id=p.user_id
+            ORDER BY p.rank,COALESCE(d.last_turn,0),p.available_at,p.id LIMIT #{limit}
             """)
     List<HintRow> candidates(@Param("limit") int limit);
+
     /**
+     *
      * @param limit 上限
      * @return 到期租约的无锁提示
      */

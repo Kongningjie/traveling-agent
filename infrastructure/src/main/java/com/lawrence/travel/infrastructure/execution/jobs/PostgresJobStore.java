@@ -5,6 +5,9 @@ import com.lawrence.travel.application.execution.JobPolicy;
 import com.lawrence.travel.application.execution.Jobs;
 import com.lawrence.travel.application.port.JobStore;
 import com.lawrence.travel.domain.execution.BackgroundJob;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.ZoneId;
@@ -13,8 +16,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /** 用户→聊天→作业→预算短事务；处理器在事务外运行，租约围栏为唯一提交资格。
  * 业务ID不可变，归属／作业行使用NO KEY UPDATE串行变更，允许计量FK的KEY SHARE，避免预算锁与归属锁反向等待。
@@ -30,9 +31,30 @@ public final class PostgresJobStore implements JobStore {
     private final DiagnosticMapper diagnostics;
     private final QuotaMapper quotas;
     private final JobPolicy policy;
+    private final int maximumWorks;
     private final TransactionTemplate tx;
     /** @param mapper 作业SQL @param diagnostics 脱敏记录 @param quotas 日配额 @param policy 上限 @param manager 同数据源事务 */
     public PostgresJobStore(JobMapper mapper, DiagnosticMapper diagnostics, QuotaMapper quotas, JobPolicy policy, PlatformTransactionManager manager) {
+        this(mapper, diagnostics, quotas, policy, manager, 2);
+    }
+
+    /**
+     * @param mapper 作业SQL
+     * @param diagnostics 诊断
+     * @param quotas 日配额
+     * @param policy 输入限额
+     * @param manager PG事务
+     * @param maximumWorks 沿用配置的全局模型工作上限
+     */
+    public PostgresJobStore(
+            JobMapper mapper,
+            DiagnosticMapper diagnostics,
+            QuotaMapper quotas,
+            JobPolicy policy,
+            PlatformTransactionManager manager,
+            int maximumWorks) {
+        if (maximumWorks < 1) throw new IllegalArgumentException("INVALID_GLOBAL_CAPACITY");
+        this.maximumWorks = maximumWorks;
         this.mapper = mapper; this.diagnostics = diagnostics; this.quotas = quotas; this.policy = policy; this.tx = new TransactionTemplate(manager);
     }
     /** {@inheritDoc} 同身份异参数拒绝；上下文、预算与作业一起提交。 */
@@ -55,8 +77,15 @@ public final class PostgresJobStore implements JobStore {
     @Override public Jobs.View read(Jobs.Scope scope, UUID id) { return transaction(() -> { lock(scope); return view(required(scope, id)); }); }
     /** {@inheritDoc} 每个发现提示分别事务，避免跨用户累计锁形成反向锁序。 */
     @Override public Optional<Jobs.Claim> claim(Set<BackgroundJob.Kind> kinds) {
+        return claim(kinds, Set.of());
+    }
+
+    /** {@inheritDoc} 全局轮转提示仍逐个用户短事务，排除在途取消者。 */
+    @Override
+    public Optional<Jobs.Claim> claim(Set<BackgroundJob.Kind> kinds, Set<UUID> excluded) {
         if (kinds.isEmpty()) return Optional.empty();
-        for (var hint : mapper.hints(kinds)) { var found = claim(new Jobs.Scope(hint.userId(), hint.chatId()), hint.id()); if (found.isPresent()) return found; }
+        for (var hint : mapper.hints(kinds)) {
+            if (excluded.contains(hint.userId())) continue; var found = claim(new Jobs.Scope(hint.userId(), hint.chatId()), hint.id()); if (found.isPresent()) return found; }
         return Optional.empty();
     }
     /** {@inheritDoc} 过期尝试先结算；等待用户不占租约；缺少处理器的类型不会被发现。 */
@@ -76,10 +105,14 @@ public final class PostgresJobStore implements JobStore {
         if (row.state() == BackgroundJob.State.RUNNING) move(scope, row, BackgroundJob.State.QUEUED, "LEASE_EXPIRED", false, null);
         row = required(scope, id);
         if (row.attempts() >= 3) { move(scope, row, BackgroundJob.State.PAUSED, "ATTEMPTS_EXHAUSTED", false, null); return Optional.empty(); }
+        if (mapper.earlier(scope, id)) return Optional.empty();
         if (mapper.operationActive(row.operationId()) > 0) return Optional.empty();
         boolean parser = row.kind() == BackgroundJob.Kind.DOCUMENT_PARSE;
         var quotaDay = mapper.now().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate();
         if (mapper.activeCount(scope.userId(), parser) > 0) return Optional.empty();
+        if (!parser && (!mapper.modelDispatch()
+                || mapper.travelWork(scope.userId()) > 0
+                || mapper.modelWork() >= maximumWorks)) return Optional.empty();
         if (parser) {
             mapper.dispatch(); if (mapper.parses() > 0) return Optional.empty();
             quotas.create(scope.userId(), quotaDay, "PARSE");
@@ -152,7 +185,11 @@ public final class PostgresJobStore implements JobStore {
     /** @param row 数据行 @return 不暴露参数的状态 */
     private Jobs.View view(JobMapper.Row row) { return new Jobs.View(row.id(), row.operationId(), row.budgetId(), row.kind(), row.state(), row.token(), row.version(), row.leaseUntil(), row.traceId(), row.requestId(), row.error()); }
     /** @param work 短事务 @param <T> 结果 @return 提交后结果；可加入外层业务事务 */
-    private <T> T transaction(Supplier<T> work) { return tx.execute(status -> work.get()); }
+    private <T> T transaction(Supplier<T> work) {
+        try { return tx.execute(status -> work.get()); } catch (org.springframework.dao.DataAccessException failure) {
+            com.lawrence.travel.infrastructure.execution.AdmissionErrors.rethrowKnown(failure);
+            throw new IllegalStateException("JOB_STORAGE_UNAVAILABLE");
+        } }
     /** @param value 固定大写码 @return 合法分类，拒绝任意异常消息 */
     private String code(String value) { if (value == null || value.isEmpty()) return ""; if (!value.matches("[A-Z][A-Z0-9_]{0,63}")) throw new IllegalArgumentException("INVALID_ERROR_CODE"); return value; }
     /** @param text 有界参数 @return SHA256，不输出正文 */

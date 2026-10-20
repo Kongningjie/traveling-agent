@@ -1,11 +1,12 @@
 package com.lawrence.travel.infrastructure.execution.persistence;
 
 import com.lawrence.travel.application.port.BusinessTransactions;
-import java.util.function.Supplier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.function.Supplier;
 
 /**
  * 同一 PostgreSQL 业务事务及提交回调适配；不使用隐式新事务绕过调用方锁。
@@ -22,6 +23,7 @@ public final class SpringBusinessTransactions implements BusinessTransactions {
     @Override public <T> T required(Supplier<T> work) {
         try { return transaction.execute(status -> work.get()); }
         catch (org.springframework.dao.DataAccessException | org.springframework.transaction.TransactionException failure) {
+            com.lawrence.travel.infrastructure.execution.AdmissionErrors.rethrowKnown(failure);
             throw new com.lawrence.travel.application.travel.TravelStorageFailure(com.lawrence.travel.application.travel.TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE);
         }
     }

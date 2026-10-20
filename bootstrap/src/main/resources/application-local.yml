@@ -45,3 +45,7 @@ travel:
   documents:
     root: ${TRAVEL_DOCUMENTS_ROOT:.runtime/documents}
     runner: ${DOCUMENT_RUNNER_URL:http://127.0.0.1:8766}
+
+# 独立最新删除清单不随业务备份回滚；丢失时拒绝启动旧资料服务。
+travel.deletions.root: ${TRAVEL_DELETION_ROOT:.runtime/lifecycle}
+travel.backups.root: ${TRAVEL_BACKUP_ROOT:.runtime/backups}

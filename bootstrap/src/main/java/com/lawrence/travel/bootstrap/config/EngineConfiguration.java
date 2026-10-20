@@ -12,12 +12,13 @@ import com.lawrence.travel.infrastructure.execution.persistence.PostgresExecutio
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
 import com.lawrence.travel.infrastructure.travel.TravelJson;
 import com.lawrence.travel.infrastructure.travel.TravelMapper;
-import java.time.Duration;
-import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+
+import java.time.Duration;
+import java.util.List;
 
 /**
  * 本地单实例执行引擎；没有注册业务处理器时不派发阶段，外部调用开关仍独立关闭。
@@ -58,14 +59,22 @@ public class EngineConfiguration {
      * @param resources 物理容量
      * @param controls 初始上限
      * @param enabled 是否启动轮询
+     * @param lifecycle 最新删除清单恢复屏障
+     * @param storage 部署容量水位
      * @return 后台阶段调度，关闭时停止领取
      */
+    @org.springframework.context.annotation.DependsOn("lifecycleReady")
     @Bean(destroyMethod = "close") PersistentStageWorker persistentStageWorker(ExecutionEngineStore store, StageExecutor executor,
-            ExecutionResources resources, ExecutionControlProperties controls, @Value("${travel.engine.enabled:true}") boolean enabled) {
+            ExecutionResources resources, ExecutionControlProperties controls, @Value("${travel.engine.enabled:true}") boolean enabled,
+            com.lawrence.travel.application.lifecycle.LifecycleService lifecycle,
+            com.lawrence.travel.application.port.StorageAdmission storage) {
         var worker = new PersistentStageWorker(store, executor, resources, controls.limits().researchConcurrencyPerRun(), Duration.ofSeconds(15));
+        worker.readiness(() -> lifecycle.ready() && storage.accepting());
         if (enabled) worker.start(); return worker;
     }
+
     /**
+     *
      * @param store 执行权威
      * @param transactions 同源事务
      * @param worker 尽力取消句柄

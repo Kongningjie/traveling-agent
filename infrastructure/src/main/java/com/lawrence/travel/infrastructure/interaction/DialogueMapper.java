@@ -1,13 +1,14 @@
 package com.lawrence.travel.infrastructure.interaction;
 
 import com.lawrence.travel.application.interaction.Dialogue;
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 /** 独立聊天SQL；用户、任务、聊天、输入依次加锁，所有私有查询限定用户。 */
 public interface DialogueMapper {
@@ -69,7 +70,15 @@ public interface DialogueMapper {
     @Select("SELECT EXISTS(SELECT 1 FROM dialogue_chat c JOIN dialogue_input i ON i.chat_id=c.id AND i.user_id=c.user_id WHERE c.user_id=#{user} AND c.task_id=#{task} AND i.state IN ('QUEUED','RUNNING','CLARIFY','PAUSED'))")
     boolean blocked(@Param("user") UUID user, @Param("task") UUID task);
     /** @return 待处理聊天的用户及ID，只作为发现提示，领取仍须复查 */
-    @Select("SELECT DISTINCT c.user_id,c.id FROM dialogue_chat c JOIN dialogue_input i ON i.chat_id=c.id AND i.user_id=c.user_id WHERE i.state='QUEUED' OR (i.state='RUNNING' AND i.lease_until < clock_timestamp()) ORDER BY c.user_id,c.id LIMIT 32")
+    @Select(
+            "WITH pending AS (SELECT c.user_id,c.id,min(i.received_at) AS"
+                + " created_at,COALESCE(d.last_turn,0) AS turn FROM dialogue_chat c JOIN"
+                + " dialogue_input i ON i.chat_id=c.id AND i.user_id=c.user_id LEFT JOIN"
+                + " dispatch_turn d ON d.user_id=c.user_id WHERE i.state='QUEUED' OR"
+                + " (i.state='RUNNING' AND i.lease_until < clock_timestamp()) GROUP BY"
+                + " c.user_id,c.id,d.last_turn), ranked AS (SELECT *,row_number() OVER(PARTITION BY"
+                + " user_id ORDER BY created_at,id) AS rank FROM pending) SELECT user_id,id FROM"
+                + " ranked ORDER BY rank,turn,created_at,id LIMIT 32")
     List<Hint> hints();
     /** @param userId 权威用户 @param id 聊天 */
     record Hint(UUID userId, UUID id) { }
@@ -78,16 +87,17 @@ public interface DialogueMapper {
     Row next(@Param("user") UUID user, @Param("chat") UUID chat);
     /** @param user 用户 @param chat 聊天 @param id 输入 @param force 正常结束或显式撤回 @param full 撤回后调用可能仍在途，保守计完整租约
      * @return 首次结算更新数；失联仅计到租约到期，不计服务停机等待时间 */
-    @Update("""
-        WITH accounted AS (
-          UPDATE execution_budget b SET active_millis=b.active_millis+GREATEST(0,CEIL(EXTRACT(EPOCH FROM (
-            (CASE WHEN #{full} THEN i.lease_until ELSE LEAST(clock_timestamp(),i.lease_until) END)-i.active_since))*1000))::bigint
-          FROM dialogue_chat c,dialogue_input i
-          WHERE b.run_id=c.budget_id AND c.user_id=#{user} AND c.id=#{chat} AND i.user_id=c.user_id AND i.chat_id=c.id AND i.id=#{id}
-            AND i.job_id IS NULL AND i.active_since IS NOT NULL AND (#{force} OR (i.state='RUNNING' AND i.lease_until<clock_timestamp()))
-          RETURNING b.run_id
-        ) UPDATE dialogue_input SET active_since=NULL WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id} AND EXISTS(SELECT 1 FROM accounted)
-        """)
+    @Update(
+            """
+            WITH accounted AS (
+              UPDATE execution_budget b SET active_millis=b.active_millis+GREATEST(0,CEIL(EXTRACT(EPOCH FROM (
+                (CASE WHEN #{full} THEN i.lease_until ELSE LEAST(clock_timestamp(),i.lease_until) END)-i.active_since))*1000))::bigint
+              FROM dialogue_chat c,dialogue_input i
+              WHERE b.run_id=c.budget_id AND c.user_id=#{user} AND c.id=#{chat} AND i.user_id=c.user_id AND i.chat_id=c.id AND i.id=#{id}
+                AND i.job_id IS NULL AND i.active_since IS NOT NULL AND (#{force} OR (i.state='RUNNING' AND i.lease_until<clock_timestamp()))
+              RETURNING b.run_id
+            ) UPDATE dialogue_input SET active_since=NULL WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id} AND EXISTS(SELECT 1 FROM accounted)
+            """)
     int settle(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id, @Param("force") boolean force, @Param("full") boolean full);
     /** @param c 原领取 @return 是否仍有提交资格 */
     @Select("SELECT EXISTS(SELECT 1 FROM dialogue_input WHERE user_id=#{c.userId} AND chat_id=#{c.chatId} AND id=#{c.messageId} AND state='RUNNING' AND token=#{c.token} AND lease_until>clock_timestamp())")

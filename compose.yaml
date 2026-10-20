@@ -51,6 +51,8 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?请设置 REDIS_PASSWORD}
       TRAVEL_ARTIFACTS_ROOT: /var/lib/traveling-agent/artifacts
+      TRAVEL_BACKUP_ROOT: /var/lib/traveling-agent/backups
+      TRAVEL_DELETION_ROOT: /var/lib/traveling-agent/lifecycle
       TRAVEL_DOCUMENTS_ROOT: /var/lib/traveling-agent/documents
       DOCUMENT_RUNNER_URL: http://host.docker.internal:8766
       DOCUMENT_PARSER_SECRET: ${DOCUMENT_PARSER_SECRET:-}
@@ -67,6 +69,8 @@ services:
     volumes:
       - agent-files:/var/lib/traveling-agent
       - ./.runtime/documents:/var/lib/traveling-agent/documents
+      - ./.runtime/lifecycle:/var/lib/traveling-agent/lifecycle
+      - ./.runtime/backups:/var/lib/traveling-agent/backups
     depends_on:
       postgres:
         condition: service_healthy

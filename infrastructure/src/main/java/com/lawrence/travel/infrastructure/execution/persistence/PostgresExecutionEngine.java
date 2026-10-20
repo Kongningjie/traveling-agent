@@ -1,11 +1,16 @@
 package com.lawrence.travel.infrastructure.execution.persistence;
 
+import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE;
+import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.IDEMPOTENCY_CONFLICT;
+import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.INVALID_INPUT;
+import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.NOT_FOUND;
+
 import com.lawrence.travel.application.execution.StageCommitCommand;
 import com.lawrence.travel.application.execution.StageOutput;
 import com.lawrence.travel.application.execution.StagePlan;
 import com.lawrence.travel.application.port.ExecutionEngineStore;
-import com.lawrence.travel.application.port.TravelStore;
 import com.lawrence.travel.application.port.StageProjection;
+import com.lawrence.travel.application.port.TravelStore;
 import com.lawrence.travel.application.travel.TravelStorageFailure;
 import com.lawrence.travel.domain.execution.ExecutionFence;
 import com.lawrence.travel.domain.execution.ExecutionLease;
@@ -19,12 +24,16 @@ import com.lawrence.travel.domain.execution.control.RunLimits;
 import com.lawrence.travel.domain.interaction.DecisionAnswer;
 import com.lawrence.travel.domain.interaction.DecisionRequest;
 import com.lawrence.travel.domain.rule.DomainViolation;
-import com.lawrence.travel.domain.travel.TaskScope;
 import com.lawrence.travel.domain.travel.ConstraintRevision;
+import com.lawrence.travel.domain.travel.TaskScope;
 import com.lawrence.travel.domain.travel.TravelTask;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
 import com.lawrence.travel.infrastructure.travel.TravelJson;
 import com.lawrence.travel.infrastructure.travel.TravelMapper;
+
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,13 +43,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
-import org.springframework.dao.DataAccessException;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE;
-import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.IDEMPOTENCY_CONFLICT;
-import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.INVALID_INPUT;
-import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.NOT_FOUND;
 
 /**
  * 唯一数据库执行引擎；短事务只做状态与产物提交，没有网络调用。
@@ -156,7 +158,8 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
             if (exhausted(session)) { pause(session, Failure.BUDGET); return Optional.empty(); }
             int active = mapper.leased(session.run.id());
             if (session.run.state() != ExecutionRun.State.QUEUED && session.run.state() != ExecutionRun.State.RUNNING) return Optional.empty();
-            if (active == 0 && mapper.activeRuns() >= maximumRuns) return Optional.empty();
+            if (active == 0 && (mapper.activeWork() >= maximumRuns
+                    || mapper.otherUserWork(hint.scope().userId(), hint.runId()) > 0)) return Optional.empty();
             ExecutionStep step = step(session, event.stepId());
             StagePlan definition = definition(session, step.id());
             if (active > 0 && (step.key().type() != StageType.RESEARCH || active >= maximumResearch)) return Optional.empty();

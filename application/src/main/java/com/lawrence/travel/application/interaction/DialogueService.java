@@ -84,7 +84,26 @@ public final class DialogueService implements BackgroundWorkSource {
     /** @param actor 已认证用户 @param chat 新聊天幂等身份 @param task 历史私有旅行 @return 原有或新关联聊天，历史任务不绕过意图理解 */
     public Dialogue.View attach(UserIdentity actor, UUID chat, UUID task) { return transactions.required(() -> store.read(actor.id(), store.attach(actor.id(), chat, task).id())); }
     /** {@inheritDoc} 由既有Worker取得运行容量后调用，领取事务不跨模型调用。 */
-    @Override public Optional<Runnable> claimWork() { return transactions.required(store::claim).map(c -> new com.lawrence.travel.application.port.BackgroundWorkSource.LeasedWork() {
+    @Override public Optional<Runnable> claimWork() { return claimed( transactions.required(store::claim));
+    }
+
+    /** {@inheritDoc} 领取前排除仍持物理槽的用户，不靠取消后数据库终态提前放行。 */
+    @Override
+    public Optional<Runnable> claimWorkExcluding(java.util.Set<UUID> excluded) {
+        return claimed(transactions.required(() -> store.claimExcluding(excluded)));
+    }
+
+    /**
+     * @param selected 原输入
+     * @return 维持关联和心跳的实际工作
+     */
+    private Optional<Runnable> claimed(Optional<Dialogue.Claim> selected) {
+        return selected.map(c -> new com.lawrence.travel.application.port.BackgroundWorkSource.LeasedWork() {
+                            /** {@inheritDoc} 使用权威输入归属。 */
+                            @Override
+                            public UUID userId() {
+                                return c.userId();
+                            }
         /** 原输入续租，不授予新预算或业务版本。 */
         @Override public boolean renew() { return transactions.required(() -> store.renew(c)); }
         /** 异步执行显式绑定持久关联身份；业务提交仍由原领取资格控制。 */

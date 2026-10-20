@@ -1,4 +1,8 @@
 package com.lawrence.travel.bootstrap;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import com.lawrence.travel.application.document.DocumentService;
 import com.lawrence.travel.application.document.Documents;
 import com.lawrence.travel.application.execution.Jobs;
@@ -9,25 +13,21 @@ import com.lawrence.travel.application.port.JobStore;
 import com.lawrence.travel.application.port.ParserProcessPort;
 import com.lawrence.travel.domain.execution.BackgroundJob;
 import com.lawrence.travel.domain.identity.UserIdentity;
-import java.util.List;
-import java.util.UUID;
-import java.util.ArrayList;
-import java.nio.file.Path;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.jdbc.core.JdbcTemplate;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.when;
-import static org.mockito.ArgumentMatchers.any;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 /** 真实本机PG及文件系统；解析器明确替身，不访问模型或网络服务。 */
 @EnabledIfEnvironmentVariable(named="TRAVEL_INTEGRATION_TESTS",matches="true")
 @ActiveProfiles("local") @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"travel.engine.enabled=false","travel.documents.cleanup-enabled=false"})
@@ -145,13 +145,49 @@ class DocumentIntegrationTest {
         var u=actor();var chat=UUID.randomUUID();var d=upload(u,chat);var entry=store.get(new Jobs.Scope(u.id(),chat),d.id());java.nio.file.Files.writeString(ROOT.resolve(entry.key()),"modified");assertThatThrownBy(()->service.download(u,chat,d.id())).hasMessage("DOCUMENT_CORRUPT");
     }
 
-    /** 在临时数据库／卷实际恢复文档元数据、PG正文与原件；只核对状态，不保留脚本控制台。 */
+    /** 旧备份恢复先重放备份之后的删除；最新清单缺失拒绝恢复，不保留脚本控制台。 */
     @Test void backupRestoresUploadedOriginalAndPgReport() throws Exception {
         var u=actor();var chat=UUID.randomUUID();var d=upload(u,chat);var c=claim(u,chat,d.id());service.commit(c,service.execute(c),()->{});
         Path script=Path.of("scripts/backup-local.ps1").toAbsolutePath();if(!java.nio.file.Files.exists(script))script=Path.of("../scripts/backup-local.ps1").toAbsolutePath().normalize();Path backupParent=java.nio.file.Files.createTempDirectory("travel-document-backup-");Path backup=backupParent.resolve("backup");
         try {
-        for(String action:List.of("Backup","Verify")) {var command=new ArrayList<>(List.of("pwsh","-NoProfile","-File",script.toString(),"-Action",action,"-Directory",backup.toString()));if(action.equals("Backup"))command.addAll(List.of("-DocumentsDirectory",ROOT.toString(),"-Quiesced"));var process=new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();try {assertThat(process.waitFor(120,java.util.concurrent.TimeUnit.SECONDS)).isTrue();assertThat(process.exitValue()).isZero();}finally{if(process.isAlive())process.destroyForcibly();}}
-        assertThat(service.list(u,chat).getFirst().state()).isEqualTo("READY");
+        for(String action:List.of("Backup","Verify")) {
+                if (action.equals("Verify")) service.action(u, chat, d.id(), "DELETE");var command=new ArrayList<>(List.of("pwsh","-NoProfile","-File",script.toString(),"-Action",action,"-Directory",backup.toString(),
+                                        "-BackupRoot",
+                                        backupParent.toString()));if(action.equals("Backup"))command.addAll(List.of("-DocumentsDirectory",ROOT.toString(),"-Quiesced"));var process=new ProcessBuilder(command).redirectErrorStream(true).start();try {assertThat(process.waitFor(120,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                    String result =
+                            new String(
+                                    process.getInputStream().readAllBytes(),
+                                    java.nio.charset.StandardCharsets.UTF_8);
+                    var codes =
+                            java.util.regex.Pattern.compile(
+                                            "(?:LATEST_DELETIONS|LOCAL_BACKUP|BACKUP|DOCUMENT_BACKUP|RESTORE|DOCUMENT_RESTORE|DELETED_RESTORE)_[A-Z_]+")
+                                    .matcher(result)
+                                    .results()
+                                    .map(java.util.regex.MatchResult::group)
+                                    .distinct()
+                                    .toList();assertThat(process.exitValue())
+                            .withFailMessage("BACKUP_FIXTURE_%s_%s", action, codes).isZero();}finally{if(process.isAlive())process.destroyForcibly();}}
+            assertThatThrownBy(() ->service.download(u,chat, d.id())).hasMessage("DOCUMENT_NOT_FOUND");
+            var missing =
+                    new ProcessBuilder(
+                                    "pwsh",
+                                    "-NoProfile",
+                                    "-File",
+                                    script.toString(),
+                                    "-Action",
+                                    "Verify",
+                                    "-Directory",
+                                    backup.toString(),
+                                    "-DeletionDirectory",
+                                    backupParent.resolve("missing-latest").toString()).redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                            .redirectError(ProcessBuilder.Redirect.DISCARD)
+                            .start();
+            try {
+                assertThat(missing.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(missing.exitValue()).isNotZero();
+            } finally {
+                if (missing.isAlive()) missing.destroyForcibly();
+            }
         } finally {
             if(!backupParent.toRealPath().getFileName().toString().startsWith("travel-document-backup-"))throw new IllegalStateException("TEST_CLEAN_PATH_INVALID");
             try(var paths=java.nio.file.Files.walk(backupParent)) {for(var p:paths.sorted(java.util.Comparator.reverseOrder()).toList())java.nio.file.Files.delete(p);}

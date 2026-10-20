@@ -6,7 +6,9 @@ export class ApiError extends Error {
   /** @param status HTTP状态，0表示网络结果不明，不自动重发写请求。 */
   constructor(status: number) {
     super(
-      status === 409
+      status === 429
+        ? "当前容量已达上限，请等待或停止部分任务；仍可读取和删除。"
+        : status === 409
         ? "状态已更新，请刷新后重新确认。"
         : status === 401 || status === 403
           ? "登录已失效或请求被拒绝，请重新登录。"

@@ -7,12 +7,13 @@ import com.lawrence.travel.domain.travel.TaskScope;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
 import com.lawrence.travel.infrastructure.travel.TravelJson;
 import com.lawrence.travel.infrastructure.travel.TravelMapper;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 聊天和理解请求共用PostgreSQL事务；加锁从用户到任务，不与候选接受形成反向锁序。 */
 public final class PostgresDialogueStore implements DialogueStore {
@@ -71,8 +72,15 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
     /** {@inheritDoc} 同聊天串行，领取使用用户锁与输入租约，恢复不创建新的预算身份。 */
     @Override public Optional<Dialogue.Claim> claim() {
+        return claimExcluding(java.util.Set.of());
+    }
+
+    /** {@inheritDoc} 在取得用户锁之前排除物理忙用户，按持久轮转顺序发现。 */
+    @Override
+    public Optional<Dialogue.Claim> claimExcluding(java.util.Set<UUID> excluded) {
         transaction();
         for (var hint : mapper.hints()) {
+            if (excluded.contains(hint.userId())) continue;
             var chat = lock(hint.userId(), hint.id());
             var row = mapper.next(hint.userId(), hint.id()); if (row == null) continue;
             if (mapper.legacyRunning(hint.userId(), hint.id(), row.id())) continue;
@@ -180,5 +188,6 @@ public final class PostgresDialogueStore implements DialogueStore {
     /** @param condition 检查 @param missing 是否归属不存在，错误不能包含私有正文 */
     private static void require(boolean condition, boolean missing) { if (!condition) throw new TravelStorageFailure(missing ? TravelStorageFailure.Code.NOT_FOUND : TravelStorageFailure.Code.STALE_VERSION); }
     /** @param work 只读查询 @param <T> 结果类型 @return 固定依赖错误，不让SQL和用户原文进入HTTP异常日志 */
-    private static <T> T safe(java.util.function.Supplier<T> work) { try { return work.get(); } catch (org.springframework.dao.DataAccessException failure) { throw new TravelStorageFailure(TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE); } }
+    private static <T> T safe(java.util.function.Supplier<T> work) { try { return work.get(); } catch (org.springframework.dao.DataAccessException failure) {
+            com.lawrence.travel.infrastructure.execution.AdmissionErrors.rethrowKnown(failure); throw new TravelStorageFailure(TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE); } }
 }

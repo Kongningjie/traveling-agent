@@ -31,6 +31,14 @@ public interface DialogueStore {
     Dialogue.View receive(UUID user, UUID chat, UUID id, String text);
     /** @return 同一聊天有序领取；超时重试保留原预算，超过尝试上限暂停并保留屏障 */
     Optional<Dialogue.Claim> claim();
+
+    /**
+     * @param excluded 尚未实际退出的模型用户
+     * @return 公平发现，兼容旧测试端口
+     */
+    default Optional<Dialogue.Claim> claimExcluding(java.util.Set<UUID> excluded) {
+        return claim();
+    }
     /** @param claim 原租约 @return 锁用户、任务、聊天及消息后检查租约与版本；不允许迟到结果推进 */
     boolean guard(Dialogue.Claim claim);
     /** @param claim 已锁领取 @param inputs 本轮明确解决的旧澄清；只允许同聊天CLARIFY消息，普通新消息不自动解除旧屏障 */

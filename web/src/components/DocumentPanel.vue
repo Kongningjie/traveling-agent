@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from "vue";
 import ReportProblem from "./ReportProblem.vue";
+import LifecycleDelete from "./LifecycleDelete.vue";
 import SourcePreview from "./SourcePreview.vue";
 import { Api } from "../workspace/client";
 import { decodeDocumentList as decode, documentLabel as label } from "../workspace/documents";
@@ -28,7 +29,9 @@ async function upload(): Promise<void> {
   finally {busy.value=false;void refresh();}
 }
 /** @param id 本聊天附件 @param action 明确操作；删除需用户确认，不通过LLM授权。 */
-async function act(id:string,action:string): Promise<void> {if(busy.value)return;if(action==="DELETE"&&!window.confirm("删除原附件及已提取正文？删除后立即不可读，后台清理原件。"))return;busy.value=true;const stamp=generation;try{await api.post(`/api/v1/chats/${props.chat}/documents/${id}/actions`,{action});if(action==="DELETE")window.dispatchEvent(new CustomEvent("travel:sources-invalidated",{detail:props.chat}));}catch{if(stamp===generation)error.value="操作尚未确认，请刷新状态后重试。";}finally{busy.value=false;void refresh();}}
+async function act(id:string,action:string): Promise<void> {if(busy.value)return;busy.value=true;const stamp=generation;try{await api.post(`/api/v1/chats/${props.chat}/documents/${id}/actions`,{action});if(action==="DELETE")window.dispatchEvent(new CustomEvent("travel:sources-invalidated",{detail:props.chat}));}catch{if(stamp===generation)error.value="操作尚未确认，请刷新状态后重试。";}finally{busy.value=false;void refresh();}}
+/** 来源删除后清除所有打开的预览，并重新读取权威状态。 */
+function removed(): void {window.dispatchEvent(new CustomEvent("travel:sources-invalidated",{detail:props.chat}));void refresh();}
 </script>
 <template>
   <details class="document-panel"><summary>旅行资料 <small>PDF / DOCX / TXT / Markdown · 单份10MiB</small></summary>
@@ -41,7 +44,7 @@ async function act(id:string,action:string): Promise<void> {if(busy.value)return
       <a :href="`/api/v1/chats/${chat}/documents/${item.id}/download`" download>下载原件</a>
       <button v-if="['QUEUED','RUNNING'].includes(item.state)" :disabled="busy" @click="act(item.id,'STOP')">停止解析</button>
       <button v-if="item.state==='PAUSED'" :disabled="busy" @click="act(item.id,'RETRY')">重试解析</button>
-      <button :disabled="busy" @click="act(item.id,'DELETE')">删除</button>
+      <LifecycleDelete kind="DOCUMENT" :target="item.id" @deleted="removed"/>
     <ReportProblem kind="DOCUMENT" :scope="chat" :target="item.id"/></li></ul>
   </details>
 </template>

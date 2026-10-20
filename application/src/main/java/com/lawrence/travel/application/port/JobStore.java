@@ -16,6 +16,16 @@ public interface JobStore {
     Jobs.View read(Jobs.Scope scope, UUID id);
     /** @param kinds 已装配处理器类型 @return 一个新领取或失联接管，预算不重置 */
     Optional<Jobs.Claim> claim(Set<BackgroundJob.Kind> kinds);
+
+    /**
+     * @param kinds 已装配类型
+     * @param excluded 尚未实际退出的用户
+     * @return 公平发现后的可靠领取，旧替身兼容原入口
+     */
+    default Optional<Jobs.Claim> claim(
+            Set<BackgroundJob.Kind> kinds, java.util.Set<UUID> excluded) {
+        return claim(kinds);
+    }
     /** @param scope 已验证范围 @param id 精确作业 @return 同聊天理解入口的有序领取 */
     Optional<Jobs.Claim> claim(Jobs.Scope scope, UUID id);
     /** @param fence 原租约 @return 是否仍可执行；已取消／过期／资料变化返回false */

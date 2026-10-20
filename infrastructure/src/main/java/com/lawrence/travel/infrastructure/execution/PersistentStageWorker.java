@@ -31,9 +31,27 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("stage-poll").factory());
     private final ScheduledExecutorService heartbeats = Executors.newScheduledThreadPool(2, Thread.ofPlatform().daemon().name("stage-heartbeat-", 0).factory());
     private final Duration heartbeat;
+    private volatile java.util.function.BooleanSupplier readiness = () -> true;
+
+    /**
+     * @param check 恢复最新删除清单后才允许领取，不授予额外执行权
+     */
+    public synchronized void readiness(java.util.function.BooleanSupplier check) {
+        this.readiness = java.util.Objects.requireNonNull(check);
+    }
+
     private boolean closed;
     private boolean started;
     private final java.util.List<com.lawrence.travel.application.port.BackgroundWorkSource> auxiliary = new java.util.ArrayList<>();
+    private boolean stagesFirst;
+    private int sourceCursor;
+    private final Map<Thread, AuxOwner> auxiliaryOwners = new HashMap<>();
+
+    /**
+     * @param user 原归属可空
+     * @param parser 独立解析容量
+     */
+    private record AuxOwner(UUID user, boolean parser) {}
     private final Set<Thread> auxiliaryThreads = new HashSet<>();
     private final java.util.concurrent.Semaphore parserSlots = new java.util.concurrent.Semaphore(1);
     private volatile java.util.function.BiConsumer<String, String> problems = (component, code) -> { };
@@ -81,12 +99,27 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
      * 单次受控发现，供本地确定性测试；同一 Worker 的派发串行执行。
      */
     public synchronized void tick() {
-        if (closed) return;
-        for (var source : auxiliary) {
+        if (closed || !readiness.getAsBoolean()) return;
+        stagesFirst = !stagesFirst;
+        if (stagesFirst) {
+            dispatchStages();
+            dispatchAuxiliary();
+        } else {
+            dispatchAuxiliary();
+            dispatchStages();
+        }
+    }
+
+    /** 模型聊天与旅行交替先取共享容量，源列表也轮转；解析始终使用独立槽。 */
+    private void dispatchAuxiliary() {
+        if (auxiliary.isEmpty()) return;
+        int start = sourceCursor;
+        sourceCursor = (sourceCursor + 1) % auxiliary.size();
+        for (int position = 0; position < auxiliary.size(); position++) {var source = auxiliary.get((start + position) % auxiliary.size());
             ExecutionResources.RunScope slot;
             try { slot = openAuxiliary(source.parserCapacity()); } catch (RejectedExecutionException full) { continue; }
             java.util.Optional<Runnable> next;
-            try { next = source.claimWork(); } catch (RuntimeException failure) { slot.close(); throw failure; }
+            try { next = source.claimWorkExcluding(busyUsers(source.parserCapacity())); } catch (RuntimeException failure) { slot.close(); throw failure; }
             if (next.isEmpty()) { slot.close(); continue; }
             var thread = Thread.ofVirtual().name("dialogue-understand").unstarted(() -> {
                 Thread running = Thread.currentThread();
@@ -98,14 +131,28 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
                 } finally { if (pulse != null) pulse.cancel(false); auxiliaryExited(running, slot); }
             });
             thread.setUncaughtExceptionHandler((ignored, failure) -> { report("JOB", "WORKER_EXECUTION_FAILED"); });
+            var user =
+                    next.get()
+                                    instanceof
+                                    com.lawrence.travel.application.port.BackgroundWorkSource
+                                                    .LeasedWork
+                                            work
+                            ? work.userId()
+                            : null;
+            auxiliaryOwners.put(thread, new AuxOwner(user, source.parserCapacity()));
             auxiliaryThreads.add(thread); thread.start();
         }
+    }
+
+    /** 持久用户轮转顺序不改变阶段依赖或提交围栏；同用户实际退出后才可切换下一运行。 */
+    private void dispatchStages() {
         store.recover(32);
         for (var hint : store.candidates(32)) {
             if (!executor.supports(hint.type())) continue;
             Group group = groups.get(hint.runId());
             if (group == null) {
-                try { group = new Group(resources.openRun()); groups.put(hint.runId(), group); }
+                if (busyUsers(false).contains(hint.scope().userId())) continue;
+                try { group = new Group(resources.openRun(), hint.scope().userId()); groups.put(hint.runId(), group); }
                 catch (RejectedExecutionException full) { continue; }
             }
             boolean research = hint.type() == StageType.RESEARCH;
@@ -133,12 +180,27 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     }
 
     /**
+     * @param parser 独立解析类别
+     * @return 仍实际持槽的用户，包含已取消但网络/处理器尚未退出者
+     */
+    private Set<UUID> busyUsers(boolean parser) {
+        var users = new HashSet<UUID>();
+        if (!parser) for (var group : groups.values()) users.add(group.user);
+        for (var owner : auxiliaryOwners.values())
+            if (owner.parser() == parser && owner.user() != null) users.add(owner.user());
+        return users;
+    }
+
+    /**
      * 定时器异常仅延迟发现，不写原始异常日志；数据库请求和租约仍是权威。
      */
     private void safeTick() { try { tick(); } catch (RuntimeException failure) { report("WORKER", "DISCOVERY_FAILED"); } }
     /** @param thread 已实际退出的对话线程 @param slot 仅退出后释放物理容量 */
-    private synchronized void auxiliaryExited(Thread thread, ExecutionResources.RunScope slot) { auxiliaryThreads.remove(thread); slot.close(); }
+    private synchronized void auxiliaryExited(Thread thread, ExecutionResources.RunScope slot) { auxiliaryThreads.remove(thread);
+        auxiliaryOwners.remove(thread); slot.close(); }
+
     /**
+     *
      * @param work 执行句柄；心跳失败尽力中断，不能延长未知租约
      */
     private void pulse(Work work) { try { if (!store.renew(work.claim.fence())) work.requestCancel(); } catch (RuntimeException unavailable) { work.requestCancel(); } }
@@ -197,14 +259,18 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
      * 每运行物理执行资源，仅在 Worker 监视器内修改。
      */
     private static final class Group {
+        private final UUID user;
         private final ExecutionResources.RunScope scope;
         private final Set<Work> work = new HashSet<>();
         private int research;
         private int nonResearch;
+
         /**
+         *
          * @param scope 共享物理运行容量
          */
-        private Group(ExecutionResources.RunScope scope) { this.scope = scope; }
+        private Group(ExecutionResources.RunScope scope, UUID user) { this.scope = scope;
+            this.user = user; }
     }
     /**
      * 每尝试进程句柄，不能作为提交资格。

@@ -2,13 +2,14 @@ package com.lawrence.travel.infrastructure.execution.jobs;
 
 import com.lawrence.travel.application.execution.Jobs;
 import com.lawrence.travel.domain.execution.BackgroundJob;
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 /** 作业私有SQL；归属先锁user／chat，再job，执行期间不持锁。 */
 public interface JobMapper {
@@ -67,7 +68,14 @@ public interface JobMapper {
     @Select("SELECT dependency_id::text FROM background_job WHERE user_id=#{s.userId} AND chat_id=#{s.chatId} AND id=#{id}")
     String dependencyId(@Param("s") Jobs.Scope s, @Param("id") UUID id);
     /** @param kinds 已装配处理类型 @return 发现提示，实际领取必须重新加锁 */
-    @Select("<script>SELECT user_id,chat_id,id FROM background_job WHERE kind IN <foreach collection='kinds' item='k' open='(' separator=',' close=')'>#{k}</foreach> AND (state IN ('QUEUED','WAITING_DEPENDENCY') OR (state='RUNNING' AND lease_until&lt;clock_timestamp())) ORDER BY created_at,id LIMIT 32</script>")
+    @Select(
+            "<script>WITH p AS(SELECT j.*,row_number() OVER(PARTITION BY user_id ORDER BY"
+                + " created_at,id) AS rank FROM background_job j WHERE kind IN <foreach"
+                + " collection='kinds' item='k' open='(' separator=',' close=')'>#{k}</foreach> AND"
+                + " (state IN ('QUEUED','WAITING_DEPENDENCY') OR (state='RUNNING' AND"
+                + " lease_until&lt;clock_timestamp()))) SELECT p.user_id,p.chat_id,p.id FROM p LEFT"
+                + " JOIN dispatch_turn d ON d.user_id=p.user_id ORDER BY"
+                + " p.rank,COALESCE(d.last_turn,0),p.created_at,p.id LIMIT 32</script>")
     List<Hint> hints(@Param("kinds") java.util.Set<BackgroundJob.Kind> kinds);
     /** @param userId 用户 @param chatId 聊天 @param id 作业 */
     record Hint(UUID userId, UUID chatId, UUID id) { }
@@ -105,4 +113,40 @@ public interface JobMapper {
     int activeCount(@Param("user") UUID user, @Param("parser") boolean parser);
     /** @return 全局有效解析数 */
     @Select("SELECT count(*) FROM background_job WHERE kind='DOCUMENT_PARSE' AND state='RUNNING' AND lease_until>clock_timestamp()") int parses();
+
+    /**
+     * @return 与旅行领取共用的短互斥，不等待持锁用户造成反向死锁
+     */
+    @Select("SELECT pg_try_advisory_xact_lock(71351012)")
+    boolean modelDispatch();
+
+    /**
+     * @param user 归属
+     * @return 实际运行中的旅行数
+     */
+    @Select(
+            "SELECT count(DISTINCT run_id) FROM outbox_event WHERE user_id=#{user} AND"
+                + " status='LEASED' AND lease_until>clock_timestamp()")
+    int travelWork(@Param("user") UUID user);
+
+    /**
+     * @return 模型工作租约总量，解析独立
+     */
+    @Select(
+            "SELECT (SELECT count(DISTINCT run_id) FROM outbox_event WHERE status='LEASED' AND"
+                + " lease_until>clock_timestamp())+(SELECT count(*) FROM background_job WHERE"
+                + " kind<>'DOCUMENT_PARSE' AND state='RUNNING' AND lease_until>clock_timestamp())")
+    int modelWork();
+
+    /**
+     * @param s 私有聊天
+     * @param id 当前作业
+     * @return 同种类旧作业尚未处理，不允许显式ID绕过FIFO
+     */
+    @Select(
+            "SELECT EXISTS(SELECT 1 FROM background_job old JOIN background_job fresh ON"
+                + " fresh.id=#{id} WHERE old.user_id=#{s.userId} AND old.chat_id=#{s.chatId} AND"
+                + " old.kind=fresh.kind AND old.state IN('QUEUED','RUNNING','WAITING_DEPENDENCY')"
+                + " AND CASE WHEN fresh.kind='CHAT_INPUT' AND EXISTS(SELECT 1 FROM dialogue_input fi WHERE fi.job_id=fresh.id) THEN EXISTS(SELECT 1 FROM dialogue_input oi JOIN dialogue_input fi ON fi.chat_id=oi.chat_id AND fi.user_id=oi.user_id WHERE oi.job_id=old.id AND fi.job_id=fresh.id AND oi.sequence<fi.sequence) ELSE (old.created_at,old.id)<(fresh.created_at,fresh.id) END)")
+    boolean earlier(@Param("s") Jobs.Scope s, @Param("id") UUID id);
 }

@@ -438,6 +438,14 @@ class SupportIntegrationTest {
                         null,
                         "{}",
                         List.of());
+        // 本例验证追踪关联，不测试同用户并行；结束合成聊天工作后再领取旅行，遵守单用户模型槽。
+        var inputJob =
+                jdbc.queryForObject(
+                        "SELECT job_id FROM dialogue_input WHERE user_id=? AND id=?",
+                        UUID.class,
+                        u.id(),
+                        t.id());
+        jobs.control(new Jobs.Scope(u.id(), t.scope()), inputJob, false);
         var run = engine.start(task, UUID.randomUUID(), stage);
         var hint =
                 engine.candidates(100).stream()
