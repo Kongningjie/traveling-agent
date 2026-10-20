@@ -163,6 +163,25 @@ const stoppable = computed(() =>
       ].includes(view.value?.state ?? ""),
   ),
 );
+/** 优先停止正在理解的消息，其次停止旅行执行；暂停待澄清的消息仍可在同一入口取消处理。 */
+const stopMessage = computed(() => {
+  const pending = [...(chatView.value?.messages ?? [])].reverse();
+  return pending.find(item => ['QUEUED', 'RUNNING'].includes(item.state))
+    ?? (stoppable.value ? undefined : pending.find(item => ['PAUSED', 'CLARIFY'].includes(item.state)));
+});
+/** 计算中始终提供停止；已暂停或等待用户时，输入草稿即可恢复发送，避免挡住澄清和决策回答。 */
+const composerStopping = computed(() => Boolean(
+  ['QUEUED', 'RUNNING'].includes(stopMessage.value?.state ?? '') || active.value
+  || (!message.value.trim() && (stopMessage.value || stoppable.value)),
+));
+const stopDisabled = computed(() => busy.value || chatBusy.value || retryable.value || chatRetryable.value || (!stopMessage.value && !ready.value));
+/** 只提交当前可见对象的原停止命令，不删除消息、不重试模型，未知写入结果须先同步。 */
+async function stopCurrent(): Promise<void> {
+  if (stopDisabled.value) return;
+  const messageId = stopMessage.value?.id;
+  if (messageId) await dialogue.act(messageId, 'WITHDRAW');
+  else if (stoppable.value) await cancel();
+}
 /** 业务字段的可读名称，显示名称不改变后端规范值。 */
 const fieldLabels: Record<string, string> = {
   cities: "目的地",
@@ -621,6 +640,9 @@ onMounted(initialize);
               v-model="message"
               :disabled="inputDisabled"
               :attachment-disabled="chatBusy || chatRetryable"
+              :stopping="composerStopping"
+              :stop-disabled="stopDisabled"
+              @stop="stopCurrent"
               @attach="documentPanel?.choose()"
               @submit="submitMessage"
             />
@@ -646,7 +668,7 @@ onMounted(initialize);
           <div v-else class="chat-thread">
             <template v-if="chatSelected">
               <template v-for="item in chatView?.messages ?? []" :key="item.id">
-                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已撤回处理，原文保留' : '已保存' }}</small></article>
+                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已停止处理，原文保留' : '已保存' }}</small></article>
                 <AssistantReply v-if="item.reply || ['PAUSED','CLARIFY'].includes(item.state)" :key="chatSelected + item.id" :text="item.reply" :chat="chatSelected" :target="item.id" :can-retry="['PAUSED','CLARIFY'].includes(item.state)" :retry-disabled="chatBusy || chatRetryable" @retry="dialogue.act(item.id, 'RETRY')" />
                 <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
                 <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
@@ -654,9 +676,6 @@ onMounted(initialize);
                   <button :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'CONFIRM')">确认执行</button>
                   <button class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">取消</button>
                 </section>
-                <div v-if="['PAUSED','CLARIFY','QUEUED','RUNNING'].includes(item.state)" class="dialogue-actions">
-                  <button class="text-button" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">{{ ['QUEUED','RUNNING'].includes(item.state) ? '停止本次回复' : '撤回这条输入' }}</button>
-                </div>
               </template>
               <p v-if="chatView?.blocked" class="run-note">有输入待理解或澄清，规划可以继续计算；候选展示与接受暂缓。</p>
             </template>
@@ -761,14 +780,7 @@ onMounted(initialize);
           <div v-if="selected" class="composer-context">
             <span :title="connection"
               ><span class="status-dot" />{{ status }}</span
-            ><button
-              v-if="stoppable"
-              class="text-button"
-              :disabled="busy || !ready"
-              @click="cancel"
             >
-              停止本次规划
-            </button>
           </div>
           <div v-if="selected && target" class="reply-target">
             仅调整：{{
@@ -794,6 +806,9 @@ onMounted(initialize);
                 : '继续聊聊，或者告诉我你想调整哪里…'
             "
             :attachment-disabled="chatBusy || chatRetryable"
+            :stopping="composerStopping"
+            :stop-disabled="stopDisabled"
+            @stop="stopCurrent"
             @attach="documentPanel?.choose()"
             @submit="submitMessage"
           />

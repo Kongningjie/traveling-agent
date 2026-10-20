@@ -8,12 +8,15 @@ const props = defineProps<{
   placeholder?: string;
   answering?: boolean;
   attachmentDisabled?: boolean;
+  stopping?: boolean;
+  stopDisabled?: boolean;
 }>();
 /** 仅显式提交触发业务命令，编辑及高度变化不发送网络请求。 */
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [];
   attach: [];
+  stop: [];
 }>();
 const input = ref<HTMLTextAreaElement>();
 const remaining = computed(() => 4000 - props.modelValue.length);
@@ -37,7 +40,7 @@ function update(event: Event): void {
 }
 /** 空白、超限、忙碌时不产生命令；网络未知结果由工作台原样重试。 */
 function submit(): void {
-  if (props.disabled || !props.modelValue.trim() || remaining.value < 0) return;
+  if (props.stopping || props.disabled || !props.modelValue.trim() || remaining.value < 0) return;
   emit("submit");
 }
 /** @param event 中文候选确认键和换行保留原生行为；只有正常Enter会提交。 */
@@ -87,6 +90,18 @@ defineExpose({ focus });
             remaining
           }}</span>
           <button
+            v-if="stopping"
+            class="send-button stop-button"
+            type="button"
+            :disabled="stopDisabled"
+            aria-label="停止当前处理"
+            title="停止当前处理（保留消息与草稿）"
+            @click="emit('stop')"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" /></svg>
+          </button>
+          <button
+            v-else
             class="send-button"
             type="submit"
             :disabled="disabled || !modelValue.trim() || remaining < 0"
