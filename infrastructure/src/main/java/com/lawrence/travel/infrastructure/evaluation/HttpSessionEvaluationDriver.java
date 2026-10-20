@@ -23,6 +23,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
     private final FixtureFiles fixtures;
     private final Restart restart;
     private final Duration timeout;
+    private final boolean auditIsolation;
     private final TravelJson json = new TravelJson();
     /** @param endpoint 本机已配置的业务后端，不接受凭据、路径或外网地址
      * @param evidence 独立读取持久状态与实际计量，不从模型文本提取用量
@@ -30,9 +31,15 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
      * @param restart 显式本地进程恢复动作；未配置返回false，不能跳过后宣称通过
      * @param timeout 每个等待的墙钟上限，1秒到15分钟 */
     public HttpSessionEvaluationDriver(URI endpoint, EvidenceReader evidence, FixtureFiles fixtures, Restart restart, Duration timeout) {
+        this(endpoint, evidence, fixtures, restart, timeout, false);
+    }
+    /** @param endpoint 本机后端 @param evidence 同库观察器 @param fixtures 固定原件 @param restart 显式重启
+     * @param timeout 有界等待 @param auditIsolation 是否额外注册隔离身份，实测聊天及旅行跨用户读取404 */
+    public HttpSessionEvaluationDriver(URI endpoint, EvidenceReader evidence, FixtureFiles fixtures, Restart restart, Duration timeout, boolean auditIsolation) {
         if (endpoint == null || !"http".equals(endpoint.getScheme()) || !List.of("127.0.0.1", "localhost", "[::1]").contains(endpoint.getHost()) || endpoint.getUserInfo() != null || endpoint.getQuery() != null || endpoint.getFragment() != null || !List.of("", "/").contains(endpoint.getPath())) throw new IllegalArgumentException("EVALUATION_LOOPBACK_REQUIRED");
         if (timeout.compareTo(Duration.ofSeconds(1)) < 0 || timeout.compareTo(Duration.ofMinutes(15)) > 0) throw new IllegalArgumentException("EVALUATION_TIMEOUT_INVALID");
         this.endpoint = endpoint; this.evidence = java.util.Objects.requireNonNull(evidence); this.fixtures = java.util.Objects.requireNonNull(fixtures); this.restart = java.util.Objects.requireNonNull(restart); this.timeout = timeout;
+        this.auditIsolation = auditIsolation;
     }
     /** @param action 固定用户操作码 @param text 完整用户输入 @param fixture 封存夹具逻辑名，仅UPLOAD使用 */
     public record Turn(String action, String text, String fixture) { }
@@ -119,14 +126,27 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                 }
                 completed++; trace.add(turn.action());
             }
+            var isolation = auditIsolation ? auditIsolation(browser, chat) : Map.<String,Object>of();
             var observed = evidence.read(user, chat, completed); var metrics = new java.util.HashMap<>(observed.metrics());
             deletedMetrics.forEach((key, value) -> metrics.merge(key, value, Long::sum));
             metrics.put("wallMillis", (System.nanoTime() - start) / 1000000);
-            return new SessionEvaluationExecutor.Capture(user, chat, observed.outcome(), completed, observed.state(), metrics, List.copyOf(trace));
+            var state = new java.util.HashMap<>(observed.state()); state.putAll(isolation);
+            return new SessionEvaluationExecutor.Capture(user, chat, observed.outcome(), completed, state, metrics, List.copyOf(trace));
         } catch (java.io.IOException failure) { if (user != null) return paused(user, chat, completed, "PAUSED_HTTP_FAILED", start, deletedMetrics); throw new IllegalStateException("SESSION_HTTP_FAILED"); }
         catch (RuntimeException failure) { if (user != null) return paused(user, chat, completed, "PAUSED_EXECUTION_FAILED", start, deletedMetrics); throw failure; }
         catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException("SESSION_INTERRUPTED"); }
         finally { browser.close(); }
+    }
+    /** @param owner 原登录身份 @param chat 私有聊天 @return 仅实际HTTP正/负检查的布尔值，删除场景不伪造隔离证据
+     * @throws java.io.IOException 回环请求失败 @throws InterruptedException 审计取消 */
+    private Map<String,Object> auditIsolation(Browser owner, UUID chat) throws java.io.IOException, InterruptedException {
+        var view = owner.get("/chats/" + chat, 200);
+        Object task = ((Map<?,?>) view.get("chat")).get("taskId");
+        try (var other = new Browser()) {
+            other.login(); other.get("/chats/" + chat, 404);
+            if (task != null) other.get("/tasks/" + task + "/view", 404);
+        }
+        return Map.of("httpOwnerVisible", true, "httpOtherUserReadDenied", true);
     }
     /** @param turns 全部脚本；在注册或首个模型请求之前校验所有操作，防止坏尾部步骤导致部分真实调用 */
     private static void requireScript(Turn[] turns) {

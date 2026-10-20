@@ -1,0 +1,175 @@
+package com.lawrence.travel.bootstrap;
+
+import com.lawrence.travel.application.evaluation.Evaluation;
+import com.lawrence.travel.application.evaluation.EvaluationRunner;
+import com.lawrence.travel.application.evaluation.SessionEvaluationExecutor;
+import com.lawrence.travel.application.execution.ModelCallAdmission;
+import com.lawrence.travel.application.port.BudgetLedger;
+import com.lawrence.travel.application.port.DialogueInterpreter;
+import com.lawrence.travel.application.safety.SafetyGate;
+import com.lawrence.travel.bootstrap.config.ExecutionControlProperties;
+import com.lawrence.travel.domain.execution.control.CallKind;
+import com.lawrence.travel.domain.execution.control.CallRejectedException;
+import com.lawrence.travel.domain.interaction.DialogueIntent;
+import com.lawrence.travel.infrastructure.evaluation.HttpSessionEvaluationDriver;
+import com.lawrence.travel.infrastructure.evaluation.JdbcConversationAcceptanceJudge;
+import com.lawrence.travel.infrastructure.evaluation.JdbcSessionEvaluationEvidence;
+import com.lawrence.travel.infrastructure.evaluation.PhaseTwoEvaluationSuite;
+import com.lawrence.travel.infrastructure.travel.TravelJson;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+
+/** 隔离库的实际HTTP/登录/Worker/PG裁判入口；默认本地替身，真实模式须脚本及当前授权双重选择。 */
+@EnabledIfEnvironmentVariable(named="TRAVEL_DEV35_HTTP_ACCEPTANCE", matches="true")
+@ActiveProfiles("local")
+@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT, properties={
+        "server.address=127.0.0.1", "travel.engine.enabled=true", "travel.tools.enabled=false", "travel.jobs.model-limit=4",
+        "travel.documents.cleanup-enabled=false", "travel.lifecycle.maintenance-enabled=false",
+        "logging.level.root=OFF", "logging.level.io.agentscope=OFF"})
+class Dev35HttpAcceptanceTest {
+    @LocalServerPort private int port;
+    @Autowired private Environment environment;
+    @Autowired private JdbcTemplate jdbc;
+    @Autowired private PlatformTransactionManager transactions;
+    @Autowired private SafetyGate safety;
+    @Autowired private ExecutionControlProperties properties;
+    @MockitoSpyBean private DialogueInterpreter interpreter;
+    @MockitoSpyBean private BudgetLedger ledger;
+    @MockitoSpyBean private ModelCallAdmission admission;
+    private final AtomicInteger modelReservations = new AtomicInteger();
+    private final List<Evaluation.Row> rows = new ArrayList<>();
+    private final List<SessionEvaluationExecutor.Capture> captures = new ArrayList<>();
+    private final TravelJson json = new TravelJson();
+
+    /** 在后台Worker创建前验证独立库名及隔离存储根，禁止借错误配置对开发库开启真实Worker。 */
+    @DynamicPropertySource static void isolatedProperties(DynamicPropertyRegistry registry) {
+        String database = System.getenv("POSTGRES_DB"), root = System.getenv("TRAVEL_DEV35_HTTP_STORAGE");
+        if (database == null || !database.matches("travel_dev35_http_[a-f0-9]{16}") || root == null || root.isBlank())
+            throw new IllegalStateException("HTTP_ACCEPTANCE_ISOLATED_DATABASE_REQUIRED");
+        registry.add("travel.external-calls-enabled", Dev35HttpAcceptanceTest::real);
+        // 当前批次只批准协调27b；其余角色即使意外被调度，也没有任何可匹配的免费准入快照。
+        for (String role : List.of("research", "planner", "reviewer")) registry.add("travel.models." + role, () -> "UNAPPROVED_HTTP_ROLE");
+        registry.add("spring.session.redis.namespace", () -> "travel:acceptance:" + database);
+        registry.add("travel.deletions.root", () -> Path.of(root, "lifecycle").toString());
+        registry.add("travel.artifacts.root", () -> Path.of(root, "artifacts").toString());
+        registry.add("travel.documents.root", () -> Path.of(root, "documents").toString());
+    }
+
+    /** @return 只有脚本明确设置的真实模式才打开当前测试进程的模型开关 */
+    private static boolean real() { return "true".equals(System.getenv("TRAVEL_DEV35_HTTP_REAL")); }
+
+    /** 执行两个已封存开发场景的HTTP闭环；首个失败停止后续场景，未完成判据绝不填true。
+     * @throws Exception 报告或本机HTTP证据不可用 */
+    @Test void runsLockedConversationCasesOverHttp() throws Exception {
+        assertThat(properties.models().get("coordinator")).isEqualTo("qwen3.8-27b");
+        if (!real()) org.mockito.Mockito.doAnswer(invocation -> localReply(invocation.getArgument(0))).when(interpreter).interpret(any());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (!"coordinator".equals(invocation.getArgument(1))) throw new CallRejectedException(CallRejectedException.Reason.MODEL_NOT_APPROVED);
+            return invocation.callRealMethod();
+        }).when(admission).begin(any(), anyString(), anyString(), anyString(), anyLong());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            countModelReservation(modelReservations, invocation.getArgument(1));
+            return invocation.callRealMethod();
+        }).when(ledger).reserve(any(), any(), any(), any(), anyLong(), any());
+        var suite = new PhaseTwoEvaluationSuite(PhaseTwoEvaluationTest::resource).load(false);
+        var evidence = new JdbcSessionEvaluationEvidence(jdbc, transactions, Set.of(properties.models().get("coordinator")));
+        var judge = new JdbcConversationAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), real());
+        var driver = new HttpSessionEvaluationDriver(URI.create("http://127.0.0.1:" + port), evidence,
+                name -> { throw new IllegalArgumentException("HTTP_ACCEPTANCE_FIXTURE_NOT_SUPPORTED"); }, () -> false, Duration.ofMinutes(3), true);
+        var mode = real() ? Evaluation.Mode.REAL_MODEL : Evaluation.Mode.LOCAL_CONTRACT;
+        var executor = new SessionEvaluationExecutor(mode, input -> { var c = driver.execute(input); captures.add(c); return c; }, judge, real());
+        for (String id : List.of("P01", "P02")) {
+            var input = suite.cases().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
+            var selected = new Evaluation.Suite(suite.version(), suite.fingerprint(), List.of(input), Map.of(id, suite.oracles().get(id)));
+            var report = real() ? EvaluationRunner.modelsOnly().runModels(selected, executor, true, Map.of())
+                    : new EvaluationRunner(executor).run(selected, false, Map.of());
+            var row = report.rows().stream().filter(r -> r.mode() == mode).findFirst().orElseThrow(); rows.add(row);
+            if (!real() && id.equals("P01") && row.status().equals("PASS")) verifyJudgeRejectsMissingProof(judge, captures.getLast());
+            System.out.println("DEV35_HTTP case=" + id + " mode=" + mode + " status=" + row.status());
+            if (!row.status().equals("PASS")) break;
+        }
+        assertThat(rows).hasSize(2).allMatch(r -> r.status().equals("PASS"));
+    }
+
+    /** @param judge 实际PG裁判 @param c 已完成本地HTTP咨询；负例只改观察输入，不伪造真实成绩或破坏业务数据 */
+    private void verifyJudgeRejectsMissingProof(JdbcConversationAcceptanceJudge judge, SessionEvaluationExecutor.Capture c) {
+        var batch = new AtomicInteger();
+        for (int i = 0; i < 16; i++) countModelReservation(batch, CallKind.MODEL);
+        countModelReservation(batch, CallKind.TOOL); assertThat(batch.get()).isEqualTo(16);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> countModelReservation(batch, CallKind.MODEL)).hasMessage("CALL_BUDGET_EXHAUSTED");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> admission.begin(java.util.UUID.randomUUID(), "research", "cn-beijing", "DASHSCOPE_NATIVE_REALTIME", 128))
+                .hasMessage("MODEL_NOT_APPROVED");
+        var missing = new SessionEvaluationExecutor.Capture(c.userId(), c.chatId(), c.outcome(), 0, Map.of(), c.metrics(), c.trace());
+        assertThat(judge.check("P01", missing)).containsEntry("OWNER_ISOLATED", false).containsEntry("SCRIPT_COMPLETED", false);
+        assertThat(judge.check("P02", c)).containsEntry("CURRENT_REQUIREMENTS_PRESERVED", false).containsEntry("NO_UNCONFIRMED_WRITE", false);
+        var requiresReal = new JdbcConversationAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), true);
+        assertThat(requiresReal.check("P01", c)).containsEntry("CONTEXT_BOUNDED", false);
+        var syntheticSecret = new SafetyGate(() -> List.of("本地替身只做旅行咨询"), (point,result) -> { });
+        assertThat(new JdbcConversationAcceptanceJudge(jdbc, transactions, syntheticSecret, properties.models().get("coordinator"), false)
+                .check("P01", c)).containsEntry("NO_SECRET_OUTPUT", false);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> judge.check("P03", c)).hasMessage("JUDGE_CASE_NOT_SUPPORTED");
+    }
+
+    /** @param count 全批计数 @param kind 计量类型；模型预占尝试最多16次，底层拒绝也不退还本批尝试额 */
+    private static void countModelReservation(AtomicInteger count, CallKind kind) {
+        if (kind == CallKind.MODEL && count.incrementAndGet() > 16)
+            throw new CallRejectedException(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
+    }
+
+    /** 本地固定解释仅验证生产HTTP、Worker和裁判接线；不得当真实模型成绩。
+     * @param c 实际领取的合成消息 @return 有真实原文引用的固定业务协议 */
+    private DialogueIntent.Result localReply(com.lawrence.travel.application.interaction.Dialogue.Claim c) {
+        if (c.text().startsWith("开始规划北京旅行")) return new DialogueIntent.Result(
+                List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, c.text())),
+                List.of(new DialogueIntent.Fact("cities", "北京", "北京"),
+                        new DialogueIntent.Fact("startDate", "2026-11-01", "2026年11月1日至3日"),
+                        new DialogueIntent.Fact("endDate", "2026-11-03", "2026年11月1日至3日"), new DialogueIntent.Fact("travelers", "2", "2人")),
+                "本地替身已理解北京、日期与2人。", "", null, "", "", "");
+        if (c.text().startsWith("刚才说的城市不变")) return new DialogueIntent.Result(
+                List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, c.text())),
+                List.of(new DialogueIntent.Fact("pace", "最后一天希望早点结束", "最后一天希望早点结束")),
+                "本地替身已理解最后一天早点结束。", "", null, "", "", "");
+        return new DialogueIntent.Result(List.of(new DialogueIntent.Intent(DialogueIntent.Kind.CONVERSATION, DialogueIntent.Action.TRAVEL_QA, c.text())),
+                List.of(), "本地替身只做旅行咨询，不建立旅行。", "", null, "", "", "");
+    }
+
+    /** 即使断言中止也保存真实账本总量和部分结果；原始认证值不进入报告，语义仍待人工。
+     * @throws Exception 最小结构化报告无法持久化 */
+    @AfterEach void recordsPartialEvidence() throws Exception {
+        var reviews = new ArrayList<Object>();
+        for (var c : captures) reviews.add(Map.of("user", c.userId(), "chat", c.chatId(), "state", c.state(),
+                "metrics", c.metrics(), "outcome", c.outcome(), "turns", c.turns(),
+                "messages", jdbc.queryForList("SELECT text,reply,state FROM dialogue_input WHERE user_id=? AND chat_id=? ORDER BY sequence", c.userId(), c.chatId())));
+        var meters = jdbc.queryForMap("SELECT count(*) FILTER(WHERE kind='MODEL') AS requests,coalesce(sum(input_tokens),0) AS input,coalesce(sum(output_tokens),0) AS output,count(*) FILTER(WHERE kind='MODEL' AND status<>'COMPLETED') AS unknown FROM call_meter");
+        String body = json.encode(Map.of("version", "dev35-http-v1", "mode", real() ? "REAL_MODEL" : "LOCAL_CONTRACT",
+                "coverage", "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE", "requestLimit", 16,
+                "suiteHash", PhaseTwoEvaluationSuite.LOCK_HASH, "rows", rows, "meterTotals", meters, "manualReview", "PENDING", "reviews", reviews,
+                "modelId", real() ? properties.models().get("coordinator") : "LOCAL_INTERPRETER_STUB"));
+        safety.require("EVALUATION_REPORT", body);
+        Path report = Path.of(environment.getRequiredProperty("TRAVEL_DEV35_HTTP_REPORT")); Files.createDirectories(report.getParent()); Files.writeString(report, body);
+    }
+}
