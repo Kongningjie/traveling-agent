@@ -149,6 +149,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             if(toolkit instanceof SafetyToolkit boundary) boundary.check();
             if(sessionSource.get()!=null) sessions.guard(sessionSource.get()); else if (source.get() != null) contexts.guard(source.get());
         });
+        if (toolkit instanceof SourceToolkit sources) transport.contextHeadroom(sources::contextHeadroom);
         var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
                 .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
                 .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)

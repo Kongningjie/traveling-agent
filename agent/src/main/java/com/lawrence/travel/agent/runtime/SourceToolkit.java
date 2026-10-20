@@ -16,6 +16,19 @@ public final class SourceToolkit extends SafetyToolkit {
     private final UUID budget;
     private final long token;
     private volatile boolean failed;
+    private volatile long remainingBytes = Long.MAX_VALUE;
+
+    /** @param remaining 最后一次完整SDK请求在原上限内的剩余量；不是供应商计费用量 */
+    void contextHeadroom(long remaining) { remainingBytes = Math.max(0, remaining); }
+
+    /** @param requested 工具请求字符数 @return 随发送窗口缩小的页长；非法输入仍交原服务拒绝，不擅自修正 */
+    int pageLength(int requested) {
+        if (requested < 1 || requested > 4000) return requested;
+        // 给新tool_call及结果JSON至少预留1024字节，单UTF-16字符按两层JSON转义12字节保守估算。
+        // 最小64字符只是读取粒度，不是放行保证；最终SDK完整正文仍必须通过原发送门禁。
+        long available = remainingBytes == Long.MAX_VALUE ? 4000 : Math.max(64, (remainingBytes - 1024) / 12);
+        return (int) Math.min(requested, available);
+    }
 
     /** @param service 权威读取 @param budget 输入预算 @param token 原领取身份 @param ledger 同一工具计量 @param limits 初始限制 */
     public SourceToolkit(SourceReadService service, UUID budget, long token, BudgetLedger ledger, RunLimits limits) {

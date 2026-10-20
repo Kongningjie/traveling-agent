@@ -37,6 +37,16 @@ import static org.mockito.Mockito.when;
 
 /** 使用真实门禁及可控连接验证每次 HTTP 的预占、异常与实际取消边界。 */
 class GuardedTransportTest {
+    /** 合法完整请求才更新工具页剩余量；计数来自最终SDK正文，不包含正文或供应商数据。 */
+    @Test void acceptedRequestPublishesExactConservativeHeadroom() throws Exception {
+        when(call.execute()).thenReturn(response(200, "{\"usage\":{\"input_tokens\":10,\"output_tokens\":12}}"));
+        var remaining = new java.util.concurrent.atomic.AtomicLong(-1);
+        try (var transport = transport(true)) {
+            transport.contextHeadroom(remaining::set); var request = request(); transport.execute(request);
+            assertThat(remaining.get()).isEqualTo(com.lawrence.travel.application.memory.ContextAssembler.limit("planner")
+                    - HarnessContextCompression.estimateInput(request.getBody()));
+        }
+    }
     /** 最终SDK正文超限在计量及网络前拒绝，只附带固定边界和量测，不泄露合成正文。 */
     @Test void oversizedInputRetainsOnlySafeBudgetDiagnostic() {
         String body = "{\"model\":\"test-model\",\"parameters\":{\"max_tokens\":128},\"input\":{\"messages\":[{\"role\":\"user\",\"content\":[{\"text\":\"" + "x".repeat(40000) + "\"}]}]}}";

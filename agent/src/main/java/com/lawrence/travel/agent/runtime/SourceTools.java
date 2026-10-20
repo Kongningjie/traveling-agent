@@ -67,12 +67,12 @@ public final class SourceTools {
     }
 
     /** @param document 当前目录ID @param position 页段 @param start 含起点 @param length 最多4000字符 @return 实际读取范围及引用 */
-    @Tool(name="ReadDocumentSection", description="读取指定文件真实页段及字符范围；不支持任意路径，必须保留截断和解析限制。")
+    @Tool(name="ReadDocumentSection", description="读取指定文件真实页段及字符范围；窗口不足时返回更短页，以实际定位和截断标记为准。不支持任意路径。")
     public Object section(@ToolParam(name="document", description="文档UUID") String document,
             @ToolParam(name="position", description="真实页或段序号，从1开始") int position,
             @ToolParam(name="start", description="起始字符，从0开始") int start,
             @ToolParam(name="length", description="1至4000字符") int length) {
-        return query(() -> service.section(budget, token, UUID.fromString(document), position, start, length));
+        return query(() -> service.section(budget, token, UUID.fromString(document), position, start, boundary.pageLength(length)));
     }
 
     /** @param query 字面查询 @return 当前聊天较早完整消息，不授予操作权限 */
@@ -82,10 +82,10 @@ public final class SourceTools {
     }
 
     /** @param path 框架卸载占位中的逻辑路径 @param offset 字符起点 @param length 最多4000 @return 从PG恢复的有界工作文件 */
-    @Tool(name="read_file", description="仅读取当前尝试/work逻辑文件；按字符分页，不接触宿主机文件。")
+    @Tool(name="read_file", description="仅读取当前尝试/work逻辑文件；窗口不足时返回更短页，按nextOffset继续，complete只表示本文件是否读完。不接触宿主机文件。")
     public String file(@ToolParam(name="path", description="占位中/work/...逻辑路径") String path,
             @ToolParam(name="offset", description="起始字符，从0开始") int offset,
             @ToolParam(name="length", description="1至4000字符") int length) {
-        return query(() -> service.file(budget, token, path, offset, length));
+        return query(() -> service.file(budget, token, path, offset, boundary.pageLength(length)));
     }
 }

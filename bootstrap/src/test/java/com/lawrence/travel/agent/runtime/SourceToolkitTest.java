@@ -27,6 +27,25 @@ import static org.mockito.Mockito.when;
 class SourceToolkitTest {
     @TempDir Path root;
 
+    /** 页长随最后完整SDK请求的窗口缩小，非法长度不被悄悄修正；原文分页定位仍由应用服务生成。 */
+    @Test void pagedToolsShareObservedWindowWithoutChangingOffsets() {
+        var service = mock(SourceReadService.class);
+        var ledger = mock(com.lawrence.travel.application.port.BudgetLedger.class);
+        when(ledger.reserve(any(), any(), any(), any(), anyLong(), any())).thenReturn(
+                new com.lawrence.travel.application.port.BudgetLedger.Reservation(UUID.randomUUID(), null));
+        var toolkit = new SourceToolkit(service, UUID.randomUUID(), 1, ledger, null);
+        assertThat(toolkit.pageLength(4000)).isEqualTo(4000);
+        toolkit.contextHeadroom(3424); assertThat(toolkit.pageLength(4000)).isEqualTo(200);
+        assertThat(toolkit.pageLength(100)).isEqualTo(100);
+        assertThat(toolkit.pageLength(0)).isZero(); assertThat(toolkit.pageLength(4001)).isEqualTo(4001);
+        var tools = new SourceTools(service, UUID.randomUUID(), 1, ledger, null, toolkit);
+        UUID document = UUID.randomUUID(); tools.section(document.toString(), 2, 137, 4000);
+        tools.file("/work/coordinator/source", 225, 4000);
+        org.mockito.Mockito.verify(service).section(any(), anyLong(), org.mockito.ArgumentMatchers.eq(document), org.mockito.ArgumentMatchers.eq(2), org.mockito.ArgumentMatchers.eq(137), org.mockito.ArgumentMatchers.eq(200));
+        org.mockito.Mockito.verify(service).file(any(), anyLong(), org.mockito.ArgumentMatchers.eq("/work/coordinator/source"), org.mockito.ArgumentMatchers.eq(225), org.mockito.ArgumentMatchers.eq(200));
+        toolkit.contextHeadroom(0); assertThat(toolkit.pageLength(4000)).isEqualTo(64);
+    }
+
     /** 真SDK格式化加真实发送门禁复现工具追加超限，受控HTTP替身仅收到两次合法请求；无外网。 */
     @Test void serializedRequestOverflowRecoversBeforeLedgerAndNetwork() {
         var ledger = mock(com.lawrence.travel.application.port.BudgetLedger.class);

@@ -41,6 +41,10 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Object lifecycle=new Object();
     private int activeRequests;
+    private java.util.function.LongConsumer contextHeadroom = value -> { };
+
+    /** @param observer 当前隔离调用的只读工具页预算；仅接收安全计数，必须在调用开始前绑定 */
+    void contextHeadroom(java.util.function.LongConsumer observer) { contextHeadroom = java.util.Objects.requireNonNull(observer); }
 
     /**
      * 固定实际传输策略，不接受调用方指定替代地域或重定向。
@@ -174,6 +178,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
             var failure = new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
             failure.initCause(new com.lawrence.travel.domain.execution.control.ContextBudgetDiagnostic("TRANSPORT_BODY", estimatedInput, contextLimit)); throw failure;
         }
+        contextHeadroom.accept(contextLimit - estimatedInput);
         // 文本 JSON 的 UTF-8 字节数采用双倍余量并加消息模板开销；输出强制有上限。
         // 图片、音视频及联网搜索不在此适配器范围，不能借文本上界放行其隐藏消耗。
         long upper = body.getBytes(StandardCharsets.UTF_8).length * 2L + 4096 + max.intValue();
