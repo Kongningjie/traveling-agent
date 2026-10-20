@@ -2,19 +2,27 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from "vue";
 import { Api } from "../workspace/client";
-import { decodeSourceFragment as fragment } from "../workspace/sources";
+import { decodeSourceFragment as fragment, decodeSourceReferences } from "../workspace/sources";
 import type { SourceFragment as Fragment } from "../workspace/sources";
 /** 私有聊天及文档或消息ID；组件不接受服务端存储路径。 */
 const props = defineProps<{ chat: string; document?: string; message?: string; reference?: string; revision?: string }>();
 const api = new Api(), query = ref(""), fragments = ref<Fragment[]>([]), notice = ref(""), busy = ref(false);
+const references = ref<string[]>([]);
 let generation = 0;
 /** @param event 同页删除完成信号；只携带逻辑聊天ID，立即清掉已打开的原文预览。 */
 function invalidate(event: Event): void {
-  if ((event as CustomEvent<string>).detail === props.chat) { generation++; fragments.value = []; notice.value = "资料已变化，旧引用已关闭，请重新核对。"; }
+  if ((event as CustomEvent<string>).detail === props.chat) { generation++; references.value = []; fragments.value = []; busy.value = false; notice.value = "资料已变化，旧引用已关闭，请重新核对。"; }
 }
 window.addEventListener("travel:sources-invalidated", invalidate);
 onUnmounted(() => { generation++; window.removeEventListener("travel:sources-invalidated", invalidate); });
-watch(() => [props.chat, props.document, props.message, props.reference, props.revision], () => { generation++; fragments.value = []; notice.value = ""; query.value = ""; });
+watch(() => [props.chat, props.document, props.message, props.reference, props.revision], () => { generation++; references.value = []; fragments.value = []; busy.value = false; notice.value = ""; query.value = ""; void discover(); }, { immediate: true });
+/** 只查询当前回复的有效引用编号，不预取原文；未上传／未实读／查询失败时均不显示空来源入口。 */
+async function discover(): Promise<void> {
+  if (!props.chat || !props.message || props.document || props.reference) return;
+  const stamp = generation;
+  try { const ids = decodeSourceReferences(await api.get<unknown>(`/api/v1/chats/${props.chat}/messages/${props.message}/references`)); if (stamp === generation) references.value = ids; }
+  catch { if (stamp === generation) references.value = []; }
+}
 /** 检索指定文件或按需查看成功回复实际读取的引用；没有引用不伪造来源。 */
 async function load(): Promise<void> {
   if (busy.value) return;
@@ -29,19 +37,20 @@ async function load(): Promise<void> {
     } else if(props.reference) {
       items=[fragment(await api.get(`/api/v1/chats/${chat}/references/${props.reference}`))]; explanation="这项建议绑定的实际原文，用户材料并非官方核实。";
     } else {
-      const ids = await api.get<unknown>(`/api/v1/chats/${chat}/messages/${props.message}/references`);
-      if (!Array.isArray(ids) || ids.length > 10 || ids.some(id => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))) throw new Error("SOURCE_RESPONSE_INVALID");
+      const ids = decodeSourceReferences(await api.get<unknown>(`/api/v1/chats/${chat}/messages/${props.message}/references`));
+      if (stamp !== generation) return;
+      references.value = ids;
       items = [];
       for (const id of ids) { if (stamp !== generation) return; items.push(fragment(await api.get(`/api/v1/chats/${chat}/references/${id}`))); }
       explanation = items.length ? "以下为本次回复实际读取的材料，不能据此宣称阅读全文或官方核实。" : "没有当前仍有效的文件引用；未读取、已删除或资料已变化。";
     }
     if (stamp === generation) { fragments.value = items; notice.value = explanation; }
   } catch { if (stamp === generation) notice.value = "原文暂不可读：可能尚未解析、引用已失效、资料已删除或查询超限。请刷新附件状态。"; }
-  finally { busy.value = false; }
+  finally { if (stamp === generation) busy.value = false; }
 }
 </script>
 <template>
-  <details class="source-preview"><summary>{{ document ? "检索原文" : "查看实际读取来源" }}</summary>
+  <details v-if="document || reference || references.length" class="source-preview"><summary>{{ document ? "检索原文" : "查看实际读取来源" }}</summary>
     <div v-if="document"><input v-model="query" maxlength="80" aria-label="文件原文关键词" placeholder="输入关键词，如：住宿、杭州东" @keydown.enter.prevent="load" /></div>
     <button :disabled="busy" @click="load">{{ busy ? "正在读取…" : document ? "检索" : "读取来源" }}</button>
     <p role="status">{{ notice }}</p>
