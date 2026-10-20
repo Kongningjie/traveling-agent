@@ -1,0 +1,12 @@
+# 仅搭配独立随机验收项目；不改变生产容器入口或认证配置。
+services:
+  backend:
+    command: ["--serve"]
+    ports: ["127.0.0.1:4195:8090"]
+    networks: [default, ui-ingress]
+networks:
+  # internal网络在本机Docker不提供发布端口；只给UI验证增加回环入口，关闭出口伪装。
+  ui-ingress:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

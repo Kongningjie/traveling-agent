@@ -1,0 +1,8 @@
+# 仅含生产运行类及显式验收主进程，其他测试类/本地配置/密钥不进入镜像。
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /probe
+COPY classes/ classes/
+COPY lib/ lib/
+COPY probe/ probe/
+COPY ui/ ui/
+ENTRYPOINT ["java", "-Xmx2g", "-cp", "/probe/probe:/probe/classes:/probe/lib/*", "com.lawrence.travel.bootstrap.acceptance.LocalAcceptanceProbe"]

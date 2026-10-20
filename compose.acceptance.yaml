@@ -1,0 +1,65 @@
+# DEV-0034独立测试项目：无外网、无生产卷、无宿主端口；四服务配额合计4CPU/8GiB。
+services:
+  postgres:
+    image: postgres:17.11-bookworm
+    cpus: 1
+    mem_limit: 2g
+    environment:
+      POSTGRES_DB: traveling_acceptance
+      POSTGRES_USER: traveling_acceptance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?本机数据库密码缺失}
+    volumes: ["acceptance-pg:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traveling_acceptance -d traveling_acceptance"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  redis:
+    image: redis:7.4.11-bookworm
+    cpus: 0.5
+    mem_limit: 1g
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?本机Redis密码缺失}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  backend:
+    image: traveling-agent-acceptance-probe
+    cpus: 2
+    mem_limit: 4g
+    environment:
+      TRAVEL_LOCAL_ACCEPTANCE: "true"
+      TRAVEL_EXTERNAL_CALLS_ENABLED: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: traveling_acceptance
+      POSTGRES_USER: traveling_acceptance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TRAVEL_DELETION_ROOT: /data/lifecycle
+      TRAVEL_DOCUMENTS_ROOT: /data/documents
+      TRAVEL_BACKUP_ROOT: /data/backups
+      TRAVEL_ARTIFACTS_ROOT: /data/artifacts
+      ACCEPTANCE_REPORT: /report/performance.json
+    volumes:
+      - acceptance-files:/data
+      - ${ACCEPTANCE_REPORT_ROOT:?验收报告目录缺失}:/report
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  web:
+    image: traveling-agent-web
+    cpus: 0.5
+    mem_limit: 1g
+    depends_on: [backend]
+volumes:
+  acceptance-pg:
+  acceptance-files:
+networks:
+  default:
+    internal: true

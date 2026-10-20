@@ -653,7 +653,7 @@ onMounted(initialize);
                 </section>
                 <div v-if="['PAUSED','CLARIFY','QUEUED','RUNNING'].includes(item.state)" class="dialogue-actions">
                   <button v-if="['PAUSED','CLARIFY'].includes(item.state)" class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'RETRY')">重试理解</button>
-                  <button class="text-button" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">撤回这条输入</button>
+                  <button class="text-button" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">{{ ['QUEUED','RUNNING'].includes(item.state) ? '停止本次回复' : '撤回这条输入' }}</button>
                 </div>
               </template>
               <p v-if="chatView?.blocked" class="run-note">有输入待理解或澄清，规划可以继续计算；候选展示与接受暂缓。</p>

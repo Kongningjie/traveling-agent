@@ -1,0 +1,9 @@
+{
+  "version": "phase2-session-suite-v1",
+  "files": {
+    "development.json": "1d8a8012ee5f8cb03996965a2ad8358f123485e1583719cb9ee12747702e6d20",
+    "holdout.json": "efb77c79331aec085306d956f2a1097441a27055762e37dd2e805ac86795e4d5",
+    "manual-oracle.json": "bd712e31ace379407df71b3d0ccbca1cf3195a99393646e1fcd5e4731c580623",
+    "oracle.json": "e0032b422b53928656d3a4f5c6d499365d358a2b28e3466c57926f9b74cb2768"
+  }
+}

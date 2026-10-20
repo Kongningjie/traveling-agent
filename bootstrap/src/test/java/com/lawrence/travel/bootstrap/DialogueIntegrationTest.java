@@ -33,6 +33,62 @@ import static org.mockito.Mockito.when;
 @ActiveProfiles("local")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "travel.engine.enabled=false")
 class DialogueIntegrationTest {
+    /** 评测账本读取真实PG且按用户/聊天隔离；未知请求与替身型号不能变成真实完整计量。 */
+    @Test void evaluationEvidenceKeepsUnknownUsageAndOwnerIsolation() {
+        var user = actor(); UUID chat = UUID.randomUUID(); service.send(user, chat, UUID.randomUUID(), "开始规划杭州旅行");
+        UUID budget = jdbc.queryForObject("SELECT budget_id FROM operation_context WHERE user_id=? AND chat_id=?", UUID.class, user.id(), chat);
+        jdbc.update("INSERT INTO call_meter(id,run_id,kind,model_id,region,api,token_upper_bound,started_at,status,input_tokens,output_tokens) VALUES(?,?,'MODEL','LOCAL_PROTOCOL_MODEL','LOCAL','LOCAL_FAKE',30,clock_timestamp(),'COMPLETED',11,7)", UUID.randomUUID(), budget);
+        jdbc.update("INSERT INTO call_meter(id,run_id,kind,model_id,region,api,token_upper_bound,started_at,status) VALUES(?,?,'MODEL','LOCAL_PROTOCOL_MODEL','LOCAL','LOCAL_FAKE',30,clock_timestamp(),'UNKNOWN')", UUID.randomUUID(), budget);
+        jdbc.update("INSERT INTO call_meter(id,run_id,kind,model_id,region,api,token_upper_bound,started_at,status) VALUES(?,?,'TOOL','LOCAL_TOOL','LOCAL','LOCAL_FAKE',0,clock_timestamp(),'RESERVED')", UUID.randomUUID(), budget);
+        var reader = new com.lawrence.travel.infrastructure.evaluation.JdbcSessionEvaluationEvidence(jdbc, manager, java.util.Set.of("LOCAL_PROTOCOL_MODEL"));
+        var capture = reader.read(user.id(), chat, 1);
+        assertThat(capture.metrics()).containsEntry("actualModelRequests", 1L).containsEntry("unknownModelRequests", 1L).containsEntry("actualInputTokens", 11L).containsEntry("actualOutputTokens", 7L);
+        assertThat(capture.metrics()).containsEntry("actualToolRequests", 0L).containsEntry("unknownToolRequests", 1L);
+        assertThat(capture.outcome()).isEqualTo("PAUSED_SESSION_ACTIVE");
+        assertThat(reader.read(UUID.randomUUID(), chat, 1).metrics().get("actualModelRequests")).isZero();
+        var mismatch = new com.lawrence.travel.infrastructure.evaluation.JdbcSessionEvaluationEvidence(jdbc, manager, java.util.Set.of("OTHER_MODEL")).read(user.id(), chat, 1);
+        assertThat(mismatch.metrics()).containsEntry("actualModelRequests", 0L).containsEntry("unrecognizedModelRequests", 2L);
+        assertThat(capture.state()).doesNotContainKey("text").doesNotContainKey("reply");
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, "开始规划杭州旅行", List.of(new DialogueIntent.Fact("cities", "杭州", "杭州"))));
+        assertThat(service.read(user, chat).chat().taskId()).isNotNull();
+        assertThat(reader.read(user.id(), chat, 1).outcome()).isEqualTo("PAUSED_SESSION_ACTIVE");
+    }
+    /** 用户停止运行中的当前回复后，即使理解器迟到返回规划诉求，也不能创建旅行或写回回复。
+     * @throws Exception 本地线程/围栏验证失败 */
+    @Test void stoppingCurrentReplyRejectsLatePlanningResult() throws Exception {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID(); String text = "开始规划杭州旅行";
+        service.send(user, chat, input, text);
+        var entered = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+        when(interpreter.interpret(any())).thenAnswer(invocation -> { entered.countDown(); release.await(); return result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, text, List.of()); });
+        var work = service.claimWork().orElseThrow();
+        try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var future = pool.submit(work);
+            try {
+                assertThat(entered.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                service.act(user, chat, input, "WITHDRAW");
+            } finally { release.countDown(); }
+            future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        var persisted = service.read(user, chat); assertThat(persisted.messages().getFirst().state()).isEqualTo("WITHDRAWN");
+        assertThat(persisted.messages().getFirst().reply()).isEmpty(); assertThat(persisted.chat().taskId()).isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM travel_task WHERE user_id=?", Integer.class, user.id())).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM operation_context WHERE user_id=?", Integer.class, user.id())).isEqualTo(1);
+    }
+    /** 断连后的读取与同消息重放沿用原输入/作业/预算，不重复调用理解器或隐式取消已提交处理。 */
+    @Test void reconnectReadAndReplayKeepOriginalInputAndBudget() {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID(); String text = "只咨询一下旅行方式";
+        service.send(user, chat, input, text);
+        UUID budget = jdbc.queryForObject("SELECT budget_id FROM operation_context WHERE user_id=?", UUID.class, user.id());
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(interpreter.interpret(any())).thenAnswer(invocation -> { calls.incrementAndGet(); return result(DialogueIntent.Kind.CONVERSATION, DialogueIntent.Action.TRAVEL_QA, text, List.of()); });
+        // 没有浏览器连接也会由同一Work推进；重新读取不产生控制命令。
+        service.claimWork().orElseThrow().run();
+        service.read(user, chat); service.send(user, chat, input, text); service.read(user, chat);
+        assertThat(calls).hasValue(1); assertThat(service.claimWork()).isEmpty();
+        assertThat(service.read(user, chat).messages()).hasSize(1); assertThat(service.read(user, chat).messages().getFirst().state()).isEqualTo("DONE");
+        assertThat(jdbc.queryForObject("SELECT budget_id FROM operation_context WHERE user_id=?", UUID.class, user.id())).isEqualTo(budget);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM background_job WHERE user_id=?", Integer.class, user.id())).isEqualTo(1);
+    }
     @Autowired private DialogueService service;
     @Autowired private DialogueStore store;
     @Autowired private AccountStore accounts;

@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit', 'PhaseTwo', 'Migration')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow', 'Fault', 'Evaluation','LifecycleCommit')) { throw '方法选择只能用于单一测试类作用域。' }
+if ($TestMethod -and $Scope -in @('All', 'M1', 'Workflow', 'Fault', 'Evaluation','LifecycleCommit','PhaseTwo')) { throw '方法选择只能用于单一测试类作用域。' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $projectRoot '.env'
 if (-not (Test-Path -LiteralPath $envFile)) {
@@ -63,7 +63,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '无法核对后端运行状态。' }
     $backendWasRunning = -not [string]::IsNullOrWhiteSpace(($runningBackend -join ''))
     if ($backendWasRunning) { docker compose stop backend; if ($LASTEXITCODE -ne 0) { throw '无法暂停容器后端。' } }
-    $selectedTest = if ($Scope -eq 'Lifecycle') { '-Dtest=LifecycleIntegrationTest,DeletionLedgerTest,LifecycleCapacityTest,ModuleArchitectureTest' }
+    $selectedTest = if ($Scope -eq 'Migration') { '-Dtest=LegacyMigrationIntegrationTest' }
+        elseif ($Scope -eq 'PhaseTwo') { '-Dtest=LegacyMigrationIntegrationTest,PhaseTwoEvaluationTest,PhaseTwoQualityGateTest,SessionEvaluationExecutorTest,EvaluationRunnerTest,SessionContextIntegrationTest,DialogueIntegrationTest,DialogueWorkerTest,JobIntegrationTest,BudgetLedgerIntegrationTest,DocumentIntegrationTest,SourceReadIntegrationTest,AdviceIntegrationTest,SupportIntegrationTest,LifecycleIntegrationTest,LifecycleCapacityTest,DeletionLedgerTest,LifecycleGateTest,SafetyGateTest,AgentStrategyTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Lifecycle') { '-Dtest=LifecycleIntegrationTest,DeletionLedgerTest,LifecycleCapacityTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'LifecycleCommit') { '-Dtest=LifecycleIntegrationTest,DeletionLedgerTest,LifecycleCapacityTest,LifecycleGateTest,DialogueWorkerTest,SourceReadIntegrationTest,DialogueIntegrationTest,JobIntegrationTest,CandidateAcceptanceIntegrationTest#deletingAcceptedTripRemovesFullGraph,ArtifactIntegrationTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'SupportCommit') { '-Dtest=SupportIntegrationTest,SupportServiceTest,ProblemStateTest,DiagnosticBufferTest,ModuleArchitectureTest,ExecutionEngineIntegrationTest,JobIntegrationTest,SessionContextIntegrationTest,DialogueIntegrationTest,DocumentIntegrationTest,AdviceIntegrationTest,SafetyGateTest,IdentityIntegrationTest' }
         elseif ($Scope -eq 'Support') { '-Dtest=SupportIntegrationTest,SupportServiceTest,ProblemStateTest,DiagnosticBufferTest,ModuleArchitectureTest' }
