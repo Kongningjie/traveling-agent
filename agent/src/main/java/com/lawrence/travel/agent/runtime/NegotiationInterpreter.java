@@ -28,6 +28,7 @@ public final class NegotiationInterpreter implements InputInterpreter {
                 + "返回 JSON {facts:[{field,value,quote}],outsideScope:boolean,clarification:string}。quote 必须为原文连续摘录。"
                 + "字段只允许 cities(逗号分隔1到3城市)、startDate/endDate(ISO日期)、travelers(正整数)、budgetRule(NONE/PER_PERSON/PER_GROUP)、budgetCny(正数)、budgetScope(逗号分隔ACTIVITIES/MEALS/LODGING/INTERCITY/ROUNDTRIP/LOCAL_TRANSPORT)、fixedStatus(NONE/UNKNOWN/PROVIDED)、fixedArrangements(每行 类型|ISO带时区起时|ISO带时区止时)、pace/diet/interests。"
                 + "明确的步行上限、休息要求、过敏、无障碍等硬限制存 hardRequirements，不能降为pace/diet软偏好；该字段只提供新增限制，不删除旧限制。需要解除或放宽已有硬限制时在clarification说明具体对象，不能悄悄覆盖。"
+                + "节奏愿望或倾向归pace软偏好；没有必须满足或固定时限依据时，不得升级为hardRequirements。用户明确不可违反的限制、过敏及无障碍等实际安全限制仍属硬约束；结合完整语义判断，不能仅凭希望或必须等单个词放宽旧硬限制。强度不明确且影响可行性时追问，不自行硬化或软化。"
                 + "用户明确提供UUID时可提取changeTargets(本次修改对象UUID逗号列表)、lockedIds(需保留的完整锁定UUID列表，明确清空用NONE)。不得猜测对象ID；只有名称时在clarification追问定位，不自行解锁。"
                 + "原问题内回答 outsideScope=false；同时新增或修改其他字段 outsideScope=true。信息不足在clarification说明，不补默认值。上下文："
                 + json.encode(java.util.Map.of("confirmed", com.lawrence.travel.domain.interaction.RequirementFields.fields(context.revision().requirements()),

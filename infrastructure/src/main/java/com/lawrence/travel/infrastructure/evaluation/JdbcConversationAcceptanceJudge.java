@@ -59,21 +59,24 @@ public final class JdbcConversationAcceptanceJudge implements SessionEvaluationE
         return Map.copyOf(checks);
     }
 
-    /** @param c 实际身份 @param tasks 仅当前聊天关联的旅行 @return 原四字段保留、第二轮新版本及用户新增要求存在；不代替语义复核 */
+    /** @param c 实际身份 @param tasks 仅当前聊天关联的旅行 @return 原四字段保留且新增节奏以软偏好保存；具体内容仍需语义复核 */
     private boolean requirements(SessionEvaluationExecutor.Capture c, List<Map<String,Object>> tasks) {
         if (tasks.size() != 1 || ((Number)tasks.getFirst().get("constraint_revision")).longValue() < 3) return false;
         String body = jdbc.queryForObject("SELECT payload::text FROM travel_constraint_revision WHERE user_id=? AND task_id=? AND revision=?", String.class,
                 c.userId(), tasks.getFirst().get("id"), tasks.getFirst().get("constraint_revision"));
         var root = json.decode(body, Map.class); var fields = new HashMap<String,String>();
+        boolean softPace = false;
         if (!(root.get("fixedArrangements") instanceof List<?> fixed) || !fixed.isEmpty()) return false;
         for (Object item : (List<?>)root.get("requirements")) {
             var value = (Map<?,?>)item; if (!"USER".equals(value.get("source"))) return false;
+            // P02愿望性节奏已由用户确认为软偏好，硬化同样算需求失真，不能只验证有字可读。
+            if ("pace".equals(value.get("field"))) softPace = "SOFT".equals(value.get("kind"));
             fields.put((String)value.get("field"), (String)value.get("value"));
         }
         return "北京".equals(fields.get("cities")) && "2026-11-01".equals(fields.get("startDate"))
                 && "2026-11-03".equals(fields.get("endDate")) && "2".equals(fields.get("travelers"))
-                && Set.of("cities", "startDate", "endDate", "travelers", "pace", "hardRequirements").containsAll(fields.keySet())
-                && fields.entrySet().stream().anyMatch(e -> Set.of("pace", "hardRequirements").contains(e.getKey()) && !e.getValue().isBlank());
+                && Set.of("cities", "startDate", "endDate", "travelers", "pace").containsAll(fields.keySet())
+                && softPace && fields.get("pace") != null && !fields.get("pace").isBlank();
     }
 
     /** @param c 实际身份 @return 每个实际模型请求都在批准型号/输入/输出边界；本地模式要求没有模型请求 */

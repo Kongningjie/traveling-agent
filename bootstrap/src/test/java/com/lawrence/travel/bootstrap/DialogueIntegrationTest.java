@@ -167,6 +167,39 @@ class DialogueIntegrationTest {
             assertThat(jdbc.queryForObject("SELECT execution_generation FROM travel_task WHERE id=?", Long.class, task)).isEqualTo(generation);
         }
     }
+    /** 本地解释替身验证节奏软偏好的真实落库，P02裁判拒绝把同一愿望硬化；不声称模型分类已实测通过。 */
+    @Test void softPaceIsPersistedAndAcceptanceRejectsHardenedWish() {
+        for (String field : List.of("pace", "hardRequirements")) {
+            var user = actor(); UUID chat = UUID.randomUUID(); String initial = "去北京，2026-11-01至2026-11-03，2人";
+            service.send(user, chat, UUID.randomUUID(), initial);
+            process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, initial, List.of(
+                    new DialogueIntent.Fact("cities", "北京", "北京"), new DialogueIntent.Fact("startDate", "2026-11-01", "2026-11-01"),
+                    new DialogueIntent.Fact("endDate", "2026-11-03", "2026-11-03"), new DialogueIntent.Fact("travelers", "2", "2人"))));
+            UUID task = service.read(user, chat).chat().taskId();
+            commitUnderstanding(task);
+            String wish = "收尾那天想少赶路，多留些休息时间";
+            service.send(user, chat, UUID.randomUUID(), wish);
+            process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, wish, List.of(new DialogueIntent.Fact(field, wish, wish))));
+            commitUnderstanding(task);
+            var persisted = jdbc.queryForMap("""
+                    SELECT q->>'kind' AS kind,q->>'value' AS value FROM travel_task t
+                    JOIN travel_constraint_revision r ON r.task_id=t.id AND r.user_id=t.user_id AND r.revision=t.constraint_revision,
+                    jsonb_array_elements(r.payload->'requirements') q WHERE t.id=? AND q->>'field'=?
+                    """, task, field);
+            assertThat(persisted).containsEntry("kind", field.equals("pace") ? "SOFT" : "HARD").containsEntry("value", wish);
+            var evidence = new com.lawrence.travel.infrastructure.evaluation.JdbcSessionEvaluationEvidence(jdbc, manager, java.util.Set.of("LOCAL_PROTOCOL_MODEL"));
+            var judge = new com.lawrence.travel.infrastructure.evaluation.JdbcConversationAcceptanceJudge(jdbc, manager,
+                    new com.lawrence.travel.application.safety.SafetyGate(List::of, (point, result) -> { }), "LOCAL_PROTOCOL_MODEL", false);
+            assertThat(judge.check("P02", evidence.read(user.id(), chat, 2)))
+                    .containsEntry("CURRENT_REQUIREMENTS_PRESERVED", field.equals("pace"));
+        }
+    }
+    /** @param task 本测试私有旅行；手动提交一个UNDERSTAND阶段，不调用模型或推进资料调查。 */
+    private void commitUnderstanding(UUID task) {
+        var hint = engine.candidates(100).stream().filter(h -> h.scope().taskId().equals(task)).findFirst().orElseThrow();
+        var claim = engine.claim(hint, "soft_pace_test").orElseThrow();
+        engine.commit(engine.prepare(claim, handler.execute(claim)));
+    }
     /** 独立咨询不创建旅行，原文及回复跨读取恢复，重复输入不会产生第二条。 */
     @Test void conversationDoesNotCreateTripAndReceiveIsIdempotent() {
         var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID();
