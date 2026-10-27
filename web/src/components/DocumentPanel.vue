@@ -186,12 +186,23 @@ function removed(): void {
       <p class="muted">
         可先上传自己的计划。可让助手解释、检查或优化，建议需逐项确认后才登记变更；复杂表格需核对原件，不支持扫描件／OCR。
       </p>
-      <div class="inline">
-        <button :disabled="busy || disabled" @click="choose">＋ 选择资料</button
-        ><span v-if="file" class="pending-file">{{ file.name }}</span
-        ><button :disabled="busy || disabled || !file" @click="upload">
-          {{ busy ? "处理中…" : "保存附件" }}</button
-        ><button :disabled="busy" @click="refresh">刷新</button>
+      <div v-if="file" class="pending-card">
+        <span class="document-icon" aria-hidden="true">{{
+          file.name.split(".").pop()?.toUpperCase()
+        }}</span>
+        <span class="pending-file"
+          ><strong>{{ file.name }}</strong
+          ><small
+            >{{ (file.size / 1024).toFixed(0) }} KB · {{ busy ? "正在上传…" : "待上传" }}</small
+          ></span
+        >
+        <button class="upload-confirm" :disabled="busy || disabled" @click="upload">
+          {{ busy ? "正在上传…" : "上传" }}
+        </button>
+      </div>
+      <div class="document-controls">
+        <button :disabled="busy || disabled" @click="choose">＋ 添加文件</button>
+        <button :disabled="busy" @click="refresh">刷新状态</button>
       </div>
       <p v-if="error" role="alert" class="error">{{ error }}</p>
       <p v-if="!items.length && !file" class="empty-documents">
@@ -298,7 +309,59 @@ function removed(): void {
   line-height: 1.7;
 }
 .pending-file {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+}
+.pending-file strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-file small {
+  display: block;
+  margin-top: 4px;
+}
+.pending-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid #e1e5e2;
+  border-radius: 15px;
+  background: #fff;
+}
+.document-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 44px;
+  height: 50px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #fce9e7;
+  color: #ba4940;
+  font-size: 11px;
+  font-weight: 700;
+}
+.document-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.document-controls button {
+  border: 1px solid #e1e5e2;
+  border-radius: 999px;
+  background: #fff;
+  color: #526158;
+  font-size: 12px;
+  padding: 7px 12px;
+}
+.pending-card .upload-confirm {
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 8px 14px;
 }
 .empty-documents {
   padding: 24px 0;

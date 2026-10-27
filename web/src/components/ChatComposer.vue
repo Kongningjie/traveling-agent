@@ -1,6 +1,6 @@
 <!-- 统一自然语言输入：不要求填写完整字段；中文输入法回车不发送，Shift+Enter换行。 -->
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch, useId } from "vue";
 import type { DocumentView } from "../workspace/documents";
 import { documentLabel } from "../workspace/documents";
 /** modelValue为父页面草稿；disabled只阻止提交，用户仍可编辑，输入不在本组件持久化。 */
@@ -24,6 +24,30 @@ const emit = defineEmits<{
   stop: [];
 }>();
 const input = ref<HTMLTextAreaElement>();
+const attachmentMenu = ref<HTMLElement>(),
+  attachmentTrigger = ref<HTMLButtonElement>();
+const attachmentMenuId = useId();
+/** 在加号上方显示顶层菜单，避免输入框和聊天滚动容器裁切；窄屏限制在视口内。 */
+function positionAttachments(): void {
+  if (!attachmentMenu.value || !attachmentTrigger.value) return;
+  const bounds = attachmentTrigger.value.getBoundingClientRect();
+  attachmentMenu.value.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 328))}px`;
+  attachmentMenu.value.style.bottom = `${Math.max(8, window.innerHeight - bounds.top + 8)}px`;
+}
+/** 关闭菜单后打开原有文件选择与确认流程，不自动上传或发送消息。 */
+function attachFile(): void {
+  attachmentMenu.value?.hidePopover();
+  emit("attach");
+}
+/**
+ * 从已有会话资料选择本轮引用，不删除原件或自动发起模型请求。
+ *
+ * @param document 用户明确选择的会话文件，状态限制由原引用入口再次检查。
+ */
+function attachExisting(document: DocumentView): void {
+  attachmentMenu.value?.hidePopover();
+  chooseDocument(document);
+}
 const caret = ref(0),
   mentionIndex = ref(0),
   dismissed = ref(false);
@@ -164,7 +188,9 @@ defineExpose({ focus });
     <form class="composer" @submit.prevent="submit">
       <div v-if="selected.length" class="file-chips" aria-label="本轮选中的资料">
         <div v-for="entry in selectedEntries" :key="entry.id" class="file-chip">
-          <span aria-hidden="true">▤</span>
+          <span class="file-type" aria-hidden="true">{{
+            entry.document?.kind.toUpperCase() ?? "文件"
+          }}</span>
           <span
             ><strong>{{ entry.document?.name ?? "资料正在同步" }}</strong
             ><small>{{
@@ -218,15 +244,61 @@ defineExpose({ focus });
       />
       <div class="composer-toolbar">
         <button
+          ref="attachmentTrigger"
           class="attach-button"
           type="button"
-          aria-label="上传旅行资料"
+          aria-label="添加文件"
           title="上传旅行资料（PDF、DOCX、TXT、Markdown）"
           :disabled="attachmentDisabled"
-          @click="emit('attach')"
+          :popovertarget="attachmentMenuId"
+          @click="positionAttachments"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
+        <div
+          :id="attachmentMenuId"
+          ref="attachmentMenu"
+          popover
+          class="attachment-menu"
+          aria-label="添加文件"
+        >
+          <button
+            type="button"
+            class="attachment-upload"
+            :disabled="attachmentDisabled"
+            @click="attachFile"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 12.5 14.5 6a3 3 0 0 1 4.2 4.2l-8.5 8.5a5 5 0 0 1-7.1-7.1l8.5-8.5" />
+            </svg>
+            <span><strong>添加文件</strong><small>从电脑上传旅行计划或资料</small></span>
+          </button>
+          <p>PDF、DOCX、TXT、Markdown · 最大 10 MiB</p>
+          <template v-if="documents?.length">
+            <h3>引用会话文件</h3>
+            <button
+              v-for="doc in documents"
+              :key="doc.id"
+              type="button"
+              class="attachment-existing"
+              :disabled="
+                disabled ||
+                doc.state !== 'READY' ||
+                selected.includes(doc.id) ||
+                selected.length >= 10
+              "
+              @click="attachExisting(doc)"
+            >
+              <span class="file-type" aria-hidden="true">{{ doc.kind.toUpperCase() }}</span>
+              <span
+                ><strong>{{ doc.name }}</strong
+                ><small>{{
+                  selected.includes(doc.id) ? "已添加到本轮" : documentLabel(doc)
+                }}</small></span
+              >
+            </button>
+          </template>
+        </div>
         <span>{{
           answering
             ? "回答这轮问题，也可以提出自己的想法"
@@ -283,7 +355,94 @@ defineExpose({ focus });
   border-radius: 12px;
   padding: 8px 10px;
   max-width: 100%;
-  background: #f7faf9;
+  background: #fff;
+}
+.file-type {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 38px;
+  height: 42px;
+  border-radius: 9px;
+  background: #fce9e7;
+  color: #ba4940;
+  font-size: 10px;
+  font-weight: 700;
+}
+.attachment-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(380px, 60vh);
+  overflow: auto;
+  padding: 7px;
+  border: 1px solid #e4e7e5;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 32px #18382e24;
+  color: #27332d;
+}
+.attachment-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.attachment-menu button:hover {
+  background: #f3f4f3;
+}
+.attachment-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.attachment-menu button > span:last-child {
+  min-width: 0;
+}
+.attachment-menu strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+}
+.attachment-menu small {
+  display: block;
+  margin-top: 3px;
+  color: #808780;
+  font-size: 12px;
+}
+.attachment-menu svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: #67716a;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.attachment-menu p {
+  margin: 5px 10px 9px;
+  color: #858d87;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.attachment-menu h3 {
+  border-top: 1px solid #eceeec;
+  margin: 7px 0 2px;
+  padding: 12px 10px 4px;
+  color: #808780;
+  font-size: 12px;
+  font-weight: 500;
 }
 .file-chip strong {
   display: block;
