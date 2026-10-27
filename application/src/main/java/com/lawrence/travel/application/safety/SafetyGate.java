@@ -7,12 +7,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
- * 输入、上下文、摘要、工具结果及最终回复共用的基础确定性安全边界。
- *
- * <p>DialogueService.process在模型前后检查；Harness运行时和资料应用层在各自输入/输出处复查，
- * 必须完整检查后才交付用户。检查危险载荷和进程内已知秘密，拒绝或检查不可用均失败关闭，
- * 只把固定分类/策略版本/问题ID交给reporter，不记录被拦截原文。
- * 本类不是旅行语义意图识别器，也不冒充完整内容审核或权限系统；业务授权仍由应用服务决定。
+ * 检查文本中的危险内容和已知密钥，未通过时拒绝后续处理。
  */
 public final class SafetyGate {
     /** 基础策略变化时提升版本，便于定位检查结果。 */
@@ -67,9 +62,6 @@ public final class SafetyGate {
     /**
      * 对完整文本运行本地基础策略及已知秘密检查，返回ALLOW、REJECT或UNAVAILABLE。
      *
-     * <p>规则只判定基础文本边界，不把敏感词当旅行操作意图。失败时reporter接收固定结果，
-     * 记录通道异常也转为UNAVAILABLE，不能因为诊断失败放行。不会保存原文或密钥本身。
-     *
      * @param point 固定检查点
      * @param text 待查完整文本
      * @return 不保存原文的检查结果；依赖异常失败关闭
@@ -112,9 +104,6 @@ public final class SafetyGate {
 
     /**
      * 为调用链提供失败关闭的检查入口：非ALLOW立即抛类型化Failure，阻止后续发送、显示或提交。
-     *
-     * <p>调用方按安全分类暂停并保留可处理状态，不向用户回显被拦截文本；完整输出先检查后展示，
-     * 不能通过先流式发送再检查来声称已经拦截。
      *
      * @param point 固定检查点
      * @param text 完整文本；失败抛固定异常，不能先显示后拦截

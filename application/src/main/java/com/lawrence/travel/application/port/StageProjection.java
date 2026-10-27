@@ -6,12 +6,7 @@ import com.lawrence.travel.domain.execution.StageType;
 import java.util.UUID;
 
 /**
- * 引擎阶段提交事务内的业务投影端口，隔离统一调度与需求/调查/候选各自的持久化规则。
- *
- * <p>PostgresExecutionEngine.commit先调用beforeTaskLock维护原锁序，再在围栏通过后调用project。
- * 实现包括PostgresNegotiationStore、PostgresResearchStore和PostgresCandidateStore；
- * 按各自识别的产物处理，不能由模型自报角色决定写入权限。投影、检查点、事件完成和
- * 后继登记同事务，失败不能留下半完成业务状态。
+ * 将已通过执行资格检查的阶段产物写入对应业务表。
  */
 public interface StageProjection {
     /**

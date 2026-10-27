@@ -18,14 +18,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 单实例唯一后台轮询与执行调度器，串接持久旅行阶段和注册的聊天/附件等应用工作源。
- *
- * <p>bootstrap的DialogueConfiguration注册DialogueService；轮询经dispatchAuxiliary领取
- * LeasedWork，在虚拟线程执行process并定期续租。旅行工作经dispatchStages → StageExecutor，
- * 二者共享受控物理容量，解析另用独立槽；框架不再启动第二套业务后台队列。
- *
- * <p>数据库围栏决定结果能否提交；线程中断只辅助停止。处理器和网络实际退出之前保留容量，
- * 避免逻辑取消后立刻启动更多请求而突破并发上限。readiness未就绪时不领取，关闭时停止新派发。
+ * 轮询并领取聊天、资料解析和旅行阶段任务，安排后台执行。
  */
 public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     private final ExecutionEngineStore store;
@@ -171,11 +164,7 @@ public final class PersistentStageWorker implements RunHandles, AutoCloseable {
     }
 
     /**
-     * 轮转已注册工作源，取得实际容量后领取一项工作，随后在虚拟线程执行并为租约型工作安排心跳。
-     *
-     * <p>聊天的source是DialogueService，claimWorkExcluding内部做短事务领取；未领到输入立即归还容量。
-     * 已领取后由LeasedWork.run进入process；续租失败发出中断，最终仍由数据库围栏拒绝旧结果。
-     * 线程真正退出时才清理心跳、用户占用与容量，不能在只标记取消时提前归还。
+     * 轮流领取已注册工作源的任务，启动线程并安排续租。
      */
     private void dispatchAuxiliary() {
         if (auxiliary.isEmpty()) return;

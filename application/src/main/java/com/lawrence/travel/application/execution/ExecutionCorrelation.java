@@ -3,11 +3,7 @@ package com.lawrence.travel.application.execution;
 import java.util.UUID;
 
 /**
- * 执行链路的线程局部关联范围，连接HTTP请求、后台作业、Agent角色和逐请求计量节点。
- *
- * <p>RequestCorrelationFilter建立请求身份，应用登记作业时持久化因果关联；Worker和模型虚拟线程
- * 通过bind/bindSpan/bindTrace显式恢复。Scope关闭恢复上层绑定，防止线程复用串联其他用户。
- * 本类只传递非敏感诊断身份，不是认证、租约、预算或业务提交权威，不能替代PG围栏。
+ * 在线程中绑定和恢复请求及执行追踪ID。
  */
 public final class ExecutionCorrelation {
     private static final ThreadLocal<Ids> CURRENT = new ThreadLocal<>();

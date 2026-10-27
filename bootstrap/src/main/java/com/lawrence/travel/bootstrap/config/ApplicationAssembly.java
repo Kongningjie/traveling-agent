@@ -13,11 +13,7 @@ import com.lawrence.travel.application.execution.TravelToolService;
 import com.lawrence.travel.agent.runtime.TravelAgentTools;
 
 /**
- * Agent运行时的根装配点，绑定原调用门禁、模型角色配置、工作区、上下文服务和受控资料工具。
- *
- * <p>业务层只依赖AgentRuntimePort；本配置选择HarnessAgentRuntimeAdapter生产实现，
- * 缺少真实准入能力时使用明确不可真实调用的适配状态，不自动创建可调用替身。
- * SDK密钥由进程内供应器读取，不写提示词或诊断；实例装配完成不代表已获得真实联调授权。
+ * 装配Harness运行时、模型配置和工具权限。
  */
 @Configuration(proxyBeanMethods = false)
 public class ApplicationAssembly {

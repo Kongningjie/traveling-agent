@@ -18,12 +18,7 @@ import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
 /**
- * 资料工具结果与可选历史的发送前预算兜底，挂在受限Harness的推理中间件链上。
- *
- * <p>SourceToolkit提供原生卸载能力；onReasoning先正常卸载，再仅对明确尚未发送的
- * 本地上下文超限缩小可卸载结果或移出带标记历史。工具调用/结果配对、权威区与本轮输入保留，
- * 原文仍在PG并可分页读取，不重做已完成工具，不重试未知用量的供应商请求。
- * 此处的本地重新装配不是另起业务预算，也不应误记为一次已完成模型回复。
+ * 请求超限时卸载工具结果或移除可选历史。
  */
 public final class SourceResultBudgetMiddleware implements HarnessRuntimeMiddleware {
     static final String OPTIONAL_HISTORY = "travel.context.optionalHistory";
@@ -73,7 +68,6 @@ public final class SourceResultBudgetMiddleware implements HarnessRuntimeMiddlew
                                 var smaller = withoutHistory(input.messages());
                                 if (smaller == input.messages()) return Flux.error(failure);
                                 // 只有应用装配时标记的历史可移出本次视图，完整原文仍在PG；本轮权威区没有此标记。
-                                // 保持工具调用及结果配对，不重做已完成工具；模型必须看到历史缺失提示。
                                 var state =
                                         RuntimeContext.resolveAgentState(
                                                 ctx == null ? RuntimeContext.empty() : ctx, agent);
@@ -92,7 +86,6 @@ public final class SourceResultBudgetMiddleware implements HarnessRuntimeMiddlew
                                         remaining - 1);
                             }
                             // 原生组件同时更新canonical state和本轮视图，保留调用ID、状态、来源全文及分页入口。
-                            // 已卸载结果不能再次卸载；分页读取结果不卸载，避免read_file循环。
                             return sources.eviction(longest - 1, 32)
                                     .onReasoning(
                                             agent,

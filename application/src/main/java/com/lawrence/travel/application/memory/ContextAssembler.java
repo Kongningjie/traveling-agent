@@ -11,11 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 旅行角色兼容上下文装配器；统一会话路径优先使用SessionContextService，本类不是第二套调度器。
- *
- * <p>上游HarnessAgentRuntimeAdapter在会话服务路径不可用且存在业务basis时调用prepare；
- * 通过ContextStore读取权威数据并检查需求/偏好版本，保护请求及权威区，仅压缩可选历史。
- * reviewer完全隔离规划历史和自评；摘要引用可追溯原文，存储仍归PG，不让模型摘要成为业务事实。
+ * 组装旅行上下文，保留完整需求并压缩历史。
  */
 public final class ContextAssembler {
     /** 摘要格式或装配优先级改变时提升此版本，使既有缓存失效。 */

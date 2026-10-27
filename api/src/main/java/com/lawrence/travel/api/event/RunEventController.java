@@ -17,11 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 旅行执行结果的只读HTTP/SSE出口，上游是用户可见运行事件，而非供应商原始Token流。
- *
- * <p>view/page经RunEventService读取一致性视图和持久游标；stream交给EventStreams补读PG事件。
- * Last-Event-ID优先于首次after，重连不会重新启动模型。认证身份与私有任务归属均须核对；
- * 关闭SSE只结束传输，不取消后台业务，主动停止应走应用停止命令。
+ * 提供旅行状态查询、事件分页和SSE订阅接口。
  */
 @RestController
 @Profile("local")

@@ -24,15 +24,7 @@ import java.util.function.Supplier;
 import okhttp3.OkHttpClient;
 
 /**
- * 生产Harness运行时总入口，连接应用角色调用、PG会话上下文、受限工具和逐请求计量传输。
- *
- * <p>调用顺序：业务解释器/Advisor → startContextual → startInvocation →
- * SessionContextService.prepare → ControlledHarnessCall → GuardedDashScopeTransport → 模型。
- * 模型通过白名单工具按需读取资料；工具继续轮次和压缩请求也经过相同预算及发送守卫。
- *
- * <p>每次调用建立隔离Harness工作区和ActiveInvocation，并显式传播诊断关联到虚拟线程。
- * 最终只返回经过安全检查的answer；业务持久化由应用层及PG提交链完成，框架历史/文件
- * 不是需求或行程的权威来源。取消会关闭在途连接并等待退出，结果取消不提前释放网络许可。
+ * 创建Harness调用，组装上下文并执行模型请求。
  */
 public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final ModelCallAdmission admission;
@@ -266,11 +258,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     }
 
     /**
-     * {@inheritDoc}
-     *
-     * <p>聊天解释器和各业务Advisor的生产入口。必须装配版本化上下文服务与编码器，
-     * 不能在缺少它们时退回裸prompt调用；basis传递原需求/偏好版本或聊天领取token。
-     * 实际创建、上下文准备与执行统一进入startInvocation，不在此处自行拼接另一套历史。
+     * 检查上下文服务是否已配置，然后启动模型调用。
      */
     @Override
     public Invocation startContextual(
@@ -297,11 +285,6 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     /**
      * 建立一次隔离Agent调用，并异步串接上下文准备、Harness执行、受控工具与最终产物。
      *
-     * <p>先验证角色/输入和安全，再选择工具权限；有原领取token的协调角色只读用户资料，
-     * 其他角色按白名单或禁用工具，不因prompt指令扩权。统一传输为每个实际HTTP请求独立预占。
-     * 虚拟线程恢复原请求/追踪父节点；优先SessionContextService，旧路径才使用ContextAssembler。
-     * 正常准备与唯一受控超限恢复共用原预算，输出经ActiveInvocation送回解释器，不能直接写业务库。
-     *
      * @param runId 原运行
      * @param role 角色
      * @param prompt 当前请求
@@ -326,7 +309,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         String key = keySupplier.get();
         if (key == null || key.isBlank())
             throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
-        // 只为有原领取身份的协调请求开放资料工具；原文提取、审核及普通探针仍无资料读取权。
+        // 只有携带领取token的协调调用可以读取个人资料。
         Toolkit toolkit =
                 basis != null
                                 && basis.attemptToken() != null
@@ -359,8 +342,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                         });
         if (toolkit instanceof SourceToolkit sources)
             transport.contextHeadroom(sources::contextHeadroom);
-// SDK只承担消息格式及模型协议；禁止内置联网搜索和SDK自动重试，防止未计量的隐藏调用。
-// stream用于从供应商逐块接收，浏览器不会直接收到这些原始块；最终answer仍需完整安全校验。
+        // 关闭SDK自动搜索和重试。
         var model =
                 DashScopeChatModel.builder()
                         .apiKey(key)
@@ -650,9 +632,6 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
 
         /**
          * 在后台线程执行ControlledHarnessCall，成功时只完成只读结果Future，不提交业务状态。
-         *
-         * <p>已取消时不交付迟到answer；保留可识别的门禁、安全和上下文变更分类，其他异常脱敏。
-         * finally通知实际退出，以便close等待资源释放而不把逻辑取消误当物理退出。
          *
          * @param prompt 本次完整输入提供器，先压缩与校验再调用模型
          * @param recovery 同预算唯一超限恢复

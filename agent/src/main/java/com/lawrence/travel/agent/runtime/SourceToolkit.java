@@ -11,12 +11,7 @@ import java.lang.reflect.Proxy;
 import java.util.UUID;
 
 /**
- * 协调Agent按需读取个人资料及会话工作文件的受限工具集合，不授予业务写入权限。
- *
- * <p>由HarnessAgentRuntimeAdapter仅为有原attempt token的协调调用创建；工具进入
- * SourceReadService，按原budget/token核对用户、会话、原件版本和删除水位。
- * 目录不是全文，搜索/页段读取才产生有界来源；结果预算与模型剩余上下文联动，
- * 不能因为Agent看过文件就把个人材料升级为官方证据、偏好确认或操作授权。
+ * 提供文件目录、检索、原文读取和工作文件工具。
  */
 public final class SourceToolkit extends SafetyToolkit {
     private final SourceReadService service;
@@ -39,7 +34,6 @@ public final class SourceToolkit extends SafetyToolkit {
     int pageLength(int requested) {
         if (requested < 1 || requested > 4000) return requested;
         // 给新tool_call及结果JSON至少预留1024字节，单UTF-16字符按两层JSON转义12字节保守估算。
-        // 最小64字符只是读取粒度，不是放行保证；最终SDK完整正文仍必须通过原发送门禁。
         long available =
                 remainingBytes == Long.MAX_VALUE
                         ? 4000

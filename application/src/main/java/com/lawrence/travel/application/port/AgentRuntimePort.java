@@ -1,12 +1,7 @@
 package com.lawrence.travel.application.port;
 
 /**
- * 所有Agent角色的运行时端口：应用提交角色、原预算与输入版本，适配器返回可取消的异步句柄。
- *
- * <p>聊天理解、调查和规划适配器通过此端口进入HarnessAgentRuntimeAdapter；后者调用
- * SessionContextService组装上下文，再经受控传输发起模型请求。Invocation.result只提供模型产物，
- * 不等于业务已提交；Invocation.close负责取消/释放，不能据此宣称供应商没有计费。
- * 生产startContextual复查权威上下文；接口默认实现只是旧替身兼容，不提供生产版本保障。
+ * 定义模型调用、结果读取和取消接口。
  */
 public interface AgentRuntimePort {
     /**

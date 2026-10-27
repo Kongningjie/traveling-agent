@@ -15,20 +15,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 聊天规划意图进入旅行业务的应用入口，同时承接用户问题卡片及自由回答。
- *
- * <p>DialogueService.route把已验证facts交给applyInterpreted；本类在短事务中创建/关联旅行
- * 或登记变更，通过原ExecutionEngineStore发起UNDERSTAND阶段。字段值仍需领域合并与
- * 阶段提交校验，模型reply不能作为已保存需求的证据。新修改与旧执行失效遵循原引擎，
- * 不另建后台队列；等待用户时保存问题卡片并释放执行线程。
+ * 保存旅行需求输入和问题回答，启动或继续需求分析阶段。
  */
 public final class NegotiationService {
     /**
      * 接收聊天已完成模型理解的规划字段，事务内登记为旅行协商输入并衔接原阶段引擎。
-     *
-     * <p>首次明确规划时创建真实任务；已有任务登记变更并处理旧运行资格。INTERPRETED输入保留
-     * 原文和已校验facts，NegotiationHandler不会再为同一份输入重复调用提取模型。
-     * 本方法返回关联任务身份，不代表行程已生成、校验通过或被用户接受。
      *
      * @param actor 受信用户
      * @param taskId 已关联任务，可空

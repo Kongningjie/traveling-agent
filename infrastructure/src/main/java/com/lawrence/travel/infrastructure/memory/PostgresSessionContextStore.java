@@ -16,12 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 会话上下文的PG权威读取与摘要缓存适配器，上游是SessionContextService。
- *
- * <p>load按原budget识别聊天输入或旅行运行，不创建占位旅行；snapshot读取历史、业务版本、
- * 偏好和删除水位。guard/checked在短事务复查来源，cached/save按精确依赖隔离摘要。
- * 服务重启从PG重建上下文，不能恢复旧框架对象就跳过归属、删除和版本校验。
- * recordIssue只登记固定摘要故障分类及因果身份，不保存模型提示词或供应商异常正文。
+ * 从PG读取会话上下文，保存和校验历史摘要。
  */
 public final class PostgresSessionContextStore implements SessionContextStore {
     private final SessionContextMapper mapper;

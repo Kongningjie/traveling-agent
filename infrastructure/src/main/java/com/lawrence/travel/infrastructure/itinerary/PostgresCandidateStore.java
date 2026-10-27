@@ -35,13 +35,7 @@ import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.N
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.STALE_VERSION;
 
 /**
- * 候选行程的PG读写、确定性校验与阶段产物投影，实现模型草案到可接受候选的持久化边界。
- *
- * <p>PlanningHandler读取context并请求validate；阶段execute只返回产物。真正写候选、
- * 不可变快照、Java报告和审核结论发生在PostgresExecutionEngine.commit调用project的事务中，
- * 再次比较需求/偏好/运行围栏和证据依赖，不能仅相信检查点中的通过标志。
- * 用户明确接受由ItineraryService调用accept，重新核对当前版本、屏障及门禁后才移动生效指针；
- * 候选展示、重新校验和历史恢复都不等于已经替换用户当前行程。
+ * 保存行程候选及校验报告，处理候选接受。
  */
 public final class PostgresCandidateStore implements CandidateStore {
     private final CandidateMapper mapper;
@@ -282,11 +276,7 @@ public final class PostgresCandidateStore implements CandidateStore {
     }
 
     /**
-     * {@inheritDoc}
-     *
-     * <p>只由引擎取得事件完成资格后调用；不新建事务，加入同一阶段提交事务。
-     * 按权威StageType及检查点operation分支，重查偏好版本、当前运行和未决输入，保存对应候选/报告。
-     * 模型不能凭自报operation越过Java门槛；后续任一投影或后继登记失败都会回滚当前阶段的业务写入。
+     * 只由引擎取得事件完成资格后调用。
      */
     @Override
     public Result project(ExecutionFence fence, StageType type, StageOutput output) {
@@ -642,10 +632,6 @@ public final class PostgresCandidateStore implements CandidateStore {
 
     /**
      * 在用户明确接受或重校验入口执行最终候选门禁，并以请求幂等回执防止重复改变生效版本。
-     *
-     * <p>重新核对用户、任务、候选、需求/代次/基础版本和检查报告绑定；过期依赖走重校验路径，
-     * 而非把旧报告当最新。只有满足接受条件且不是单纯forceRecheck时才允许生效；
-     * 返回是否需要可靠登记后继，由ItineraryService在同事务中衔接原引擎。
      *
      * @param command 精确预期
      * @param forceRecheck 只重校验

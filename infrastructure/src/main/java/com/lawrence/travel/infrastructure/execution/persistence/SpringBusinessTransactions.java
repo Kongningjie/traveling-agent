@@ -9,12 +9,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.function.Supplier;
 
 /**
- * 应用BusinessTransactions端口的Spring实现，使用同一PG数据源的REQUIRED事务。
- *
- * <p>DialogueService、协商与候选接受等应用用例通过required包围短数据库业务；
- * 嵌套用例加入已有事务，不能理解为每次required都是独立提交。网络及模型等待必须在外部。
- * afterCommit只负责数据库提交后的尽力通知/取消；通知失败不能将已生效数据库事实冒称回滚，
- * 旧执行的最终提交资格仍由PG围栏和租约控制。
+ * 执行数据库事务，并在提交后运行回调。
  */
 public final class SpringBusinessTransactions implements BusinessTransactions {
     private final TransactionTemplate transaction;

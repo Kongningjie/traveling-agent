@@ -12,11 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 规划与审核角色的模型适配器，上游PlanningHandler，下游统一AgentRuntimePort。
- *
- * <p>draft/patch使用planner，review使用独立reviewer；两者都通过startContextual接入上下文、
- * 逐HTTP计量与取消。审核只接收权威需求、证据、候选及Java报告，不接收规划者自评。
- * 返回草案/Patch/问题列表只是待校验结构，不访问Mapper、不接受候选、不放宽约束。
+ * 调用规划模型生成草案或补丁，调用审核模型检查候选。
  */
 public final class HarnessPlanningAdvisor implements PlanningAdvisor {
     private final AgentRuntimePort runtime;
@@ -176,10 +172,6 @@ public final class HarnessPlanningAdvisor implements PlanningAdvisor {
 
     /**
      * 通过统一运行时执行一次规划或审核角色请求，并严格解码最终answer为期望业务类型。
-     *
-     * <p>沿原run和basis调用startContextual，因此压缩、工具策略、HTTP计量和版本守卫不被旁路。
-     * 等待超时或线程中断会关闭Invocation；返回结果由PlanningHandler检查绑定和Java规则，
-     * 不能在此直接写候选状态或接受行程。
      *
      * @param run 原运行
      * @param role 固定角色

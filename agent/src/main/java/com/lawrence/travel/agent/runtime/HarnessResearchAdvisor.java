@@ -10,11 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 旅行调查角色的模型策略适配器，上游ResearchHandler，下游统一AgentRuntimePort。
- *
- * <p>根据权威需求、已知证据和固定官方主机范围提出有界查询/提取建议，不凭模型记忆补事实。
- * 所有模型请求使用原run预算与上下文版本；返回值仍由ResearchHandler和EvidencePolicy核对。
- * 查询执行通过受控工具应用服务，字段证据最终由阶段提交投影保存，不直接从模型写入PG。
+ * 调用调查模型生成查询计划和证据提取结果。
  */
 public final class HarnessResearchAdvisor implements ResearchAdvisor {
     private final AgentRuntimePort runtime;

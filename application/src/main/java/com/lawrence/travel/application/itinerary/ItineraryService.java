@@ -11,12 +11,7 @@ import com.lawrence.travel.domain.travel.TaskScope;
 import java.util.UUID;
 
 /**
- * 用户查看、明确接受及重新校验行程候选的应用入口，接在候选展示之后。
- *
- * <p>聊天确认由DialogueService.act委托accept，行程接口也经同一用例；submit把用户预期的
- * 候选身份、基础版本、需求修订、代次和内容哈希交给CandidateStore事务校验。
- * 若依赖过期则可靠登记VALIDATE后继，用户仍须重新接受；模型产物、审核通过或页面展示
- * 都不能绕过这个显式生效入口。
+ * 查询、接受或重新校验行程候选。
  */
 public final class ItineraryService {
     private final CandidateStore store;

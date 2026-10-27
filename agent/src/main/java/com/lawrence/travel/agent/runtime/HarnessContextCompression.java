@@ -21,12 +21,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 复用Harness原生压缩组件的受控适配器，上游由SessionContextService选择可压缩的完整历史。
- *
- * <p>compact只接收历史消息，不接收当前权威区；压缩器使用与主请求相同的受计量Model，
- * 因此摘要也会经过GuardedDashScopeTransport及原预算。禁用框架额外Flush/offload，
- * 不偷偷增加另一套摘要调用；产物为可核对原文摘录，业务状态仍以PG结构化记录为准。
- * 框架回退不能吞掉门禁或取消失败；调用方验证摘要原文、依赖和安全后才保存复用。
+ * 使用Harness压缩历史消息，返回可核对的原文摘录。
  */
 public final class HarnessContextCompression implements AgentContext.Compression {
     private final Model model;
@@ -69,11 +64,7 @@ public final class HarnessContextCompression implements AgentContext.Compression
     }
 
     /**
-     * {@inheritDoc}
-     *
-     * <p>把应用选定的完整历史编码为低权限数据消息，配置ConversationCompactor生成有界摘录。
-     * 使用原受控模型观察失败，禁止SDK把门禁/取消降级成看似成功的摘要；不递归压缩当前请求，
-     * 不把记忆写文件当业务提交。返回ConversationDigest后仍由SessionContextService验证引用并在PG缓存。
+     * 把应用选定的完整历史编码为低权限数据消息，配置ConversationCompactor生成有界摘录。
      */
     @Override
     public ConversationDigest compact(List<AgentContext.Message> messages) {

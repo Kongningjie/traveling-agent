@@ -12,11 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 /**
- * 模型上下文服务的装配点，将PG权威读取、统一安全检查和编码器接入运行时。
- *
- * <p>ContextAssembler是旅行兼容路径，SessionContextService处理统一会话消息及摘要；
- * 两者复用受控Harness压缩能力，但PG仍是恢复依据。装配不启动模型请求，
- * 不因存在框架文件或摘要就绕过删除水位、偏好版本和原作业预算。
+ * 装配PG上下文存储、摘要和上下文组装服务。
  */
 @Configuration(proxyBeanMethods = false)
 @Profile("local")

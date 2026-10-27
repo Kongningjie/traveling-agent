@@ -14,12 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 每个实际模型HTTP请求的准入与计量入口，连接受控传输和持久BudgetLedger。
- *
- * <p>GuardedDashScopeTransport在发送前调用begin：核对开关、角色型号、地域接口、免费证据、
- * 保守余额及在途槽，再持久化预占；只有取得Permit才能发送。压缩、工具继续、失败和恢复
- * 均沿用相同规则，不能把一次Agent调用误算为一次HTTP请求。
- * 网络完成后Permit.complete/close结算；本类本身不创建SDK、不读取密钥、不执行网络请求。
+ * 发送前检查型号、免费额度、预算和并发，并预占请求额度。
  */
 public final class ModelCallAdmission {
     private final boolean enabled;
@@ -85,8 +80,7 @@ public final class ModelCallAdmission {
                 || ledger.hasUsageOverrun(target, quota.verifiedAt())) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
         }
-        // 用户批准：UNKNOWN和重启遗留RESERVED保留原预占上限，计入下面的余额扣减，
-        // 不再因历史状态单独封禁整个型号；已知超上界及账本写失败仍须阻断。
+        // 用户批准：UNKNOWN和重启遗留RESERVED保留原预占上限，计入下面的余额扣减， 不再因历史状态单独封禁整个型号；已知超上界及账本写失败仍须阻断。
         long accounted = ledger.tokensSince(target, quota.verifiedAt());
         if (accounted > quota.remainingTokens() - tokenUpperBound) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT);
@@ -96,7 +90,6 @@ public final class ModelCallAdmission {
             throw new CallRejectedException(CallRejectedException.Reason.MODEL_CONCURRENCY_FULL);
         try {
             // 单实例的短临界区仅串行“检查快照 + 预占”，真实网络请求不持此锁。
-            // 请求次数在发送前提交，失败、取消和进程崩溃均不自动退还。
             var reservation =
                     ledger.reserve(runId, CallKind.MODEL, limits, target, tokenUpperBound, now);
             var effective = ledger.limitsFor(runId, limits);
@@ -155,11 +148,7 @@ public final class ModelCallAdmission {
         }
 
         /**
-         * 在实际HTTP结束后幂等结算一次请求；首个完成结果生效，并最终释放真实在途槽。
-         *
-         * <p>可信usage交BudgetLedger.finish写COMPLETED；null保持UNKNOWN并按预占上界保守计入。
-         * 超出预占上界或计量写入失败需保持阻断，不能通过释放槽或重复complete把故障改写成成功。
-         * 请求次数和已消耗Token不因失败/取消退还；调用方不得在HTTP仍运行时提前调用。
+         * 在实际HTTP结束后幂等结算一次请求。
          *
          * @param usage 供应商已知 Token；null 表示失败或结束后仍未知
          */
@@ -167,7 +156,6 @@ public final class ModelCallAdmission {
             if (!finished.compareAndSet(false, true)) return;
             try {
                 // 与准入共享短临界区；UNKNOWN继续占用预占上限，不退还次数或额度。
-                // 这里只做数据库结算，不能在持此锁时等待模型或调用任何工具。
                 synchronized (ModelCallAdmission.this) {
                     try {
                         ledger.finish(

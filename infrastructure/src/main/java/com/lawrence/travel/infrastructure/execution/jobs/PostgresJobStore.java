@@ -18,11 +18,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 聊天、附件等统一后台作业的PG实现，与旅行阶段共用Worker但不混淆各自的业务状态。
- *
- * <p>PostgresDialogueStore收件时登记作业，领取时通过本端口获得原budget及递增token；
- * 心跳续租和finish均以原围栏校验，停止/删除失效后旧线程不能提交。作业状态再投影到
- * dialogue_input供页面读取；持久租约使重启能重新发现工作，不承诺从任意SDK内部位置原地续跑。
+ * 保存后台作业，处理领取、续租、暂停和完成。
  */
 public final class PostgresJobStore implements JobStore {
     /** {@inheritDoc} 不领取物理容量、不消耗模型额度；不能将运行中的任意模型结果伪造成直接完成。 */

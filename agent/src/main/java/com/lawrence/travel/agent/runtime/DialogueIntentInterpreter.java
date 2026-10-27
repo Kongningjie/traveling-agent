@@ -12,12 +12,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 聊天主链的模型理解适配器：将Claim中的本轮原文和业务数据转换为一次协调Agent请求。
- *
- * <p>上游DialogueService.process → interpret → AgentRuntimePort.startContextual；生产装配为
- * HarnessAgentRuntimeAdapter，统一负责会话历史、压缩、工具权限及真实HTTP计量。
- * 本类约定外层answer字符串中包含业务JSON，再解码为DialogueIntent.Result返回应用层。
- * 返回值只是待核验提议，既不写库，也不自动接受行程或执行偏好授权。
+ * 调用协调模型，识别用户意图、提取需求并生成回复。
  */
 public final class DialogueIntentInterpreter implements DialogueInterpreter {
     private final AgentRuntimePort runtime;
@@ -37,12 +32,7 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
     }
 
     /**
-     * {@inheritDoc}
-     *
-     * <p>先检查真实调用开关，再构造意图/字段/资料读取协议；把Claim原预算及attempt token交给
-     * 运行时，禁止另起预算。等待最终结构化answer，按类型解码后返回process做安全、原文和业务校验。
-     * 超时、中断、启动失败、执行失败和解码失败分别转固定分类；try-with-resources关闭实际调用句柄，
-     * 不把异常正文、提示词或供应商响应写入诊断。此处不使用关键词替身伪装模型理解成功。
+     * 调用协调模型，等待并解码意图识别结果。
      */
     @Override
     public DialogueIntent.Result interpret(Dialogue.Claim c) {

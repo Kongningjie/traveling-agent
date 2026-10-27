@@ -19,12 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.INVALID_INPUT;
 
 /**
- * 后端结构化数据的严格编解码器，连接模型业务JSON、领域对象和PG JSONB。
- *
- * <p>bootstrap通过InteractionCodec把聊天Result解码路由到decodeDialogue；拒绝重复键、尾随JSON、
- * 非法枚举/形状和领域构造约束，不用字符串修复伪造有效模型产物。编码递归排序对象键以便
- * 生成一致哈希，但保留数组顺序。序列化成功不代表旅行可行或业务已提交。
- * 诊断仅取固定类别/白名单字段路径，不存解析器异常原文、非法字段值或模型全文。
+ * 严格编解码JSON，计算内容哈希并分类解码错误。
  */
 public final class TravelJson {
     private final JsonMapper mapper =
@@ -77,10 +72,6 @@ public final class TravelJson {
 
     /**
      * 将外层answer内的业务JSON解码为DialogueIntent.Result，并生成可脱敏定位的协议错误。
-     *
-     * <p>DialogueIntentInterpreter通过装配后的InteractionCodec调用本方法；语法、数组/对象形状、
-     * 枚举、UUID和领域约束分别分类。Jackson异常只用于读取可信类型及白名单路径，不读取message/原值。
-     * 成功产物仍需process.validateSources和route检查，不能仅凭JSON可解析就执行模型建议。
      *
      * @param text 不可信模型业务JSON
      * @return 严格领域结果，不修复或容忍非法结构

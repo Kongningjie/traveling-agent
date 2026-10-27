@@ -5,12 +5,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 聊天模型产物的纯领域协议：粗粒度意图、受限动作、带原文依据的字段与建议。
- *
- * <p>DialogueIntentInterpreter返回JSON → TravelJson严格解码 → Result/Fact/Intent构造校验
- * → DialogueService.process调用validateSources → route决定真实业务。领域类型不访问框架或数据库。
- * 分类只描述用户诉求，不授予接受、删除、授权或解除硬约束的权限；原文引用必须连续存在，
- * 软偏好ADD/REPLACE还须经RequirementFields和应用确认边界处理。
+ * 定义意图、字段和回复结构，校验模型产物格式及原文依据。
  */
 public final class DialogueIntent {
     /** 聊天和协商原文统一上限，按Java字符串长度计；不代表模型Token窗口。 */
