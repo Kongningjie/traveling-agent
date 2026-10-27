@@ -149,6 +149,24 @@ class DialogueIntegrationTest {
     private DialogueIntent.Result result(DialogueIntent.Kind kind, DialogueIntent.Action action, String text, List<DialogueIntent.Fact> facts) { return new DialogueIntent.Result(List.of(new DialogueIntent.Intent(kind, action, text)), facts, "本地替身回复", "", null, "", "", ""); }
     /** @param output 本例替身结果，手动推进唯一Worker所用应用端口 */
     private void process(DialogueIntent.Result output) { when(interpreter.interpret(any())).thenReturn(output); service.claimWork().orElseThrow().run(); }
+    /** 模型只在回复承诺修改但无字段时保留澄清，不能生成空需求版本或解除候选屏障。 */
+    @Test void planningWithoutFactsCannotPretendRequirementsWereSaved() {
+        for (var action : List.of(DialogueIntent.Action.SUPPLEMENT, DialogueIntent.Action.CHANGE_REQUIREMENTS, DialogueIntent.Action.REVISE_ITINERARY)) {
+            var user = actor(); UUID chat = UUID.randomUUID(); service.send(user, chat, UUID.randomUUID(), "开始规划杭州旅行");
+            process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, "开始规划杭州旅行", List.of(new DialogueIntent.Fact("cities", "杭州", "杭州"))));
+            UUID task = service.read(user, chat).chat().taskId();
+            long revision = jdbc.queryForObject("SELECT constraint_revision FROM travel_task WHERE id=?", Long.class, task);
+            long generation = jdbc.queryForObject("SELECT execution_generation FROM travel_task WHERE id=?", Long.class, task);
+            String text = "想多体验当地生活，减少来回赶路"; service.send(user, chat, UUID.randomUUID(), text);
+            var misleading = new DialogueIntent.Result(List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, action, text)), List.of(), "我会纳入规划", "", null, "", "", "");
+            process(misleading);
+            var message = service.read(user, chat).messages().getLast();
+            assertThat(message.state()).isEqualTo("CLARIFY"); assertThat(message.reply()).contains("未更新旅行需求").doesNotContain("我会纳入规划");
+            assertThat(store.blocked(user.id(), task)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT constraint_revision FROM travel_task WHERE id=?", Long.class, task)).isEqualTo(revision);
+            assertThat(jdbc.queryForObject("SELECT execution_generation FROM travel_task WHERE id=?", Long.class, task)).isEqualTo(generation);
+        }
+    }
     /** 独立咨询不创建旅行，原文及回复跨读取恢复，重复输入不会产生第二条。 */
     @Test void conversationDoesNotCreateTripAndReceiveIsIdempotent() {
         var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID();

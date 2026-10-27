@@ -149,6 +149,12 @@ public final class DialogueService implements BackgroundWorkSource {
                 || operations.size() > 1 || (!operations.isEmpty() && planning)) {
             store.finish(c, "CLARIFY", result.reply() + "\n" + (result.clarification().isBlank() ? "请明确本次需要执行的操作与对象，其他要求已保留原文。" : result.clarification()), null, ""); return;
         }
+        // 已有旅行的规划输入若没有任何可提交字段，不能把自然语言承诺当成成功修改。
+        // 保留原文和澄清屏障，且不提前解决旧诉求；用户可补充、重试或撤回。
+        // 首次仅表达规划意愿仍允许创建任务，由既有协商流程收集缺项。
+        if (planning && c.basis().taskId() != null && result.facts().isEmpty()) {
+            store.finish(c, "CLARIFY", "这条规划要求已保留，但尚未提取到可记录的修改，未更新旅行需求。请补充希望调整的内容，也可以重试理解或撤回。", null, "DIALOGUE_PLANNING_FACTS_MISSING"); return;
+        }
         store.resolve(c, result.resolvedInputs());
         if (!operations.isEmpty()) {
             var action = operations.getFirst().action();
