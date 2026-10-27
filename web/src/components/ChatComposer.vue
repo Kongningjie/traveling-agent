@@ -21,6 +21,7 @@ const emit = defineEmits<{
   submit: [];
   "update:selectedDocuments": [ids: string[]];
   attach: [];
+  manage: [document: string];
   stop: [];
 }>();
 const input = ref<HTMLTextAreaElement>();
@@ -47,6 +48,15 @@ function attachFile(): void {
 function attachExisting(document: DocumentView): void {
   attachmentMenu.value?.hidePopover();
   chooseDocument(document);
+}
+/**
+ * 关闭加号菜单后打开指定文件操作，不修改本轮选择。
+ *
+ * @param id 当前会话文件编号，仅通过结构化事件传递。
+ */
+function manageFile(id: string): void {
+  attachmentMenu.value?.hidePopover();
+  emit("manage", id);
 }
 const caret = ref(0),
   mentionIndex = ref(0),
@@ -198,6 +208,14 @@ defineExpose({ focus });
             }}</small></span
           >
           <button
+            v-if="entry.document"
+            type="button"
+            :aria-label="`${entry.document.name}的文件操作`"
+            @click="manageFile(entry.id)"
+          >
+            ⋯
+          </button>
+          <button
             type="button"
             :aria-label="`移除${entry.document?.name ?? '资料'}引用`"
             :disabled="disabled"
@@ -276,27 +294,35 @@ defineExpose({ focus });
           <p>PDF、DOCX、TXT、Markdown · 最大 10 MiB</p>
           <template v-if="documents?.length">
             <h3>引用会话文件</h3>
-            <button
-              v-for="doc in documents"
-              :key="doc.id"
-              type="button"
-              class="attachment-existing"
-              :disabled="
-                disabled ||
-                doc.state !== 'READY' ||
-                selected.includes(doc.id) ||
-                selected.length >= 10
-              "
-              @click="attachExisting(doc)"
-            >
-              <span class="file-type" aria-hidden="true">{{ doc.kind.toUpperCase() }}</span>
-              <span
-                ><strong>{{ doc.name }}</strong
-                ><small>{{
-                  selected.includes(doc.id) ? "已添加到本轮" : documentLabel(doc)
-                }}</small></span
+            <div v-for="doc in documents" :key="doc.id" class="attachment-row">
+              <button
+                type="button"
+                class="attachment-existing"
+                :disabled="
+                  disabled ||
+                  doc.state !== 'READY' ||
+                  selected.includes(doc.id) ||
+                  selected.length >= 10
+                "
+                @click="attachExisting(doc)"
               >
-            </button>
+                <span class="file-type" aria-hidden="true">{{ doc.kind.toUpperCase() }}</span>
+                <span
+                  ><strong>{{ doc.name }}</strong
+                  ><small>{{
+                    selected.includes(doc.id) ? "已添加到本轮" : documentLabel(doc)
+                  }}</small></span
+                >
+              </button>
+              <button
+                type="button"
+                class="file-more"
+                :aria-label="`${doc.name}的文件操作`"
+                @click="manageFile(doc.id)"
+              >
+                ⋯
+              </button>
+            </div>
           </template>
         </div>
         <span>{{
@@ -395,6 +421,20 @@ defineExpose({ focus });
   background: transparent;
   color: inherit;
   text-align: left;
+}
+.attachment-row {
+  display: flex;
+  align-items: center;
+}
+.attachment-row .attachment-existing {
+  flex: 1;
+  min-width: 0;
+}
+.attachment-row .file-more {
+  width: 32px;
+  flex-shrink: 0;
+  padding: 10px 5px;
+  justify-content: center;
 }
 .attachment-menu button:hover {
   background: #f3f4f3;

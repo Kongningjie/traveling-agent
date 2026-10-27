@@ -733,6 +733,7 @@ onMounted(initialize);
               :stop-disabled="stopDisabled"
               @stop="stopCurrent"
               @attach="documentPanel?.choose()"
+              @manage="(id) => documentPanel?.manage(id)"
               @submit="submitMessage"
             />
             <div class="starter-grid">
@@ -941,6 +942,7 @@ onMounted(initialize);
             :stop-disabled="stopDisabled"
             @stop="stopCurrent"
             @attach="documentPanel?.choose()"
+            @manage="(id) => documentPanel?.manage(id)"
             @submit="submitMessage"
           />
         </div>

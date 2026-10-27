@@ -1,6 +1,6 @@
 <!-- 私有附件交互；上传只表示保存，解析状态和清理由服务端决定，不执行文件内容。 -->
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from "vue";
+import { computed, ref, watch, onUnmounted, nextTick } from "vue";
 import ReportProblem from "./ReportProblem.vue";
 import LifecycleDelete from "./LifecycleDelete.vue";
 import SourcePreview from "./SourcePreview.vue";
@@ -15,8 +15,9 @@ const emit = defineEmits<{
   analyze: [text: string, document: string];
   changed: [items: DocumentView[]];
 }>();
-const dialog = ref<HTMLDialogElement>(),
-  picker = ref<HTMLInputElement>();
+const menu = ref<HTMLElement>(),
+  picker = ref<HTMLInputElement>(),
+  activeId = ref("");
 const api = new Api(),
   items = ref<DocumentView[]>([]),
   error = ref(""),
@@ -25,6 +26,7 @@ const api = new Api(),
 let generation = 0,
   pendingId = "",
   pendingChat = "";
+const active = computed(() => items.value.find((item) => item.id === activeId.value));
 /** 只轮询状态，不自动重试上传／解析；切换聊天后的迟到响应不显示。 */
 async function refresh(): Promise<void> {
   const stamp = generation,
@@ -44,10 +46,13 @@ watch(
   () => props.chat,
   () => {
     generation++;
+    menu.value?.hidePopover();
+    activeId.value = "";
     items.value = [];
     emit("changed", []);
     error.value = "";
     file.value = null;
+    busy.value = false;
     pendingId = "";
     pendingChat = "";
     void refresh();
@@ -60,34 +65,46 @@ onUnmounted(() => {
   clearInterval(timer);
 });
 /**
- * @param event 文件仅保存在内存；明确选择新文件才换幂等键。
+ * 选择文件即上传到当前会话，不额外打开确认页面；上传不会自动调用模型。
+ *
+ * @param event 明确选择新文件才换幂等键；取消选择保留原待重试文件。
  */
 function select(event: Event): void {
-  file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
+  const selected = (event.target as HTMLInputElement).files?.[0];
+  if (!selected || busy.value || props.disabled) return;
+  file.value = selected;
   pendingId = crypto.randomUUID();
   pendingChat = props.chat || crypto.randomUUID();
   error.value = "";
-  if (file.value) show();
   (event.target as HTMLInputElement).value = "";
+  void upload();
 }
-/** 用户明确打开文件选择器；上传仍需在预览窗口确认，关闭选择器不产生请求。 */
+/** 用户明确打开选择器，选定后上传；取消文件选择不产生请求。 */
 function choose(): void {
   if (!busy.value && !props.disabled) picker.value?.click();
 }
-/** 打开原生模态窗口，保留键盘焦点约束和Escape关闭行为。 */
-function show(): void {
-  if (!dialog.value?.open) dialog.value?.showModal();
+/**
+ * 打开单个文件的轻量操作菜单，不展示独立资料管理页面。
+ *
+ * @param id 当前会话文件；不存在时不显示旧文件菜单。
+ */
+async function manage(id: string): Promise<void> {
+  const stamp = generation;
+  activeId.value = id;
+  await nextTick();
+  if (stamp === generation && active.value) menu.value?.showPopover();
 }
 /**
- * 关闭资料浮层后才请求分析，避免助手回复被窗口遮挡；不会自动采纳建议。
+ * 关闭文件菜单后才编辑分析草稿；不会自动采纳建议。
+ *
  * @param text 给用户编辑的自然语言草稿
  * @param document 后台结构化绑定；不写入用户正文。
  */
 function analyze(text: string, document: string): void {
-  dialog.value?.close();
+  menu.value?.hidePopover();
   emit("analyze", text, document);
 }
-defineExpose({ choose });
+defineExpose({ choose, manage });
 /** 请求未知时保留同文件／ID供用户显式重试，不自动发送。 */
 async function upload(): Promise<void> {
   if (busy.value || props.disabled || !file.value) return;
@@ -115,7 +132,6 @@ async function upload(): Promise<void> {
     });
     if (stamp === generation) {
       file.value = null;
-      dialog.value?.close();
       emit("uploaded", id, pendingId);
     }
   } catch {
@@ -123,8 +139,10 @@ async function upload(): Promise<void> {
       error.value =
         "上传未确认。可能超过容量／格式限制或连接中断；可用相同文件重试，服务端按原ID去重。";
   } finally {
-    busy.value = false;
-    void refresh();
+    if (stamp === generation) {
+      busy.value = false;
+      void refresh();
+    }
   }
 }
 /**
@@ -142,8 +160,10 @@ async function act(id: string, action: string): Promise<void> {
   } catch {
     if (stamp === generation) error.value = "操作尚未确认，请刷新状态后重试。";
   } finally {
-    busy.value = false;
-    void refresh();
+    if (stamp === generation) {
+      busy.value = false;
+      void refresh();
+    }
   }
 }
 /** 来源删除后清除所有打开的预览，并重新读取权威状态。 */
@@ -162,210 +182,161 @@ function removed(): void {
     :disabled="busy || disabled"
     @change="select"
   />
-  <div v-if="items.length || file || error || busy" class="document-shortcut">
-    <button class="document-library" @click="show">
-      ▤
-      {{
-        busy
-          ? "正在保存资料…"
-          : file
-            ? "待上传资料"
-            : error
-              ? "查看资料状态"
-              : `旅行资料 · ${items.length}`
-      }}
-    </button>
+  <div v-if="file" class="upload-card" role="status">
+    <span class="document-icon" aria-hidden="true">{{
+      file.name.split(".").pop()?.toUpperCase()
+    }}</span>
+    <span
+      ><strong>{{ file.name }}</strong
+      ><small>{{ busy ? "正在上传…" : "上传未完成" }}</small></span
+    >
+    <button v-if="!busy" :disabled="disabled" @click="upload">重试上传</button>
   </div>
-  <dialog ref="dialog" class="document-dialog" aria-labelledby="documents-heading">
-    <section class="document-panel">
-      <div class="details-heading">
-        <h2 id="documents-heading">旅行资料</h2>
-        <button class="icon-button" aria-label="关闭旅行资料" @click="dialog?.close()">×</button>
-      </div>
-      <small>PDF / DOCX / TXT / Markdown · 单份不超过10MiB</small>
-      <p class="muted">
-        可先上传自己的计划。可让助手解释、检查或优化，建议需逐项确认后才登记变更；复杂表格需核对原件，不支持扫描件／OCR。
-      </p>
-      <div v-if="file" class="pending-card">
-        <span class="document-icon" aria-hidden="true">{{
-          file.name.split(".").pop()?.toUpperCase()
-        }}</span>
-        <span class="pending-file"
-          ><strong>{{ file.name }}</strong
-          ><small
-            >{{ (file.size / 1024).toFixed(0) }} KB · {{ busy ? "正在上传…" : "待上传" }}</small
-          ></span
+  <p v-if="error" role="alert" class="upload-error">
+    {{ error }} <button :disabled="busy" @click="refresh">刷新状态</button>
+  </p>
+  <div ref="menu" popover class="file-actions" aria-label="文件操作">
+    <template v-if="active">
+      <strong class="file-name">{{ active.name }}</strong>
+      <small>{{ label(active) }}</small>
+      <p v-if="active.notice" class="file-notice">{{ active.notice }}</p>
+      <div v-if="active.state === 'READY'" class="action-list">
+        <button
+          :disabled="busy || disabled"
+          @click="analyze('请解释这份旅行计划，先不要创建旅行。', active.id)"
         >
-        <button class="upload-confirm" :disabled="busy || disabled" @click="upload">
-          {{ busy ? "正在上传…" : "上传" }}
+          解释计划
+        </button>
+        <button
+          :disabled="busy || disabled"
+          @click="analyze('请检查这份旅行计划的问题，并标明原文来源。先不修改旅行。', active.id)"
+        >
+          检查问题
+        </button>
+        <button
+          :disabled="busy || disabled"
+          @click="analyze('请给这份旅行计划一些优化建议，确认前不开始规划。', active.id)"
+        >
+          优化建议
         </button>
       </div>
-      <div class="document-controls">
-        <button :disabled="busy || disabled" @click="choose">＋ 添加文件</button>
-        <button :disabled="busy" @click="refresh">刷新状态</button>
-      </div>
-      <p v-if="error" role="alert" class="error">{{ error }}</p>
-      <p v-if="!items.length && !file" class="empty-documents">
-        还没有旅行资料，上传已有计划，和助手一起完善。
-      </p>
-      <ul>
-        <li v-for="item in items" :key="item.id">
-          <strong>{{ item.name }}</strong> — {{ label(item) }}
-          <p>{{ item.notice }}</p>
-          <div v-if="item.state === 'READY'">
-            <button
-              :disabled="busy || disabled"
-              @click="analyze('请解释这份旅行计划，先不要创建旅行。', item.id)"
-            >
-              解释计划</button
-            ><button
-              :disabled="busy || disabled"
-              @click="analyze('请检查这份旅行计划的问题，并标明原文来源。先不修改旅行。', item.id)"
-            >
-              检查问题</button
-            ><button
-              :disabled="busy || disabled"
-              @click="analyze('请给这份旅行计划一些优化建议，确认前不开始规划。', item.id)"
-            >
-              优化建议
-            </button>
-          </div>
-          <SourcePreview
-            v-if="item.state === 'READY'"
-            :key="item.id"
-            :chat="chat"
-            :document="item.id"
-          />
-          <a :href="`/api/v1/chats/${chat}/documents/${item.id}/download`" download>下载原件</a>
-          <button
-            v-if="['QUEUED', 'RUNNING'].includes(item.state)"
-            :disabled="busy"
-            @click="act(item.id, 'STOP')"
-          >
-            停止解析
-          </button>
-          <button v-if="item.state === 'PAUSED'" :disabled="busy" @click="act(item.id, 'RETRY')">
-            重试解析
-          </button>
-          <LifecycleDelete kind="DOCUMENT" :target="item.id" @deleted="removed" />
-          <ReportProblem kind="DOCUMENT" :scope="chat" :target="item.id" />
-        </li>
-      </ul>
-    </section>
-  </dialog>
+      <SourcePreview
+        v-if="active.state === 'READY'"
+        :key="active.id"
+        :chat="chat"
+        :document="active.id"
+      />
+      <a :href="`/api/v1/chats/${chat}/documents/${active.id}/download`" download>下载文件</a>
+      <button
+        v-if="['QUEUED', 'RUNNING'].includes(active.state)"
+        :disabled="busy"
+        @click="act(active.id, 'STOP')"
+      >
+        停止解析
+      </button>
+      <button v-if="active.state === 'PAUSED'" :disabled="busy" @click="act(active.id, 'RETRY')">
+        重试解析
+      </button>
+      <LifecycleDelete kind="DOCUMENT" :target="active.id" @deleted="removed" />
+      <ReportProblem kind="DOCUMENT" :scope="chat" :target="active.id" />
+    </template>
+  </div>
 </template>
 <style scoped>
 .file-picker {
   display: none;
 }
-.document-shortcut {
-  max-width: 850px;
-  margin: 0 auto 8px;
-}
-.document-library {
-  border: 1px solid #dfe7e4;
-  border-radius: 20px;
-  background: #f7faf9;
-  padding: 7px 14px;
-  color: #49665d;
-  font-size: 12px;
-}
-.document-dialog {
-  width: min(680px, calc(100vw - 32px));
-  max-height: 80dvh;
-  border: 1px solid #e0e8e4;
-  border-radius: 22px;
-  padding: 24px;
-  color: inherit;
-  box-shadow: 0 24px 80px #18382e24;
-}
-.document-dialog::backdrop {
-  background: #142c244d;
-}
-.document-panel {
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-.document-panel small {
-  color: #64748b;
-}
-.document-panel ul {
-  list-style: none;
-  padding: 0;
-}
-.document-panel li {
-  margin: 16px 0;
-  padding: 16px;
-  border: 1px solid #e5ece8;
+.upload-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 12px;
+  border: 1px solid #e1e5e2;
   border-radius: 14px;
-  background: #fafcfb;
+  background: #fff;
+  margin: 0 0 10px;
+  font-size: 13px;
 }
-.document-panel button,
-.document-panel a {
-  margin: 4px;
-}
-.document-panel p {
-  margin: 12px 0;
-  line-height: 1.7;
-}
-.pending-file {
+.upload-card > span:last-of-type {
   min-width: 0;
   flex: 1;
 }
-.pending-file strong {
+.upload-card strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pending-file small {
+.upload-card small {
   display: block;
   margin-top: 4px;
-}
-.pending-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 18px 0;
-  padding: 14px;
-  border: 1px solid #e1e5e2;
-  border-radius: 15px;
-  background: #fff;
+  color: #78837b;
 }
 .document-icon {
   display: grid;
   place-items: center;
-  flex-shrink: 0;
-  min-width: 44px;
-  height: 50px;
-  padding: 0 4px;
-  border-radius: 10px;
+  min-width: 40px;
+  height: 44px;
   background: #fce9e7;
   color: #ba4940;
-  font-size: 11px;
+  border-radius: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
-.document-controls {
-  display: flex;
-  gap: 6px;
-  margin-top: 12px;
+.upload-error {
+  font-size: 12px;
+  color: #a12a2a;
+  overflow-wrap: anywhere;
 }
-.document-controls button {
+.file-actions {
+  position: fixed;
+  inset: auto;
+  left: 50%;
+  bottom: 160px;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(330px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid #e4e7e5;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 10px 32px #18382e24;
+  color: #27332d;
+  font-size: 13px;
+}
+.file-name {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-bottom: 5px;
+}
+.file-actions small,
+.file-notice {
+  color: #78837b;
+  line-height: 1.6;
+}
+.file-actions > a,
+.file-actions > button {
+  display: block;
+  margin: 8px 0;
+}
+.action-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+.file-actions button,
+.upload-card button,
+.upload-error button {
   border: 1px solid #e1e5e2;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #526158;
+  padding: 7px 10px;
   font-size: 12px;
-  padding: 7px 12px;
-}
-.pending-card .upload-confirm {
-  border-radius: 999px;
-  font-size: 12px;
-  padding: 8px 14px;
-}
-.empty-documents {
-  padding: 24px 0;
-  text-align: center;
-  color: #64748b;
 }
 </style>
