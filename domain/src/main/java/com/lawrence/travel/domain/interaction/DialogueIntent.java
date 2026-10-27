@@ -6,6 +6,8 @@ import java.util.UUID;
 
 /** 对话理解协议；模型只提供待校验数据，不能以分类结果直接取得业务权限。 */
 public final class DialogueIntent {
+    /** 聊天和协商原文统一上限，按Java字符串长度计；不代表模型Token窗口。 */
+    public static final int MAX_TEXT_LENGTH = 4000;
     /** 纯协议命名空间，不允许实例化。 */
     private DialogueIntent() { }
     /** 四类粗粒度分流；字段名称和问题回答关系不是新的一级意图。 */
@@ -22,7 +24,7 @@ public final class DialogueIntent {
     public record Intent(Kind kind, Action action, String quote) {
         /** 拒绝缺项及不相容动作，避免咨询信封夹带执行操作。 */
         public Intent {
-            if (kind == null || action == null || quote == null || quote.isBlank() || quote.length() > 4000) invalid();
+            if (kind == null || action == null || quote == null || quote.isBlank() || quote.length() > MAX_TEXT_LENGTH) invalid();
             boolean valid = switch (kind) {
                 case CONVERSATION -> Set.of(Action.CHAT, Action.TRAVEL_QA, Action.EXPLAIN_PLAN, Action.COMPARE_OPTIONS, Action.CHECK_PLAN, Action.OPTIMIZE_PLAN).contains(action);
                 case PLANNING -> Set.of(Action.START_PLAN, Action.SUPPLEMENT, Action.CHANGE_REQUIREMENTS, Action.REVISE_ITINERARY).contains(action);
@@ -32,10 +34,16 @@ public final class DialogueIntent {
             if (!valid) invalid();
         }
     }
-    /** @param field 旅行规范字段 @param value 规范值 @param quote 原文依据 */
-    public record Fact(String field, String value, String quote) {
+    /** @param field 旅行规范字段 @param value 规范值 @param quote 原文依据 @param operation 软偏好追加或明确替换，缺省追加 */
+    public record Fact(String field, String value, String quote, RequirementFields.PreferenceOperation operation) {
+        /** @param field 字段 @param value 规范值 @param quote 原文；兼容旧协议，软偏好默认追加 */
+        public Fact(String field, String value, String quote) { this(field, value, quote, RequirementFields.PreferenceOperation.ADD); }
         /** 有界字段，详细旅行规则仍由 RequirementFields 校验。 */
-        public Fact { if (field == null || value == null || value.isBlank() || value.length() > 500 || quote == null || quote.isBlank()) invalid(); }
+        public Fact {
+            operation = operation == null ? RequirementFields.PreferenceOperation.ADD : operation;
+            if (field == null || value == null || value.isBlank() || value.length() > 500 || quote == null || quote.isBlank()
+                    || operation == RequirementFields.PreferenceOperation.REPLACE && !RequirementFields.isPreference(field)) invalid();
+        }
     }
     /** @param intents 有序诉求 @param facts 需求增量 @param reply 普通回复 @param clarification 待澄清原因
      * @param targetId 已知操作目标，可空 @param category 偏好类别 @param value 偏好原文内容 @param city 偏好适用城市 @param resolvedInputs 本轮明确澄清的旧输入，仅可引用服务端提供的待澄清身份 @param advice 只读文件分析建议，可空表示无分析 */

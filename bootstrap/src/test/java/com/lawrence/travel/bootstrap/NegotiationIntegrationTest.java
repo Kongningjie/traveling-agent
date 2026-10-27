@@ -198,6 +198,16 @@ class NegotiationIntegrationTest {
         assertThat(requirements).anyMatch(r -> r.field().equals("budgetRule") && r.source().name().equals("ACCEPTED_SUGGESTION"));
         assertThat(requirements).anyMatch(r -> r.field().equals("travelers") && r.value().equals("3") && r.source().name().equals("USER"));
     }
+    /** 同输入同内容重放幂等；即使值相同，也不能将ADD偷换为REPLACE并改变原请求含义。 */
+    @Test void preferenceOperationIsPartOfIdempotencyIdentity() {
+        var f = fixture(); advance(f, f.runId()); UUID input = UUID.randomUUID();
+        var add = List.of(fact("pace", "早点结束"));
+        var receipt = service.send(f.actor(), f.taskId(), input, "", add); advance(f, receipt.runId());
+        assertThat(service.send(f.actor(), f.taskId(), input, "", add)).isEqualTo(receipt);
+        var replace = new Negotiation.Fact("pace", "早点结束", null, RequirementFields.PreferenceOperation.REPLACE);
+        assertThatThrownBy(() -> service.send(f.actor(), f.taskId(), input, "", List.of(replace))).hasMessage("IDEMPOTENCY_CONFLICT");
+        assertThat(fields(f)).containsEntry("pace", "早点结束");
+    }
     /** 接收不采纳，推荐未选择也不写入需求。 */
     @Test void receiptAndRecommendationDoNotImplyAcceptance() {
         var f = fixture(); assertThat(fields(f)).isEmpty(); assertThat(service.messages(f.actor(), f.taskId()).getFirst().state()).isEqualTo("RECEIVED");

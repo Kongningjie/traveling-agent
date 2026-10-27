@@ -12,6 +12,11 @@ import java.util.UUID;
 
 /** 初始协商字段及确定性冲突；不根据老人、儿童等标签推断人数或体力。 */
 public final class RequirementFields {
+    private static final Set<String> PREFERENCES = Set.of("pace", "diet", "interests");
+    /** 软偏好增量语义；替换必须有明确用户依据，不能用于放宽硬限制。 */
+    public enum PreferenceOperation { /** 保留已有偏好并补充。 */ ADD, /** 用户明确替换该类偏好的完整内容。 */ REPLACE }
+    /** @param field 规范字段 @return 是否允许显式替换软偏好，不含硬限制或固定安排 */
+    public static boolean isPreference(String field) { return PREFERENCES.contains(field); }
     private static final Set<String> SUPPORTED = Set.of("cities", "startDate", "endDate", "travelers", "budgetRule", "budgetCny", "budgetScope", "fixedStatus", "fixedArrangements", "pace", "diet", "interests", "hardRequirements", "changeTargets", "lockedIds");
     /** 无状态规则。 */
     private RequirementFields() { }
@@ -22,6 +27,14 @@ public final class RequirementFields {
      * @return 合并且校验后的全量；同字段保持稳定 ID
      */
     public static List<ConstraintRevision.Requirement> merge(List<ConstraintRevision.Requirement> current, Map<String, String> updates, ConstraintRevision.Source source) {
+        return merge(current, updates, source, Set.of());
+    }
+    /** @param current 已确认需求 @param updates 完整变更 @param source 新字段来源
+     * @param replacements 用户明确替换完整内容的软偏好字段；其余软偏好默认追加
+     * @return 校验后的不可变需求，不允许将替换语义用于硬限制 */
+    public static List<ConstraintRevision.Requirement> merge(List<ConstraintRevision.Requirement> current, Map<String, String> updates,
+            ConstraintRevision.Source source, Set<String> replacements) {
+        if (!PREFERENCES.containsAll(replacements) || !updates.keySet().containsAll(replacements)) throw new IllegalArgumentException("PREFERENCE_OPERATION_INVALID");
         var values = new LinkedHashMap<String, ConstraintRevision.Requirement>();
         for (var value : current) if (values.putIfAbsent(value.field(), value) != null) throw new IllegalArgumentException("AMBIGUOUS_REQUIREMENT_SCOPE");
         if ("NONE".equals(updates.get("budgetRule")) && (updates.containsKey("budgetCny") || updates.containsKey("budgetScope"))) throw new IllegalArgumentException("BUDGET_CONFLICT");
@@ -30,8 +43,15 @@ public final class RequirementFields {
             if (!SUPPORTED.contains(entry.getKey()) || entry.getValue() == null || entry.getValue().isBlank() || entry.getValue().length() > 500) throw new IllegalArgumentException("REQUIREMENT_INVALID");
             var old = values.get(entry.getKey());
             if (old != null && !old.targetIds().isEmpty()) throw new IllegalArgumentException("SCOPED_REQUIREMENT_REQUIRES_CLARIFICATION");
+            if (old != null && PREFERENCES.contains(entry.getKey()) && old.kind() == ConstraintRevision.Kind.HARD)
+                throw new IllegalArgumentException("HARD_REQUIREMENT_REQUIRES_CLARIFICATION");
             // 尚未形式化的硬限制必须保留为 HARD；新增限制不能覆盖前面仍有效的要求，更不能降成节奏偏好。
             String value = entry.getValue();
+            if (PREFERENCES.contains(entry.getKey()) && old != null && !replacements.contains(entry.getKey())) {
+                var items = new java.util.LinkedHashSet<String>(List.of(old.value().split("\n")));
+                items.addAll(List.of(value.split("\n")));
+                value = String.join("\n", items);
+            }
             if (entry.getKey().equals("hardRequirements") && old != null) {
                 value = old.value();
                 if (!value.contains(entry.getValue())) value = value + "；" + entry.getValue();

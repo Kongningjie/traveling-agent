@@ -16,8 +16,18 @@ public final class Negotiation {
      * @param field 字段
      * @param value 规范值
      * @param quote 用户原文依据，结构化输入可空
+     * @param operation 软偏好追加或明确替换；旧JSON缺失时按追加处理
      */
-    public record Fact(String field, String value, String quote) { }
+    public record Fact(String field, String value, String quote, com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation operation) {
+        /** @param field 字段 @param value 规范值 @param quote 原文；旧输入默认追加，不隐式替换偏好 */
+        public Fact(String field, String value, String quote) { this(field, value, quote, com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.ADD); }
+        /** 缺少操作兼容旧JSON；禁止通过REPLACE覆盖硬限制或预订。 */
+        public Fact {
+            operation = operation == null ? com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.ADD : operation;
+            if (operation == com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.REPLACE
+                    && !com.lawrence.travel.domain.interaction.RequirementFields.isPreference(field)) throw new IllegalArgumentException("PREFERENCE_OPERATION_INVALID");
+        }
+    }
     /**
      * @param facts 明确提取项
      * @param outsideScope 含原问题外修改

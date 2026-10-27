@@ -59,7 +59,7 @@ public final class DialogueService implements BackgroundWorkSource {
     }
     /** @param actor 认证 @param chat 可重试的创建ID @param input 消息幂等键 @param text 自由文本 @return 可靠保存的聊天，无旅行占位任务 */
     public Dialogue.View send(UserIdentity actor, UUID chat, UUID input, String text) {
-        require(actor != null && chat != null && input != null && text != null && !text.isBlank() && text.length() <= 4000 && text.indexOf(0)<0);
+        require(actor != null && chat != null && input != null && text != null && !text.isBlank() && text.length() <= DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0)<0);
         return transactions.required(() -> {
             // 创建和首条消息同事务；后续消息不能用新标题覆盖旧标题。
             boolean exists = store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chat));
@@ -186,8 +186,8 @@ public final class DialogueService implements BackgroundWorkSource {
             store.finish(c, "CONFIRM", result.reply().isBlank() ? "请核对以下操作，点击确认后才会执行。" : result.reply(), operation, ""); return;
         }
         if (planning) {
-            var facts = result.facts().stream().map(f -> new Negotiation.Fact(f.field(), f.value(), f.quote())).toList();
-            RequirementFields.merge(c.basis().taskId() == null ? List.of() : travel.revision(new TaskScope(c.userId(), c.basis().taskId()), c.basis().revision()).requirements(), NegotiationHandler.updates(facts), com.lawrence.travel.domain.travel.ConstraintRevision.Source.USER);
+            var facts = result.facts().stream().map(f -> new Negotiation.Fact(f.field(), f.value(), f.quote(), f.operation())).toList();
+            RequirementFields.merge(c.basis().taskId() == null ? List.of() : travel.revision(new TaskScope(c.userId(), c.basis().taskId()), c.basis().revision()).requirements(), NegotiationHandler.updates(facts), com.lawrence.travel.domain.travel.ConstraintRevision.Source.USER, NegotiationHandler.replacements(facts));
             UUID task = negotiation.applyInterpreted(actor, c.basis().taskId(), c.messageId(), c.text(), facts);
             if (c.basis().taskId() == null) store.link(c, task);
             store.finish(c, "DONE", result.reply().isBlank() ? "已记录你的规划要求，将继续核对缺项并生成候选。" : result.reply(), null, ""); return;

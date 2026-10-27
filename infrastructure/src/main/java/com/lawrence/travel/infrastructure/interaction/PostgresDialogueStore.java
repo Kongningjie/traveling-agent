@@ -62,7 +62,7 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
     /** {@inheritDoc} 用户锁串行收件与接受；普通输入不递增旅行代次。 */
     @Override public Dialogue.View receive(UUID user, UUID chat, UUID id, String text) {
-        transaction(); lock(user, chat); require(id != null && text != null && !text.isBlank() && text.length() <= 4000, false);
+        transaction(); lock(user, chat); require(id != null && text != null && !text.isBlank() && text.length() <= com.lawrence.travel.domain.interaction.DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0) < 0, false);
         var replay = mapper.message(user, chat, id);
         if (replay != null) { require(replay.text().equals(text), false); return read(user, chat); }
         require(mapper.messages(user, chat).stream().filter(m -> List.of("QUEUED", "RUNNING", "PAUSED", "CLARIFY", "CONFIRM").contains(m.state())).count() < 20, false);

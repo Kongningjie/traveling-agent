@@ -200,6 +200,35 @@ class DialogueIntegrationTest {
         var claim = engine.claim(hint, "soft_pace_test").orElseThrow();
         engine.commit(engine.prepare(claim, handler.execute(claim)));
     }
+    /** 4000字规划从聊天到需求提交保留完整原文，超长在理解前拒绝。 */
+    @Test void longPlanningInputUsesTheSameLimitAcrossBothInboxes() {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID(); String text = "去杭州" + "补".repeat(3997);
+        service.send(user, chat, input, text);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, text, List.of(new DialogueIntent.Fact("cities", "杭州", "杭州"))));
+        var view = service.read(user, chat); assertThat(view.messages().getFirst().state()).isEqualTo("DONE");
+        commitUnderstanding(view.chat().taskId());
+        assertThat(jdbc.queryForObject("SELECT body->>'text' FROM conversation_message WHERE user_id=? AND id=?", String.class, user.id(), input)).isEqualTo(text);
+        assertThatThrownBy(() -> service.send(user, chat, UUID.randomUUID(), text + "补")).isInstanceOf(RuntimeException.class);
+        assertThat(service.read(user, chat).messages()).hasSize(1);
+    }
+    /** ADD保留有效要求，REPLACE经过对话解释转换、可靠收件及阶段提交仍保持替换语义。 */
+    @Test void dialoguePreservesPreferenceOperationThroughStageCommit() {
+        var user = actor(); UUID chat = UUID.randomUUID(); String initial = "去杭州，每天午后休息";
+        service.send(user, chat, UUID.randomUUID(), initial);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, initial, List.of(new DialogueIntent.Fact("cities", "杭州", "杭州"), new DialogueIntent.Fact("pace", "每天午后休息", "每天午后休息"))));
+        UUID task = service.read(user, chat).chat().taskId(); commitUnderstanding(task);
+        String addition = "最后一天早点结束"; service.send(user, chat, UUID.randomUUID(), addition);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, addition, List.of(new DialogueIntent.Fact("pace", addition, addition)))); commitUnderstanding(task);
+        assertThat(currentPace(user.id(), task)).isEqualTo("每天午后休息\n最后一天早点结束");
+        String replacement = "之前节奏偏好全部改为紧凑"; service.send(user, chat, UUID.randomUUID(), replacement);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.CHANGE_REQUIREMENTS, replacement,
+                List.of(new DialogueIntent.Fact("pace", "紧凑", replacement, com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.REPLACE)))); commitUnderstanding(task);
+        assertThat(currentPace(user.id(), task)).isEqualTo("紧凑");
+    }
+    /** @param user 本测试私有用户 @param task 私有旅行 @return 当前权威版本的节奏偏好 */
+    private String currentPace(UUID user, UUID task) {
+        return jdbc.queryForObject("SELECT q->>'value' FROM travel_task t JOIN travel_constraint_revision r ON r.user_id=t.user_id AND r.task_id=t.id AND r.revision=t.constraint_revision, jsonb_array_elements(r.payload->'requirements') q WHERE t.user_id=? AND t.id=? AND q->>'field'='pace'", String.class, user, task);
+    }
     /** 独立咨询不创建旅行，原文及回复跨读取恢复，重复输入不会产生第二条。 */
     @Test void conversationDoesNotCreateTripAndReceiveIsIdempotent() {
         var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID();

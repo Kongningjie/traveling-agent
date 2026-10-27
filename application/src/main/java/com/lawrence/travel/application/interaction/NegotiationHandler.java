@@ -71,7 +71,7 @@ public final class NegotiationHandler implements StageHandler {
                     List.of(stage(replacement, StageType.UNDERSTAND)), StageOutput.Outcome.CONTINUE, null);
         }
         List<ConstraintRevision.Requirement> requirements;
-        try { requirements = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, source(context)); }
+        try { requirements = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, source(context), replacements(facts)); }
         catch (IllegalArgumentException conflict) { facts.clear(); requirements = context.revision().requirements(); clarification = "已保留原始要求，存在冲突或超出首版范围，请修改相关字段。"; }
         var resolved = new LinkedHashSet<UUID>();
         if (context.card() != null) for (var entry : context.card().specs().entrySet()) if (facts.stream().anyMatch(fact -> fact.field().equals(entry.getValue().field()))) resolved.add(entry.getKey());
@@ -102,8 +102,18 @@ public final class NegotiationHandler implements StageHandler {
      */
     public static Map<String, String> updates(List<Negotiation.Fact> facts) {
         var values = new LinkedHashMap<String, String>();
-        for (var fact : facts) { String old = values.putIfAbsent(fact.field(), fact.value()); if (old != null && !old.equals(fact.value())) throw new IllegalArgumentException("DUPLICATED_FIELD"); }
+        var operations = new LinkedHashMap<String, RequirementFields.PreferenceOperation>();
+        for (var fact : facts) {
+            String old = values.putIfAbsent(fact.field(), fact.value());
+            var previous = operations.putIfAbsent(fact.field(), fact.operation());
+            if (old != null && (!old.equals(fact.value()) || previous != fact.operation())) throw new IllegalArgumentException("DUPLICATED_FIELD");
+        }
         return values;
+    }
+    /** @param facts 本次有原文依据的提取项 @return 明确替换的软偏好字段，不能影响硬限制 */
+    public static Set<String> replacements(List<Negotiation.Fact> facts) {
+        return facts.stream().filter(f -> f.operation() == RequirementFields.PreferenceOperation.REPLACE)
+                .map(Negotiation.Fact::field).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
     /**
      * @param input 原回答

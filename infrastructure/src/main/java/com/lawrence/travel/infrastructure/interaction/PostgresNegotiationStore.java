@@ -52,10 +52,13 @@ public final class PostgresNegotiationStore implements NegotiationStore {
      */
     @Override public boolean receiveChange(TaskScope scope, UUID id, String text, List<Negotiation.Fact> facts) {
         transaction(); validate(text, facts); var row = locked(scope);
-        String hash = json.hash(json.encode(List.of("CHANGE", text, NegotiationHandler.updates(facts))));
+        var replacements = NegotiationHandler.replacements(facts);
+        // 旧ADD请求保持原哈希兼容；REPLACE必须纳入幂等身份，不能把同值不同操作当成重放。
+        String hash = json.hash(json.encode(replacements.isEmpty() ? List.of("CHANGE", text, NegotiationHandler.updates(facts))
+                : List.of("CHANGE", text, NegotiationHandler.updates(facts), replacements.stream().sorted().toList())));
         var replay = mapper.message(scope, id); if (replay != null) { require(hash.equals(replay.requestHash()), IDEMPOTENCY_CONFLICT); return false; }
         require(mapper.pending(scope).size() < 100, INVALID_INPUT);
-        if (!facts.isEmpty()) RequirementFields.merge(revision(scope, row.constraintRevision()).requirements(), NegotiationHandler.updates(facts), ConstraintRevision.Source.USER);
+        if (!facts.isEmpty()) RequirementFields.merge(revision(scope, row.constraintRevision()).requirements(), NegotiationHandler.updates(facts), ConstraintRevision.Source.USER, replacements);
         var message = new Negotiation.Message(id, "CHANGE", text, List.copyOf(facts), null, 0, row.constraintRevision(), "RECEIVED");
         checked(mapper.insert(scope, id, hash, json.encode(message), null, "RECEIVED"));
         long sequence = mapper.sequence(scope, id);
@@ -158,7 +161,7 @@ public final class PostgresNegotiationStore implements NegotiationStore {
         }
         var updates = NegotiationHandler.updates(prepared.facts());
         // 关联字段必须在完整变更上校验；逐字段合并会把新起日与旧止日混用，拒绝合法改期。
-        var merged = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, NegotiationHandler.source(context));
+        var merged = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, NegotiationHandler.source(context), NegotiationHandler.replacements(prepared.facts()));
         var origins = new java.util.HashMap<String, ConstraintRevision.Source>();
         for (var fact : prepared.facts()) origins.put(fact.field(), source(context, fact));
         if (origins.containsKey("fixedArrangements")) origins.put("fixedStatus", origins.get("fixedArrangements"));
@@ -270,7 +273,7 @@ public final class PostgresNegotiationStore implements NegotiationStore {
      * @param text 原文
      * @param facts 明确字段；限制单次提取上下文规模
      */
-    private static void validate(String text, List<Negotiation.Fact> facts) { require(text != null && text.length() <= 1000 && facts != null && facts.size() <= 20 && facts.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT); }
+    private static void validate(String text, List<Negotiation.Fact> facts) { require(text != null && text.length() <= com.lawrence.travel.domain.interaction.DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0) < 0 && facts != null && facts.size() <= 20 && facts.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT); }
     /** 写入只能在外层业务事务内，不允许把收件和可靠调度分开提交。 */
     private static void transaction() { require(TransactionSynchronizationManager.isActualTransactionActive(), INVALID_INPUT); }
     /**

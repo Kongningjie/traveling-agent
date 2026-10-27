@@ -9,6 +9,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 意图协议与来源的确定性校验，不把手工分类样本宣称为模型识别准确率。 */
 class DialogueIntentContractTest {
+    /** 旧事实JSON默认追加，替换操作编解码不丢失；硬限制拒绝REPLACE。 */
+    @Test void preferenceOperationIsBackwardCompatibleAndCannotReplaceHardLimits() {
+        var json = new TravelJson(); String old = "{\"field\":\"pace\",\"value\":\"慢游\",\"quote\":\"慢游\"}";
+        assertThat(json.decode(old, DialogueIntent.Fact.class).operation()).isEqualTo(com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.ADD);
+        assertThat(json.decode(old, com.lawrence.travel.application.interaction.Negotiation.Fact.class).operation())
+                .isEqualTo(com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.ADD);
+        var replacement = new DialogueIntent.Fact("pace", "慢游", "改为慢游", com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.REPLACE);
+        assertThat(json.decode(json.encode(replacement), DialogueIntent.Fact.class)).isEqualTo(replacement);
+        assertThatThrownBy(() -> new DialogueIntent.Fact("hardRequirements", "取消", "取消", com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.REPLACE))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
     /** 真实调用开关关闭时，连Harness入口都不能触达；本测试没有配置真实Key。 */
     @Test void disabledInterpreterNeverTouchesRuntime() {
         var runtime = org.mockito.Mockito.mock(com.lawrence.travel.application.port.AgentRuntimePort.class);

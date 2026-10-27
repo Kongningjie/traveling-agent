@@ -16,6 +16,22 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 /** 协商确定性范围、预算冲突和真实调用关闭边界。 */
 class NegotiationRulesTest {
+    /** 新增偏好保留前项，重放不重复，显式替换只作用于指定软字段。 */
+    @Test void preferencesAppendDeduplicateAndReplaceOnlyWhenExplicit() {
+        for (String field : List.of("pace", "diet", "interests")) {
+            var first = RequirementFields.merge(List.of(), Map.of(field, "原偏好"), ConstraintRevision.Source.USER);
+            var added = RequirementFields.merge(first, Map.of(field, "新偏好"), ConstraintRevision.Source.USER);
+            assertThat(added.getFirst().value()).isEqualTo("原偏好\n新偏好");
+            assertThat(RequirementFields.merge(added, Map.of(field, "新偏好"), ConstraintRevision.Source.USER)).isEqualTo(added);
+            var replaced = RequirementFields.merge(added, Map.of(field, "替代内容"), ConstraintRevision.Source.USER, java.util.Set.of(field));
+            assertThat(replaced.getFirst().value()).isEqualTo("替代内容"); assertThat(replaced.getFirst().id()).isEqualTo(first.getFirst().id());
+        }
+        assertThatThrownBy(() -> RequirementFields.merge(List.of(), Map.of("hardRequirements", "取消限制"), ConstraintRevision.Source.USER,
+                java.util.Set.of("hardRequirements"))).isInstanceOf(IllegalArgumentException.class);
+        var hard = new ConstraintRevision.Requirement(UUID.randomUUID(), "pace", "必须休息", ConstraintRevision.Kind.HARD, ConstraintRevision.Source.USER, java.util.Set.of());
+        assertThatThrownBy(() -> RequirementFields.merge(List.of(hard), Map.of("pace", "紧凑"), ConstraintRevision.Source.USER, java.util.Set.of("pace")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
     /** 多对象或同字段多条约束不能被简单字段合并覆盖，必须保留并澄清范围。 */
     @Test void ambiguousOrScopedRequirementsAreNeverSilentlyCollapsed() {
         var first = new ConstraintRevision.Requirement(UUID.randomUUID(), "pace", "休息", ConstraintRevision.Kind.HARD, ConstraintRevision.Source.USER, java.util.Set.of());
