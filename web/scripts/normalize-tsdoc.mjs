@@ -50,9 +50,9 @@ function normalize(source) {
     if (!/@(?:param|returns?|throws|see|deprecated)\b/.test(comment)) continue;
     let body = comment
       .slice(3, -2)
-      .replace(/\r?\n\s*\* ?/g, "\n")
+      .replace(/\r?\n[ \t]*\* ?/g, "\n")
       .trim();
-    body = body.replace(/(?<!\{)\s+(@(?:param|returns?|throws|see|deprecated)\b)/g, "\n$1");
+    body = body.replace(/(?<!\{)[ \t]+(@(?:param|returns?|throws|see|deprecated)\b)/g, "\n$1");
     const prefix = source.slice(0, range.pos).split("\n").at(-1);
     const indent = prefix.trim() ? "" : prefix;
     const expanded =

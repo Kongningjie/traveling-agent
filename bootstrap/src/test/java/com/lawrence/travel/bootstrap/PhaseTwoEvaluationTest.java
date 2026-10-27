@@ -11,6 +11,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 二期数据封存与评测器负例；仅验证协议，不将模拟观察计为模型质量或完整24场景。 */
 class PhaseTwoEvaluationTest {
+    /** 补充文件用例指纹不受集合迭代顺序影响，判据改变必须产生不同身份。 */
+    @org.junit.jupiter.api.Test
+    void documentReferenceFingerprintIncludesCanonicalOracle() {
+        byte[] source = "合成补充输入".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var one =
+                new com.lawrence.travel.application.evaluation.Evaluation.Oracle(
+                        "COMPLETED", new java.util.LinkedHashSet<>(java.util.List.of("A", "B")));
+        var reordered =
+                new com.lawrence.travel.application.evaluation.Evaluation.Oracle(
+                        "COMPLETED", new java.util.LinkedHashSet<>(java.util.List.of("B", "A")));
+        var changed =
+                new com.lawrence.travel.application.evaluation.Evaluation.Oracle(
+                        "COMPLETED", java.util.Set.of("A"));
+        org.assertj.core.api.Assertions.assertThat(
+                        Dev35HttpAcceptanceTest.referenceSuiteFingerprint(source, one))
+                .isEqualTo(Dev35HttpAcceptanceTest.referenceSuiteFingerprint(source, reordered))
+                .isNotEqualTo(Dev35HttpAcceptanceTest.referenceSuiteFingerprint(source, changed));
+    }
+
     /** 默认16开发；显式24场景四类各6、每类2留出，加载结构不消耗留出质量成绩。 */
     @Test
     void balancedLockedPartitions() {

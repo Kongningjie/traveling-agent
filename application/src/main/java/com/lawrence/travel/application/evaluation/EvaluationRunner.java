@@ -170,7 +170,7 @@ public final class EvaluationRunner {
             throw new IllegalArgumentException("SUITE_INVALID");
         for (var input : suite.cases()) {
             var oracle = suite.oracles().get(input.id());
-            if (!input.id().matches("E(0[1-9]|1[0-2])|P(0[1-9]|1[0-9]|2[0-4])|R01")
+            if (!input.id().matches("E(0[1-9]|1[0-2])|P(0[1-9]|1[0-9]|2[0-4])|R0[1-3]")
                     || !Set.of("DEVELOPMENT", "HOLDOUT").contains(input.partition())
                     || oracle == null
                     || oracle.outcome() == null

@@ -156,6 +156,8 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
         UUID chat = UUID.randomUUID();
         UUID document = null, lastInput = null;
         String lastText = null;
+        Map<String, Object> lastBody = null;
+        boolean structuredDocumentBound = false;
         var trace = new ArrayList<String>();
         int completed = 0;
         var deletedMetrics = new java.util.HashMap<String, Long>();
@@ -163,7 +165,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             user = browser.login();
             for (var turn : turns) {
                 switch (turn.action()) {
-                    case "MESSAGE", "MESSAGE_ASYNC" -> {
+                    case "MESSAGE", "MESSAGE_ASYNC", "MESSAGE_DOCUMENT" -> {
                         if (turn.text() == null
                                 || turn.text().isBlank()
                                 || turn.text().length() > 4000)
@@ -174,10 +176,22 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                                         .replace(
                                                 "{{document}}",
                                                 document == null ? "未上传资料" : document.toString());
-                        browser.post(
-                                "/chats/" + chat + "/messages",
-                                Map.of("inputId", lastInput, "text", lastText),
-                                200);
+                        lastBody =
+                                turn.action().equals("MESSAGE_DOCUMENT")
+                                        ? Map.of(
+                                                "inputId",
+                                                lastInput,
+                                                "text",
+                                                lastText,
+                                                "documentIds",
+                                                List.of(document))
+                                        : Map.of("inputId", lastInput, "text", lastText);
+                        var receipt = browser.post("/chats/" + chat + "/messages", lastBody, 200);
+                        if (turn.action().equals("MESSAGE_DOCUMENT")) {
+                            // 检查实际HTTP收件投影，不能只因请求里带过附件字段就宣称绑定成功。
+                            structuredDocumentBound =
+                                    boundDocument(receipt, lastInput, document, lastText);
+                        }
                         if (turn.action().equals("MESSAGE_ASYNC")) break;
                         String state = browser.waitMessage(chat, lastInput);
                         if (List.of("FAILED", "PAUSED", "PAUSED_QUOTA", "PAUSED_BUDGET", "RETRY")
@@ -204,10 +218,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                                     200);
                     case "DISCONNECT_RECONNECT" -> browser.reconnect();
                     case "REPLAY_MESSAGE" -> {
-                        browser.post(
-                                "/chats/" + chat + "/messages",
-                                Map.of("inputId", lastInput, "text", lastText),
-                                200);
+                        browser.post("/chats/" + chat + "/messages", lastBody, 200);
                         String state = browser.waitMessage(chat, lastInput);
                         if (state.equals("PAUSED"))
                             return paused(
@@ -229,7 +240,9 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                     }
                     case "WAIT_DOCUMENT" ->
                             browser.waitDocument(
-                                    chat, document, List.of("P07", "P19").contains(input.id()));
+                                    chat,
+                                    document,
+                                    List.of("P07", "P19", "R02", "R03").contains(input.id()));
                     case "READ_AS_OTHER" -> {
                         try (var other = new Browser()) {
                             other.login();
@@ -287,8 +300,9 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             metrics.put("wallMillis", (System.nanoTime() - start) / 1000000);
             var state = new java.util.HashMap<>(observed.state());
             state.putAll(isolation);
+            state.put("httpStructuredDocumentBound", structuredDocumentBound);
             if (auditIsolation
-                    && List.of("P07", "P19").contains(input.id())
+                    && List.of("P07", "P19", "R02", "R03").contains(input.id())
                     && document != null
                     && lastInput != null)
                 state.putAll(auditDocument(browser, chat, document, lastInput));
@@ -380,6 +394,31 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
     }
 
     /**
+     * 核对服务端真正返回的消息与附件投影，不通过文件名推断引用。
+     *
+     * @param receipt 已认证收件响应
+     * @param input 本次幂等消息
+     * @param document 本轮选中文件
+     * @param text 不含内部身份的原文
+     * @return 正文保持且有唯一、可读、正确命名的结构化附件
+     */
+    private static boolean boundDocument(
+            Map<?, ?> receipt, UUID input, UUID document, String text) {
+        if (!(receipt.get("messages") instanceof List<?> messages)) return false;
+        for (var value : messages)
+            if (value instanceof Map<?, ?> message && input.toString().equals(message.get("id"))) {
+                if (!text.equals(message.get("text"))
+                        || !(message.get("documents") instanceof List<?> references)
+                        || references.size() != 1) return false;
+                return references.getFirst() instanceof Map<?, ?> reference
+                        && document.toString().equals(reference.get("id"))
+                        && "trip1.txt".equals(reference.get("name"))
+                        && Boolean.TRUE.equals(reference.get("available"));
+            }
+        return false;
+    }
+
+    /**
      * @param turns 全部脚本；在注册或首个模型请求之前校验所有操作，防止坏尾部步骤导致部分真实调用
      */
     private static void requireScript(Turn[] turns) {
@@ -392,6 +431,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                     || !List.of(
                                     "MESSAGE",
                                     "MESSAGE_ASYNC",
+                                    "MESSAGE_DOCUMENT",
                                     "STOP_CHAT",
                                     "DISCONNECT_RECONNECT",
                                     "REPLAY_MESSAGE",
@@ -405,9 +445,16 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                                     "RESTART")
                             .contains(turn.action()))
                 throw new IllegalArgumentException("SESSION_ACTION_INVALID");
-            if (List.of("MESSAGE", "MESSAGE_ASYNC").contains(turn.action())) {
+            if (List.of("MESSAGE", "MESSAGE_ASYNC", "MESSAGE_DOCUMENT").contains(turn.action())) {
                 if (turn.text() == null || turn.text().isBlank() || turn.text().length() > 4000)
                     throw new IllegalArgumentException("SESSION_TEXT_INVALID");
+                if (turn.action().equals("MESSAGE_DOCUMENT")
+                        && (!document
+                                || turn.text().contains("{{document}}")
+                                || turn.text()
+                                        .matches(
+                                                "(?s).*[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}.*")))
+                    throw new IllegalArgumentException("SESSION_DOCUMENT_MESSAGE_INVALID");
                 input = true;
             }
             if (turn.action().equals("UPLOAD")) {

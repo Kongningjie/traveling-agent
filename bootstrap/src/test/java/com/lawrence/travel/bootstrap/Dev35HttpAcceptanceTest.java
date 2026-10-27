@@ -112,17 +112,26 @@ class Dev35HttpAcceptanceTest {
      */
     private static boolean requirementsBatch() {
         String batch = System.getenv("TRAVEL_DEV35_HTTP_BATCH");
-        if (batch == null || "Conversation".equals(batch) || "Documents".equals(batch))
-            return false;
+        if (batch == null
+                || "Conversation".equals(batch)
+                || ("Documents".equals(batch) || "DocumentReferences".equals(batch))) return false;
         if ("Requirements".equals(batch)) return true;
         throw new IllegalArgumentException("HTTP_ACCEPTANCE_BATCH_INVALID");
     }
 
     /**
-     * @return 只有明确选择Documents才运行上传与真实隔离解析，不因其他场景顺带启动runner
+     * @return 只有明确选择Documents或DocumentReferences才运行上传与真实隔离解析，不因其他场景顺带启动runner
      */
     private static boolean documentsBatch() {
-        return "Documents".equals(System.getenv("TRAVEL_DEV35_HTTP_BATCH"));
+        return "Documents".equals(System.getenv("TRAVEL_DEV35_HTTP_BATCH"))
+                || documentReferencesBatch();
+    }
+
+    /**
+     * @return 独立自然语言文件引用批次，不回写封存P07/P19输入或成绩
+     */
+    private static boolean documentReferencesBatch() {
+        return "DocumentReferences".equals(System.getenv("TRAVEL_DEV35_HTTP_BATCH"));
     }
 
     /**
@@ -171,6 +180,40 @@ class Dev35HttpAcceptanceTest {
      * @throws java.io.IOException 补充合成资源不可读
      */
     private Evaluation.Suite selectedSuite() throws java.io.IOException {
+        if (documentReferencesBatch()) {
+            try (var stream =
+                    getClass()
+                            .getResourceAsStream(
+                                    "/evaluation/regressions/document-references.json")) {
+                if (stream == null)
+                    throw new IllegalStateException("DOCUMENT_REFERENCE_FIXTURE_MISSING");
+                byte[] source = stream.readAllBytes();
+                var cases =
+                        List.of(
+                                json.decode(
+                                        new String(source, java.nio.charset.StandardCharsets.UTF_8),
+                                        Evaluation.Case[].class));
+                if (!cases.stream().map(Evaluation.Case::id).toList().equals(List.of("R02", "R03")))
+                    throw new IllegalStateException("DOCUMENT_REFERENCE_FIXTURE_INVALID");
+                var oracle =
+                        new Evaluation.Oracle(
+                                "COMPLETED",
+                                Set.of(
+                                        "OWNER_ISOLATED",
+                                        "NO_UNCONFIRMED_WRITE",
+                                        "NO_SECRET_OUTPUT",
+                                        "SCRIPT_COMPLETED",
+                                        "SOURCE_VERSION_VERIFIED",
+                                        "DOCUMENT_NOT_OFFICIAL_FACT",
+                                        "DELETION_WATERMARK_CHECKED",
+                                        "AUDIT_BOUNDED",
+                                        "MESSAGE_DOCUMENT_BOUND"));
+                var oracles = Map.of("R02", oracle, "R03", oracle);
+                String fingerprint = referenceSuiteFingerprint(source, oracle);
+                return new Evaluation.Suite(
+                        "document-reference-regression-v1", fingerprint, cases, oracles);
+            }
+        }
         if (!requirementsBatch())
             return new PhaseTwoEvaluationSuite(PhaseTwoEvaluationTest::resource).load(false);
         try (var stream =
@@ -200,6 +243,24 @@ class Dev35HttpAcceptanceTest {
                     cases,
                     Map.of("R01", oracle));
         }
+    }
+
+    /**
+     * 对补充输入和程序判据建立稳定指纹，不依赖Set/Map在不同JVM中的迭代顺序。
+     *
+     * @param source 原始补充用例字节
+     * @param oracle 两例共同采用的固定程序判据
+     * @return 输入内容、预期结果和排序后检查项共同决定的SHA256
+     */
+    static String referenceSuiteFingerprint(byte[] source, Evaluation.Oracle oracle) {
+        String canonical =
+                new String(source, java.nio.charset.StandardCharsets.UTF_8)
+                        + "\n"
+                        + oracle.outcome()
+                        + "\n"
+                        + new java.util.TreeSet<>(oracle.required());
+        return com.lawrence.travel.application.artifact.ArtifactService.hash(
+                canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     /**
@@ -269,7 +330,9 @@ class Dev35HttpAcceptanceTest {
         var ids =
                 requirementsBatch()
                         ? List.of("R01")
-                        : documentsBatch() ? List.of("P07", "P19") : List.of("P01", "P02");
+                        : documentReferencesBatch()
+                                ? List.of("R02", "R03")
+                                : documentsBatch() ? List.of("P07", "P19") : List.of("P01", "P02");
         for (String id : ids) {
             var input =
                     suite.cases().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
@@ -317,6 +380,10 @@ class Dev35HttpAcceptanceTest {
                         c.metrics(),
                         c.trace());
         assertThat(judge.check(id, missing)).containsEntry("OWNER_ISOLATED", false);
+        if (documentReferencesBatch()) {
+            assertThat(judge.check(id, missing)).containsEntry("MESSAGE_DOCUMENT_BOUND", false);
+            assertThat(judge.check(id, c)).containsEntry("MESSAGE_DOCUMENT_BOUND", true);
+        }
         var incomplete =
                 new SessionEvaluationExecutor.Capture(
                         c.userId(), c.chatId(), c.outcome(), 0, c.state(), c.metrics(), List.of());
@@ -592,9 +659,11 @@ class Dev35HttpAcceptanceTest {
                                 "coverage",
                                 requirementsBatch()
                                         ? "HTTP_WORKER_PG_R01_SUPPLEMENT_NOT_FROZEN_SUITE"
-                                        : documentsBatch()
-                                                ? "HTTP_WORKER_PG_P07_P19_DOCUMENTS_NOT_FULL_SUITE"
-                                                : "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE",
+                                        : documentReferencesBatch()
+                                                ? "HTTP_WORKER_PG_R02_R03_STRUCTURED_DOCUMENTS_NOT_BROWSER_OR_FROZEN_SUITE"
+                                                : documentsBatch()
+                                                        ? "HTTP_WORKER_PG_P07_P19_DOCUMENTS_NOT_FULL_SUITE"
+                                                        : "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE",
                                 "requestLimit",
                                 16,
                                 "suiteHash",

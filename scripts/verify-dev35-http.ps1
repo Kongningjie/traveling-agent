@@ -5,19 +5,20 @@
 .DESCRIPTION
     每批新建独立PG库与Redis会话命名空间，不停止用户后端或修改.env。
     默认Conversation选择P01/P02各一次，Requirements选择独立R01四轮，不改封存24例。
+    DocumentReferences选择独立R02/R03，自然语言正文与documentIds分离；不回写原封存用例。
     Documents选择P07/P19各一次；需本地已有精确解析镜像，使用本批原件根和临时认证，不修改.env或接管用户runner。
     真实模式须RealModel及本次Authorized，限27b协调角色，全批最多16模型预占。
     不调用高德/Tavily；失败停止后续场景。保留结构化报告，不保存控制台日志。
     本地库执行后删除，真实批次库保留供人工核查；不删除任何开发库/用户卷。
 #>
-param([switch]$RealModel, [switch]$Authorized, [ValidateSet('Conversation','Requirements','Documents')][string]$Batch = 'Conversation')
+param([switch]$RealModel, [switch]$Authorized, [ValidateSet('Conversation','Requirements','Documents','DocumentReferences')][string]$Batch = 'Conversation')
 $ErrorActionPreference = 'Stop'
 if ($RealModel -and -not $Authorized) { throw '本批真实HTTP验收必须先明确授权，再使用Authorized。' }
 $root = Split-Path -Parent $PSScriptRoot
 $original = Get-Location
 $keys = @('POSTGRES_HOST','POSTGRES_PORT','POSTGRES_DB','POSTGRES_USER','POSTGRES_PASSWORD','REDIS_HOST','REDIS_PORT','REDIS_PASSWORD')
 if ($RealModel) { $keys += 'DASHSCOPE_API_KEY' }
-if ($Batch -eq 'Documents') { $keys += 'DOCUMENT_PARSER_IMAGE' }
+if ($Batch -in @('Documents','DocumentReferences')) { $keys += 'DOCUMENT_PARSER_IMAGE' }
 $runtimeKeys = @('TRAVEL_DEV35_HTTP_ACCEPTANCE','TRAVEL_DEV35_HTTP_REAL','TRAVEL_DEV35_HTTP_STORAGE','TRAVEL_DEV35_HTTP_REPORT','TRAVEL_DEV35_HTTP_BATCH')
 $previous = @{}
 foreach ($key in $keys + $runtimeKeys) { $previous[$key] = [Environment]::GetEnvironmentVariable($key,'Process') }
@@ -35,7 +36,7 @@ try {
     }
     if ($env:POSTGRES_HOST -and $env:POSTGRES_HOST -notin @('127.0.0.1','localhost')) { throw 'HTTP_ACCEPTANCE_REQUIRES_LOCAL_POSTGRES' }
     if ($RealModel -and -not $env:DASHSCOPE_API_KEY) { throw 'DASHSCOPE_API_KEY_MISSING' }
-    if ($Batch -eq 'Documents') {
+    if ($Batch -in @('Documents','DocumentReferences')) {
         if ($env:DOCUMENT_PARSER_IMAGE -notmatch '^sha256:[a-f0-9]{64}$') { throw 'PARSER_IMAGE_NOT_CONFIGURED' }
         & docker image inspect $env:DOCUMENT_PARSER_IMAGE --format '{{.Id}}' 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'PARSER_IMAGE_UNAVAILABLE' }
@@ -45,7 +46,7 @@ try {
     $parts = foreach ($file in ($sourceFiles | Sort-Object)) { $file + ':' + (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
     $configuration = @{ codeCommit = (& git rev-parse HEAD); runtime = 'SPRING_BOOT_TEST_CLASSES'; database = $database;
         sourceFingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($parts -join "`n")))) }
-    if ($Batch -eq 'Documents') {
+    if ($Batch -in @('Documents','DocumentReferences')) {
         $configuration.parserImage = $env:DOCUMENT_PARSER_IMAGE
         $configuration.documentFixtureHash = (Get-FileHash -LiteralPath (Join-Path $root 'bootstrap/src/test/resources/evaluation/documents/trip1.txt') -Algorithm SHA256).Hash.ToLowerInvariant()
     }
@@ -72,7 +73,7 @@ try {
     $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $report -Encoding utf8
     'REPORT: ' + $report
     $result.rows | Select-Object caseId,mode,status,failedChecks,metrics | ConvertTo-Json -Depth 4 -Compress
-    $expectedCases = if ($Batch -eq 'Requirements') { @('R01') } elseif ($Batch -eq 'Documents') { @('P07','P19') } else { @('P01','P02') }
+    $expectedCases = if ($Batch -eq 'Requirements') { @('R01') } elseif ($Batch -eq 'DocumentReferences') { @('R02','R03') } elseif ($Batch -eq 'Documents') { @('P07','P19') } else { @('P01','P02') }
     if ($testExit -ne 0 -or @($result.rows).Count -ne $expectedCases.Count -or
         (($result.rows.caseId -join ',') -ne ($expectedCases -join ',')) -or
         @($result.rows | Where-Object status -ne 'PASS').Count) { throw 'HTTP_ACCEPTANCE_FAILED_WITH_EVIDENCE' }

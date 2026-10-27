@@ -1,0 +1,32 @@
+[
+  {
+    "id": "R02",
+    "partition": "DEVELOPMENT",
+    "scenario": "DOCUMENT",
+    "input": "自然语言与结构化文件引用补充验收，不计入封存P07/P19",
+    "facts": {
+      "script": "[{\"action\":\"UPLOAD\",\"text\":null,\"fixture\":\"trip1.txt\"},{\"action\":\"WAIT_DOCUMENT\",\"text\":null,\"fixture\":null},{\"action\":\"MESSAGE_DOCUMENT\",\"text\":\"请解释这份旅行计划，先不要创建旅行。\",\"fixture\":null}]",
+      "fixtureFamily": "TXT_STRUCTURED_REFERENCE"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "network": "DISABLED",
+      "version": "document-reference-regression-v1"
+    }
+  },
+  {
+    "id": "R03",
+    "partition": "DEVELOPMENT",
+    "scenario": "DOCUMENT",
+    "input": "自然语言与结构化文件引用补充验收，不计入封存P07/P19",
+    "facts": {
+      "script": "[{\"action\":\"UPLOAD\",\"text\":null,\"fixture\":\"trip1.txt\"},{\"action\":\"WAIT_DOCUMENT\",\"text\":null,\"fixture\":null},{\"action\":\"READ_AS_OTHER\",\"text\":null,\"fixture\":null},{\"action\":\"MESSAGE_DOCUMENT\",\"text\":\"只解释我选中的这份旅行计划，不读取别人的资料，先不要创建旅行。\",\"fixture\":null}]",
+      "fixtureFamily": "TXT_STRUCTURED_REFERENCE"
+    },
+    "seed": {
+      "source": "SYNTHETIC_TEST_DATA",
+      "network": "DISABLED",
+      "version": "document-reference-regression-v1"
+    }
+  }
+]

@@ -20,7 +20,7 @@ public final class Evaluation {
     }
 
     /**
-     * @param id 一期E01～E12、二期P01～P24或独立回归R01，回归不计入封存场景
+     * @param id 一期E01～E12、二期P01～P24或独立回归R01～R03，回归不计入封存场景
      * @param partition DEVELOPMENT或HOLDOUT
      * @param scenario 场景类型
      * @param input 原始合成需求

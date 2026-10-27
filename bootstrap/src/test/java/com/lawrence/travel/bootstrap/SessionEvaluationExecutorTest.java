@@ -146,6 +146,28 @@ class SessionEvaluationExecutorTest {
                 .hasMessage("SESSION_FIXTURE_MISSING");
     }
 
+    /** 结构化文件提问必须先上传，正文不得夹带内部UUID或占位符；坏脚本在首个连接前拒绝。 */
+    @Test
+    void invalidStructuredDocumentMessageIsRejectedBeforeConnection() {
+        var value = driver(URI.create("http://127.0.0.1:1/"));
+        assertThatThrownBy(
+                        () ->
+                                value.execute(
+                                        input(
+                                                "[{\"action\":\"MESSAGE_DOCUMENT\",\"text\":\"解释这个计划\"}]")))
+                .hasMessage("SESSION_DOCUMENT_MESSAGE_INVALID");
+        var json = new TravelJson();
+        for (String text : List.of("解释{{document}}", "解释文件11111111-1111-4111-8111-111111111111")) {
+            var script =
+                    json.encode(
+                            List.of(
+                                    Map.of("action", "UPLOAD", "fixture", "trip1.txt"),
+                                    Map.of("action", "MESSAGE_DOCUMENT", "text", text)));
+            assertThatThrownBy(() -> value.execute(input(script)))
+                    .hasMessage("SESSION_DOCUMENT_MESSAGE_INVALID");
+        }
+    }
+
     /**
      * 使用真实回环HTTP跑两轮独立会话脚本，认证值只留内存；这是替身协议证据，不写REAL_MODEL成绩。
      * @throws Exception 回环夹具启动/关闭失败

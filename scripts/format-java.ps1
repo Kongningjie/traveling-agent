@@ -17,7 +17,7 @@ $tool = Join-Path $root ".runtime/tooling/google-java-format-$version-all-deps.j
 
 # 词法优先跳过文本块、字符串、字符及行注释，只转换真正的Javadoc，不能改到SQL或提示词。
 $tokens = [regex]::new('"""(?:\\[\s\S]|(?!""")[\s\S])*"""|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*''|//[^\n]*|/\*[\s\S]*?\*/')
-$tags = '(?<!\{)\s+(@(?:param|return|throws|exception|see|since|deprecated|apiNote|implNote|implSpec)\b)'
+$tags = '(?<!\{)[ \t]+(@(?:param|return|throws|exception|see|since|deprecated|apiNote|implNote|implSpec)\b)'
 
 try {
     Set-Location -LiteralPath $root
@@ -31,7 +31,7 @@ try {
     $utf8 = [Text.UTF8Encoding]::new($false)
     $invalidDocs = 0
     foreach ($file in $files) {
-        $content = [IO.File]::ReadAllText((Join-Path $root $file))
+        $content = [IO.File]::ReadAllText((Join-Path $root $file)).Replace("`r`n","`n")
         $expanded = $tokens.Replace($content, [Text.RegularExpressions.MatchEvaluator]{
             param($match)
             if (-not $match.Value.StartsWith('/**') -or $match.Value -notmatch '@(?:param|return|throws|exception|see|since|deprecated|apiNote|implNote|implSpec)\b') { return $match.Value }
@@ -39,7 +39,7 @@ try {
             $indent = ($prefix -split "`n")[-1]
             if ($indent.Trim().Length) { $indent = '' }
             $body = $match.Value.Substring(3,$match.Length-5)
-            $body = [regex]::Replace($body,'\r?\n\s*\* ?',"`n").Trim()
+            $body = [regex]::Replace($body,'\r?\n[ \t]*\* ?',"`n").Trim()
             $body = [regex]::Replace($body,$tags,"`n`$1")
             $lines = @($body -split '\r?\n' | ForEach-Object { $_.TrimEnd() })
             return "/**`n" + (($lines | ForEach-Object { $indent + ' *' + $(if ($_.Length) { ' ' + $_ } else { '' }) }) -join "`n") + "`n$indent */"
