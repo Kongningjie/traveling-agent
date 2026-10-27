@@ -10,6 +10,7 @@ public interface RunEventStore {
      * @return 同一一致性视图内的任务、快照和事件游标
      */
     RunEvents.View view(TaskScope scope);
+
     /**
      * @param scope 私有归属
      * @param after 已确认水位

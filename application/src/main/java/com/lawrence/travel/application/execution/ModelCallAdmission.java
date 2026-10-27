@@ -34,9 +34,14 @@ public final class ModelCallAdmission {
      * @param slots 实际在途并发槽
      * @param clock 用于校验快照及记账的时钟
      */
-    public ModelCallAdmission(boolean enabled, Map<String, String> models,
-                               Map<String, FreeQuotaEvidence> evidence, RunLimits limits,
-                               BudgetLedger ledger, ModelRequestSlots slots, Clock clock) {
+    public ModelCallAdmission(
+            boolean enabled,
+            Map<String, String> models,
+            Map<String, FreeQuotaEvidence> evidence,
+            RunLimits limits,
+            BudgetLedger ledger,
+            ModelRequestSlots slots,
+            Clock clock) {
         this.enabled = enabled;
         this.models = Map.copyOf(models);
         this.evidence = Map.copyOf(evidence);
@@ -56,12 +61,16 @@ public final class ModelCallAdmission {
      * @return 实际请求许可；必须在请求真正结束后结束计量并释放
      * @throws CallRejectedException 不满足准入、预算或并发限制
      */
-    public synchronized Permit begin(UUID runId, String role, String region, String api, long tokenUpperBound) {
-        if (!enabled) throw new CallRejectedException(CallRejectedException.Reason.EXTERNAL_DISABLED);
+    public synchronized Permit begin(
+            UUID runId, String role, String region, String api, long tokenUpperBound) {
+        if (!enabled)
+            throw new CallRejectedException(CallRejectedException.Reason.EXTERNAL_DISABLED);
         String model = models.get(role);
-        if (model == null) throw new CallRejectedException(CallRejectedException.Reason.MODEL_NOT_APPROVED);
+        if (model == null)
+            throw new CallRejectedException(CallRejectedException.Reason.MODEL_NOT_APPROVED);
         FreeQuotaEvidence quota = evidence.get(model);
-        if (quota == null) throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
+        if (quota == null)
+            throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
         var now = clock.instant();
         quota.requireUsable(model, region, api, tokenUpperBound, now);
         var target = new BudgetLedger.Target(model, region, api);
@@ -76,13 +85,19 @@ public final class ModelCallAdmission {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT);
         }
         var lease = slots.tryAcquire();
-        if (lease == null) throw new CallRejectedException(CallRejectedException.Reason.MODEL_CONCURRENCY_FULL);
+        if (lease == null)
+            throw new CallRejectedException(CallRejectedException.Reason.MODEL_CONCURRENCY_FULL);
         try {
             // 单实例的短临界区仅串行“检查快照 + 预占”，真实网络请求不持此锁。
             // 请求次数在发送前提交，失败、取消和进程崩溃均不自动退还。
-            var reservation = ledger.reserve(runId, CallKind.MODEL, limits, target, tokenUpperBound, now);
+            var reservation =
+                    ledger.reserve(runId, CallKind.MODEL, limits, target, tokenUpperBound, now);
             var effective = ledger.limitsFor(runId, limits);
-            return new Permit(reservation, target, lease, (effective == null ? limits : effective).requestTimeout(reservation.budget()));
+            return new Permit(
+                    reservation,
+                    target,
+                    lease,
+                    (effective == null ? limits : effective).requestTimeout(reservation.budget()));
         } catch (RuntimeException failure) {
             lease.close();
             throw failure;
@@ -105,8 +120,11 @@ public final class ModelCallAdmission {
          * @param lease 在途槽
          * @param timeout 收紧后的请求超时
          */
-        private Permit(BudgetLedger.Reservation reservation, BudgetLedger.Target target,
-                        ModelRequestSlots.Lease lease, Duration timeout) {
+        private Permit(
+                BudgetLedger.Reservation reservation,
+                BudgetLedger.Target target,
+                ModelRequestSlots.Lease lease,
+                Duration timeout) {
             this.reservation = reservation;
             this.target = target;
             this.lease = lease;
@@ -140,7 +158,10 @@ public final class ModelCallAdmission {
                 // 这里只做数据库结算，不能在持此锁时等待模型或调用任何工具。
                 synchronized (ModelCallAdmission.this) {
                     try {
-                        ledger.finish(reservation.id(), usage, Duration.ofNanos(System.nanoTime() - startedNanos));
+                        ledger.finish(
+                                reservation.id(),
+                                usage,
+                                Duration.ofNanos(System.nanoTime() - startedNanos));
                     } catch (RuntimeException failure) {
                         unreliableTargets.add(target);
                         throw failure;

@@ -45,7 +45,8 @@ public class SupportConfiguration {
      * @param tx 事务
      * @param json JSON
      * @param safety 安全
-     * @param sources 引用 @param buffer 降级
+     * @param sources 引用
+     * @param buffer 降级
      * @return 反馈用例
      */
     @Bean

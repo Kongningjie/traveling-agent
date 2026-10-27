@@ -22,7 +22,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProbeStreamTest {
     @LocalServerPort private int port;
     @Autowired private ExecutionProbe probe;
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+    private final HttpClient client =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
 
     /** 真实客户端收到开始帧后关闭响应流，后台仍完成；新连接可独立收到完整事件流。 */
     @Test
@@ -30,9 +31,11 @@ class ProbeStreamTest {
         long before = probe.completedCount();
         var first = client.send(request(), HttpResponse.BodyHandlers.ofInputStream());
         assertThat(first.statusCode()).isEqualTo(200);
-        assertThat(first.headers().firstValue("Content-Type").orElse("")).contains("text/event-stream");
+        assertThat(first.headers().firstValue("Content-Type").orElse(""))
+                .contains("text/event-stream");
         assertThat(first.headers().firstValue("Cache-Control")).contains("no-store");
-        try (var reader = new BufferedReader(new InputStreamReader(first.body(), StandardCharsets.UTF_8))) {
+        try (var reader =
+                new BufferedReader(new InputStreamReader(first.body(), StandardCharsets.UTF_8))) {
             assertThat(reader.readLine()).isEqualTo("event:started");
             assertThat(reader.readLine()).isEqualTo("data:OFFLINE_PROBE_STARTED");
         }
@@ -41,7 +44,8 @@ class ProbeStreamTest {
         assertThat(probe.completedCount()).isEqualTo(before + 1);
         var reconnected = client.send(request(), HttpResponse.BodyHandlers.ofString());
         assertThat(reconnected.statusCode()).isEqualTo(200);
-        assertThat(reconnected.body()).contains("event:started", "event:completed", "OFFLINE_PROBE_COMPLETED");
+        assertThat(reconnected.body())
+                .contains("event:started", "event:completed", "OFFLINE_PROBE_COMPLETED");
         assertThat(probe.completedCount()).isEqualTo(before + 2);
     }
 
@@ -50,7 +54,8 @@ class ProbeStreamTest {
     void rejectsExcessSubscribers() throws Exception {
         var first = client.send(request(), HttpResponse.BodyHandlers.ofInputStream());
         var second = client.send(request(), HttpResponse.BodyHandlers.ofInputStream());
-        try (var bodyOne = first.body(); var bodyTwo = second.body()) {
+        try (var bodyOne = first.body();
+                var bodyTwo = second.body()) {
             var third = client.send(request(), HttpResponse.BodyHandlers.ofString());
             assertThat(first.statusCode()).isEqualTo(200);
             assertThat(second.statusCode()).isEqualTo(200);
@@ -61,9 +66,14 @@ class ProbeStreamTest {
         }
     }
 
-    /** @return 仅访问测试进程，超时后不自动重试或取消应用任务 */
+    /**
+     * @return 仅访问测试进程，超时后不自动重试或取消应用任务
+     */
     private HttpRequest request() {
-        return HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/system/probe-events"))
-                .timeout(Duration.ofSeconds(5)).GET().build();
+        return HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + port + "/api/v1/system/probe-events"))
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build();
     }
 }

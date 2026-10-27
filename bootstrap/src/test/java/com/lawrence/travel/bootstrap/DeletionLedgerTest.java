@@ -19,7 +19,6 @@ class DeletionLedgerTest {
 
     /**
      * PG标记初始化后缺失独立头不得重新生成；已匹配的最新条目损坏也不能跳过验证。
-     *
      * @throws Exception 合成文件删除失败
      */
     @Test
@@ -87,7 +86,7 @@ class DeletionLedgerTest {
         assertThat(ledger.head()).isEqualTo(next);
         Files.writeString(root.resolve("head"), "v1\t" + head.instance() + "\t0\t" + head.hash());
         assertThat(ledger.head()).isEqualTo(next);
-        assertThat(ledger.read(1,head.hash())).isEqualTo(e);
+        assertThat(ledger.read(1, head.hash())).isEqualTo(e);
         Files.writeString(root.resolve("00000000000000000001.del"), "损坏的合成记录");
         assertThatThrownBy(() -> ledger.read(1, head.hash()))
                 .hasMessage("DELETION_LEDGER_UNAVAILABLE")

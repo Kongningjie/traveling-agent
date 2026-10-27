@@ -19,7 +19,7 @@ public interface TravelStore {
      * @param lockVersion CAS 行版本，从零开始
      * @param eventSequence 已提交事件游标，事件引擎尚未接入时为零
      */
-    record StoredTask(TravelTask task, String title, long lockVersion, long eventSequence) { }
+    record StoredTask(TravelTask task, String title, long lockVersion, long eventSequence) {}
 
     /**
      * 确认后的完整需求内容；替换必须保留仍有效要求，语义协商由上层负责。
@@ -28,19 +28,27 @@ public interface TravelStore {
      * @param source 确认来源说明，不代表自动采纳模型建议
      * @param difference 本次变更说明
      */
-    record RevisionContent(List<ConstraintRevision.Requirement> requirements,
-                           List<ConstraintRevision.FixedArrangement> fixedArrangements,
-                           String source, String difference) {
+    record RevisionContent(
+            List<ConstraintRevision.Requirement> requirements,
+            List<ConstraintRevision.FixedArrangement> fixedArrangements,
+            String source,
+            String difference) {
         /**
          * 防御性复制，基础领域限制在构造具体需求版本时执行。
          */
         public RevisionContent {
-            if (requirements == null || fixedArrangements == null || requirements.stream().anyMatch(java.util.Objects::isNull)
+            if (requirements == null
+                    || fixedArrangements == null
+                    || requirements.stream().anyMatch(java.util.Objects::isNull)
                     || fixedArrangements.stream().anyMatch(java.util.Objects::isNull)
-                    || source == null || source.isBlank() || source.length() > 2000
-                    || difference == null || difference.length() > 4000) {
+                    || source == null
+                    || source.isBlank()
+                    || source.length() > 2000
+                    || difference == null
+                    || difference.length() > 4000) {
                 throw new com.lawrence.travel.application.travel.TravelStorageFailure(
-                        com.lawrence.travel.application.travel.TravelStorageFailure.Code.INVALID_INPUT);
+                        com.lawrence.travel.application.travel.TravelStorageFailure.Code
+                                .INVALID_INPUT);
             }
             requirements = List.copyOf(requirements);
             fixedArrangements = List.copyOf(fixedArrangements);
@@ -66,7 +74,8 @@ public interface TravelStore {
      * @param sequence 任务内唯一输入顺序
      * @return 保存后的任务；不生成运行或声称已提取需求
      */
-    StoredTask registerChange(TaskScope scope, String key, long expectedLockVersion, UUID inputId, long sequence);
+    StoredTask registerChange(
+            TaskScope scope, String key, long expectedLockVersion, UUID inputId, long sequence);
 
     /**
      * 按输入顺序保存确认后的完整需求，新 revision 与移除该待处理输入同事务提交。
@@ -77,7 +86,12 @@ public interface TravelStore {
      * @param content 已完成协商的全量需求，不是局部增量
      * @return 初次提交结果；冲突不得覆盖新状态
      */
-    StoredTask appendRevision(TaskScope scope, String key, long expectedLockVersion, UUID inputId, RevisionContent content);
+    StoredTask appendRevision(
+            TaskScope scope,
+            String key,
+            long expectedLockVersion,
+            UUID inputId,
+            RevisionContent content);
 
     /**
      * @param scope 用户及任务
@@ -128,5 +142,5 @@ public interface TravelStore {
      * @param version 身份与依赖
      * @param payload 规范化 JSON 正文
      */
-    record StoredSnapshot(ItineraryVersion version, String payload) { }
+    record StoredSnapshot(ItineraryVersion version, String payload) {}
 }

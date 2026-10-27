@@ -8,4 +8,4 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 @MapperScan(basePackageClasses = EventMapper.class)
-public class EventPersistenceConfiguration { }
+public class EventPersistenceConfiguration {}

@@ -23,7 +23,8 @@ public interface ToolEvidenceMapper {
      * @param since 核实时间
      * @return 已占单位
      */
-    @Select("SELECT count(*) FROM traveling_agent.tool_evidence WHERE resource_group=#{group} AND started_at >= #{since}")
+    @Select(
+            "SELECT count(*) FROM traveling_agent.tool_evidence WHERE resource_group=#{group} AND started_at >= #{since}")
     long count(@Param("group") String group, @Param("since") Instant since);
 
     /**
@@ -32,7 +33,8 @@ public interface ToolEvidenceMapper {
      * @param since 核实时间
      * @return 是否有不确定消耗
      */
-    @Select("SELECT EXISTS(SELECT 1 FROM traveling_agent.tool_evidence WHERE resource_group=#{group} AND started_at >= #{since} AND status <> 'COMPLETED')")
+    @Select(
+            "SELECT EXISTS(SELECT 1 FROM traveling_agent.tool_evidence WHERE resource_group=#{group} AND started_at >= #{since} AND status <> 'COMPLETED')")
     boolean uncertain(@Param("group") String group, @Param("since") Instant since);
 
     /**
@@ -41,7 +43,8 @@ public interface ToolEvidenceMapper {
      * @param runId 原运行
      * @param group 服务组
      */
-    @Insert("INSERT INTO traveling_agent.tool_evidence(id,run_id,resource_group) VALUES(#{id},#{runId},#{group})")
+    @Insert(
+            "INSERT INTO traveling_agent.tool_evidence(id,run_id,resource_group) VALUES(#{id},#{runId},#{group})")
     void insert(@Param("id") UUID id, @Param("runId") UUID runId, @Param("group") String group);
 
     /**
@@ -52,7 +55,12 @@ public interface ToolEvidenceMapper {
      * @param payload JSON 文本，失败为空
      * @param hash 原文哈希，失败为空
      */
-    @Update("UPDATE traveling_agent.tool_evidence SET status=CASE WHEN CAST(#{payload} AS text) IS NULL THEN 'UNKNOWN' ELSE 'COMPLETED' END, source_url=#{source},retrieved_at=#{retrieved},payload=CAST(#{payload} AS jsonb),content_hash=#{hash} WHERE id=#{id} AND status='RESERVED'")
-    void finish(@Param("id") UUID id, @Param("source") String source, @Param("retrieved") Instant retrieved,
-                @Param("payload") String payload, @Param("hash") String hash);
+    @Update(
+            "UPDATE traveling_agent.tool_evidence SET status=CASE WHEN CAST(#{payload} AS text) IS NULL THEN 'UNKNOWN' ELSE 'COMPLETED' END, source_url=#{source},retrieved_at=#{retrieved},payload=CAST(#{payload} AS jsonb),content_hash=#{hash} WHERE id=#{id} AND status='RESERVED'")
+    void finish(
+            @Param("id") UUID id,
+            @Param("source") String source,
+            @Param("retrieved") Instant retrieved,
+            @Param("payload") String payload,
+            @Param("hash") String hash);
 }

@@ -6,4 +6,10 @@ import { replyParts } from "../workspace/reply";
 const props = defineProps<{ text: string }>();
 const parts = computed(() => replyParts(props.text));
 </script>
-<template><template v-for="(part, index) in parts" :key="index"><strong v-if="part.kind === 'strong'">{{ part.text }}</strong><code v-else-if="part.kind === 'code'">{{ part.text }}</code><template v-else>{{ part.text }}</template></template></template>
+<template>
+  <template v-for="(part, index) in parts" :key="index"
+    ><strong v-if="part.kind === 'strong'">{{ part.text }}</strong
+    ><code v-else-if="part.kind === 'code'">{{ part.text }}</code
+    ><template v-else>{{ part.text }}</template></template
+  >
+</template>

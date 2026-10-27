@@ -25,7 +25,8 @@ public final class BoundedExecutionResources implements ExecutionResources, Auto
      * @param maximumBranches 每运行同时调查分支上限，正数
      */
     public BoundedExecutionResources(int maximumRuns, int maximumBranches) {
-        if (maximumRuns < 1 || maximumBranches < 1) throw new IllegalArgumentException("RESOURCE_LIMIT_INVALID");
+        if (maximumRuns < 1 || maximumBranches < 1)
+            throw new IllegalArgumentException("RESOURCE_LIMIT_INVALID");
         this.maximumRuns = maximumRuns;
         this.maximumBranches = maximumBranches;
     }
@@ -33,7 +34,8 @@ public final class BoundedExecutionResources implements ExecutionResources, Auto
     /** {@inheritDoc} 运行占用与停止检查原子完成。 */
     @Override
     public synchronized RunScope openRun() {
-        if (stopped || scopes.size() >= maximumRuns) throw new RejectedExecutionException("RUN_CAPACITY");
+        if (stopped || scopes.size() >= maximumRuns)
+            throw new RejectedExecutionException("RUN_CAPACITY");
         var scope = new Scope();
         scopes.add(scope);
         return scope;
@@ -54,32 +56,44 @@ public final class BoundedExecutionResources implements ExecutionResources, Auto
         private boolean closing;
 
         /** 创建尚无调查分支的范围；仅由已检查全局容量的工厂调用。 */
-        private Scope() { }
+        private Scope() {}
 
         /** {@inheritDoc} 先预占再派发，派发失败与实际退出均精确归还一次。 */
         @Override
         public <T> CompletionStage<T> forkResearch(Supplier<T> work) {
             Objects.requireNonNull(work);
             var result = new CompletableFuture<T>();
-            var correlation = com.lawrence.travel.application.execution.ExecutionCorrelation.current();
-            var parentSpan = com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
+            var correlation =
+                    com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+            var parentSpan =
+                    com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
             synchronized (BoundedExecutionResources.this) {
                 if (stopped || closing || branches >= maximumBranches) {
                     throw new RejectedExecutionException("RESEARCH_CAPACITY");
                 }
                 branches++;
                 try {
-                    executor.execute(() -> {
-                        T value = null;
-                        Throwable failure = null;
-                        try (var ids = com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation);
-                             var span = com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parentSpan)) { value = work.get(); }
-                        catch (Throwable error) { failure = error; }
-                        finally { branchExited(); }
-                        // 先释放实际执行资源，再通知父流程；回调可立即开启下一调查分支。
-                        if (failure == null) result.complete(value);
-                        else result.completeExceptionally(failure);
-                    });
+                    executor.execute(
+                            () -> {
+                                T value = null;
+                                Throwable failure = null;
+                                try (var ids =
+                                                com.lawrence.travel.application.execution
+                                                        .ExecutionCorrelation.bind(correlation);
+                                        var span =
+                                                com.lawrence.travel.application.execution
+                                                        .ExecutionCorrelation.bindSpan(
+                                                        parentSpan)) {
+                                    value = work.get();
+                                } catch (Throwable error) {
+                                    failure = error;
+                                } finally {
+                                    branchExited();
+                                }
+                                // 先释放实际执行资源，再通知父流程；回调可立即开启下一调查分支。
+                                if (failure == null) result.complete(value);
+                                else result.completeExceptionally(failure);
+                            });
                 } catch (RejectedExecutionException rejected) {
                     branches--;
                     throw rejected;

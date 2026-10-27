@@ -43,15 +43,17 @@ public final class FileDeletionLedger implements DeletionLedger {
             if (p.length != 4 || !p[0].equals("v1") || !p[3].matches("[a-f0-9]{64}")) throw fail();
             long n = Long.parseLong(p[2]);
             if (n < 0 || n > 1000000) throw fail();
-            var current=new Lifecycle.Head(UUID.fromString(p[1]), n, p[3]);
-            if(n>0 && !hash(n).equals(current.hash())) throw fail();
+            var current = new Lifecycle.Head(UUID.fromString(p[1]), n, p[3]);
+            if (n > 0 && !hash(n).equals(current.hash())) throw fail();
             // 条目已fsync但头未改名时也必须完成原删除意图；不能让下一请求的时间戳/UUID覆盖孤立条目。
-            while(current.sequence()<1000000 && Files.exists(path(name(current.sequence()+1)),LinkOption.NOFOLLOW_LINKS)){
-                long next=current.sequence()+1;
-                read(next,current.hash());
-                current=new Lifecycle.Head(current.instance(),next,hash(next));
+            while (current.sequence() < 1000000
+                    && Files.exists(
+                            path(name(current.sequence() + 1)), LinkOption.NOFOLLOW_LINKS)) {
+                long next = current.sequence() + 1;
+                read(next, current.hash());
+                current = new Lifecycle.Head(current.instance(), next, hash(next));
             }
-            if(current.sequence()!=n) write("head",encode(current),true);
+            if (current.sequence() != n) write("head", encode(current), true);
             return current;
         } catch (IllegalArgumentException e) {
             throw fail();
@@ -62,9 +64,11 @@ public final class FileDeletionLedger implements DeletionLedger {
     @Override
     public synchronized Lifecycle.Head initialize(UUID instance) {
         if (head() != null) throw fail();
-        try(var entries=Files.list(root)){
-            if(entries.anyMatch(p->p.getFileName().toString().endsWith(".del"))) throw fail();
-        }catch(java.io.IOException unavailable){throw fail();}
+        try (var entries = Files.list(root)) {
+            if (entries.anyMatch(p -> p.getFileName().toString().endsWith(".del"))) throw fail();
+        } catch (java.io.IOException unavailable) {
+            throw fail();
+        }
         var h = new Lifecycle.Head(instance, 0, "0".repeat(64));
         write("head", encode(h), true);
         return h;

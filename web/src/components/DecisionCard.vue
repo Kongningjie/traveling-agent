@@ -6,24 +6,20 @@ import type { Card } from "../workspace/types";
 const props = defineProps<{ card: Card; enabled: boolean }>();
 /** selection只同步未提交草稿；只有answer事件才表示用户提交，reply只聚焦聊天框。 */
 const emit = defineEmits<{
-  answer: [
-    action: string,
-    selected: Record<string, string>,
-    text: string,
-    authorization: string[],
-  ];
+  answer: [action: string, selected: Record<string, string>, text: string, authorization: string[]];
   selection: [selected: Record<string, string>];
   reply: [];
 }>();
 const selected = ref<Record<string, string>>({}),
   authorized = ref<string[]>([]);
 const choices = computed(() =>
-  Object.fromEntries(
-    Object.entries(selected.value).filter(([, value]) => value),
-  ),
+  Object.fromEntries(Object.entries(selected.value).filter(([, value]) => value)),
 );
 watch(choices, (value) => emit("selection", { ...value }));
-/** @param question 当前问题 @param option 用户点选项；再次点击取消，不自动采纳推荐。 */
+/**
+ * @param question 当前问题
+ * @param option 用户点选项；再次点击取消，不自动采纳推荐。
+ */
 function toggle(question: string, option: string): void {
   if (!props.enabled) return;
   selected.value = {
@@ -31,7 +27,9 @@ function toggle(question: string, option: string): void {
     [question]: selected.value[question] === option ? "" : option,
   };
 }
-/** @param action 明确动作；自由文本由主聊天框提交，授权不能由选择建议推断。 */
+/**
+ * @param action 明确动作；自由文本由主聊天框提交，授权不能由选择建议推断。
+ */
 function submit(action: string): void {
   if (!props.enabled) return;
   emit(
@@ -56,11 +54,7 @@ defineExpose({ reset });
       <h3>有几件事，想听听你的想法</h3>
     </div>
     <fieldset :disabled="!enabled">
-      <div
-        v-for="question in card.decision.remaining"
-        :key="question.id"
-        class="question"
-      >
+      <div v-for="question in card.decision.remaining" :key="question.id" class="question">
         <p class="question-title">{{ question.prompt }}</p>
         <p v-if="card.specs[question.id]?.reason" class="muted">
           {{ card.specs[question.id]?.reason }}
@@ -79,52 +73,27 @@ defineExpose({ reset });
             @click="toggle(question.id, String(id))"
           >
             {{ label
-            }}<span
-              v-if="id === question.recommendedOption"
-              class="recommend-label"
-              >推荐</span
-            >
+            }}<span v-if="id === question.recommendedOption" class="recommend-label">推荐</span>
           </button>
         </div>
       </div>
       <p class="muted">可以只选一部分，也可以直接在下面的聊天框回答。</p>
       <div class="actions">
-        <button
-          :disabled="!Object.keys(choices).length"
-          @click="submit('ANSWER')"
-        >
-          提交选择
-        </button>
+        <button :disabled="!Object.keys(choices).length" @click="submit('ANSWER')">提交选择</button>
         <button class="quiet" @click="emit('reply')">用自己的话回答 ↗</button>
       </div>
       <details class="decision-more">
         <summary>暂不决定或设置授权</summary>
-        <label
-          v-for="id in card.decision.allowedAuthorizationScope"
-          :key="id"
-          class="inline"
-        >
-          <input
-            v-model="authorized"
-            type="checkbox"
-            :value="id"
-          />仅授权系统决定：{{
+        <label v-for="id in card.decision.allowedAuthorizationScope" :key="id" class="inline">
+          <input v-model="authorized" type="checkbox" :value="id" />仅授权系统决定：{{
             card.decision.remaining[id]?.prompt ?? "当前问题"
           }}
         </label>
         <div class="actions">
-          <button
-            class="secondary"
-            :disabled="!authorized.length"
-            @click="submit('AUTHORIZE')"
-          >
+          <button class="secondary" :disabled="!authorized.length" @click="submit('AUTHORIZE')">
             确认有限授权
           </button>
-          <button
-            class="quiet"
-            :disabled="!Object.keys(choices).length"
-            @click="submit('REJECT')"
-          >
+          <button class="quiet" :disabled="!Object.keys(choices).length" @click="submit('REJECT')">
             不采纳所选建议
           </button>
           <button class="quiet" @click="submit('UNDECIDED')">暂未决定</button>

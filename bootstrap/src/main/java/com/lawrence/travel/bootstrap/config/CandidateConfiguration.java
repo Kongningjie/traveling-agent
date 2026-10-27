@@ -28,21 +28,46 @@ public class CandidateConfiguration {
      * @param json 规范 JSON
      * @param controls 角色配置
      * @param evidence 字段证据权威端口
-     * @param preferences 结构化偏好端口 @param transactions 短事务
+     * @param preferences 结构化偏好端口
+     * @param transactions 短事务
      * @return 唯一业务报告投影
      */
-    @Bean CandidateStore candidateStore(CandidateMapper mapper, TravelMapper tasks, EngineMapper engine, BudgetMapper budgets,
-                                       TravelJson json, ExecutionControlProperties controls, com.lawrence.travel.application.port.ResearchStore evidence, com.lawrence.travel.application.port.PreferenceStore preferences, BusinessTransactions transactions) {
-        return new PostgresCandidateStore(mapper, tasks, engine, budgets, json, "itinerary-rules-v4",
-                json.hash(json.encode(List.of("review-prompt-v4", controls.models().get("reviewer")))), Duration.ofMinutes(10), evidence, preferences, transactions);
+    @Bean
+    CandidateStore candidateStore(
+            CandidateMapper mapper,
+            TravelMapper tasks,
+            EngineMapper engine,
+            BudgetMapper budgets,
+            TravelJson json,
+            ExecutionControlProperties controls,
+            com.lawrence.travel.application.port.ResearchStore evidence,
+            com.lawrence.travel.application.port.PreferenceStore preferences,
+            BusinessTransactions transactions) {
+        return new PostgresCandidateStore(
+                mapper,
+                tasks,
+                engine,
+                budgets,
+                json,
+                "itinerary-rules-v4",
+                json.hash(
+                        json.encode(
+                                List.of("review-prompt-v4", controls.models().get("reviewer")))),
+                Duration.ofMinutes(10),
+                evidence,
+                preferences,
+                transactions);
     }
+
     /**
      * @param store 候选权威
      * @param engine 同源可靠执行
      * @param transactions 业务事务
      * @return 显式接受用例，无 HTTP 写入口
      */
-    @Bean ItineraryService itineraryService(CandidateStore store, ExecutionEngineStore engine, BusinessTransactions transactions) {
+    @Bean
+    ItineraryService itineraryService(
+            CandidateStore store, ExecutionEngineStore engine, BusinessTransactions transactions) {
         return new ItineraryService(store, engine, transactions);
     }
 }

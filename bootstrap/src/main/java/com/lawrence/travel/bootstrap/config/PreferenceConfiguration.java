@@ -15,8 +15,23 @@ import org.springframework.context.annotation.Profile;
 @Profile("local")
 @org.mybatis.spring.annotation.MapperScan(basePackageClasses = PreferenceMapper.class)
 public class PreferenceConfiguration {
-    /** @param mapper SQL @param json 规范JSON @return 权威仓储 */
-    @Bean PreferenceStore preferenceStore(PreferenceMapper mapper, TravelJson json) { return new PostgresPreferenceStore(mapper, json); }
-    /** @param store 权威端口 @param transactions 短事务 @return 用户偏好用例 */
-    @Bean PreferenceService preferenceService(PreferenceStore store, BusinessTransactions transactions) { return new PreferenceService(store, transactions); }
+    /**
+     * @param mapper SQL
+     * @param json 规范JSON
+     * @return 权威仓储
+     */
+    @Bean
+    PreferenceStore preferenceStore(PreferenceMapper mapper, TravelJson json) {
+        return new PostgresPreferenceStore(mapper, json);
+    }
+
+    /**
+     * @param store 权威端口
+     * @param transactions 短事务
+     * @return 用户偏好用例
+     */
+    @Bean
+    PreferenceService preferenceService(PreferenceStore store, BusinessTransactions transactions) {
+        return new PreferenceService(store, transactions);
+    }
 }

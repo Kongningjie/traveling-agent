@@ -17,7 +17,10 @@ public record RunBudget(long modelCalls, long toolCalls, int repairRounds, Durat
      */
     public RunBudget {
         Objects.requireNonNull(activeTime);
-        if (modelCalls < 0 || toolCalls < 0 || repairRounds < 0 || activeTime.isNegative()
+        if (modelCalls < 0
+                || toolCalls < 0
+                || repairRounds < 0
+                || activeTime.isNegative()
                 || !activeTime.equals(Duration.ofMillis(activeTime.toMillis()))) {
             throw new IllegalArgumentException("Invalid budget snapshot");
         }
@@ -33,17 +36,20 @@ public record RunBudget(long modelCalls, long toolCalls, int repairRounds, Durat
     public RunBudget reserve(CallKind kind, RunLimits limits) {
         Objects.requireNonNull(kind);
         limits.requestTimeout(this);
-        boolean exhausted = switch (kind) {
-            case MODEL -> modelCalls >= limits.modelCalls();
-            case TOOL -> toolCalls >= limits.toolCalls();
-            case REPAIR -> repairRounds >= limits.repairRounds();
-        };
+        boolean exhausted =
+                switch (kind) {
+                    case MODEL -> modelCalls >= limits.modelCalls();
+                    case TOOL -> toolCalls >= limits.toolCalls();
+                    case REPAIR -> repairRounds >= limits.repairRounds();
+                };
         if (exhausted) {
             throw new CallRejectedException(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
         }
         // 先检查再递增，第 30／60 次允许完成；只有新增第 31／61 次时才拒绝。
-        return new RunBudget(modelCalls + (kind == CallKind.MODEL ? 1 : 0),
+        return new RunBudget(
+                modelCalls + (kind == CallKind.MODEL ? 1 : 0),
                 toolCalls + (kind == CallKind.TOOL ? 1 : 0),
-                repairRounds + (kind == CallKind.REPAIR ? 1 : 0), activeTime);
+                repairRounds + (kind == CallKind.REPAIR ? 1 : 0),
+                activeTime);
     }
 }

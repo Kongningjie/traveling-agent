@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** 仅借用 smoke 的数据库排除配置；未启用 smoke profile 时诊断启动入口必须消失。 */
 @ActiveProfiles("boundary")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "spring.config.import=classpath:application-smoke.yml")
 class ProbeSecurityBoundaryTest {
     @LocalServerPort private int port;
@@ -25,9 +26,17 @@ class ProbeSecurityBoundaryTest {
     @Test
     void probeCannotBeStartedOutsideSmokeProfile() throws Exception {
         assertThat(context.getBeansOfType(ProbeStreamController.class)).isEmpty();
-        var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(
-                "http://127.0.0.1:" + port + "/api/v1/system/probe-events")).GET().build(),
-                HttpResponse.BodyHandlers.discarding());
+        var response =
+                HttpClient.newHttpClient()
+                        .send(
+                                HttpRequest.newBuilder(
+                                                URI.create(
+                                                        "http://127.0.0.1:"
+                                                                + port
+                                                                + "/api/v1/system/probe-events"))
+                                        .GET()
+                                        .build(),
+                                HttpResponse.BodyHandlers.discarding());
         assertThat(response.statusCode()).isEqualTo(403);
     }
 }

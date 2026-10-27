@@ -8,4 +8,4 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 @MapperScan(basePackageClasses = EvidenceMapper.class)
-public class KnowledgePersistenceConfiguration { }
+public class KnowledgePersistenceConfiguration {}

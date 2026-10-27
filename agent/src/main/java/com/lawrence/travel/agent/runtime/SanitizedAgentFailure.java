@@ -14,12 +14,18 @@ public final class SanitizedAgentFailure extends IllegalStateException {
     public SanitizedAgentFailure(String code, Throwable failure) {
         super(code);
         var types = new ArrayList<String>();
-        for (Throwable current = failure; current != null && types.size() < 8; current = current.getCause()) {
+        for (Throwable current = failure;
+                current != null && types.size() < 8;
+                current = current.getCause()) {
             types.add(current.getClass().getName());
         }
         exceptionTypes = List.copyOf(types);
     }
 
-    /** @return 不含原始异常文本的有界只读类型链，不代表用户可重试 */
-    public List<String> exceptionTypes() { return exceptionTypes; }
+    /**
+     * @return 不含原始异常文本的有界只读类型链，不代表用户可重试
+     */
+    public List<String> exceptionTypes() {
+        return exceptionTypes;
+    }
 }

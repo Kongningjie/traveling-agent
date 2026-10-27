@@ -11,8 +11,12 @@ import java.util.Objects;
  * @param modelTimeout 单模型请求超时，必须为正且至少一毫秒
  * @param activeTime 主动执行累计上限，必须为正且至少一毫秒
  */
-public record RunLimits(long modelCalls, long toolCalls, int repairRounds,
-                        Duration modelTimeout, Duration activeTime) {
+public record RunLimits(
+        long modelCalls,
+        long toolCalls,
+        int repairRounds,
+        Duration modelTimeout,
+        Duration activeTime) {
     /**
      * 检查配置合法性，拒绝无界、负数或无法按毫秒执行的预算。
      * @throws IllegalArgumentException 次数或时间配置不合法
@@ -20,8 +24,11 @@ public record RunLimits(long modelCalls, long toolCalls, int repairRounds,
     public RunLimits {
         Objects.requireNonNull(modelTimeout);
         Objects.requireNonNull(activeTime);
-        if (modelCalls <= 0 || toolCalls <= 0 || repairRounds < 0
-                || modelTimeout.toMillis() <= 0 || activeTime.toMillis() <= 0
+        if (modelCalls <= 0
+                || toolCalls <= 0
+                || repairRounds < 0
+                || modelTimeout.toMillis() <= 0
+                || activeTime.toMillis() <= 0
                 || !modelTimeout.equals(Duration.ofMillis(modelTimeout.toMillis()))
                 || !activeTime.equals(Duration.ofMillis(activeTime.toMillis()))) {
             throw new IllegalArgumentException("Invalid execution limits");

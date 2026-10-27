@@ -23,20 +23,31 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public final class RunEventController {
     private final RunEventService service;
     private final EventStreams streams;
+
     /**
      * @param service 归属及游标用例
      * @param streams 有界传输
      */
-    public RunEventController(RunEventService service, EventStreams streams) { this.service = service; this.streams = streams; }
+    public RunEventController(RunEventService service, EventStreams streams) {
+        this.service = service;
+        this.streams = streams;
+    }
+
     /**
      * @param actor 服务端认证
      * @param taskId 私有任务
      * @param response 禁止缓存
      * @return 一致性视图和游标
      */
-    @GetMapping("/view") public RunEvents.View view(@AuthenticationPrincipal UserIdentity actor, @PathVariable UUID taskId, HttpServletResponse response) {
-        response.setHeader("Cache-Control", "no-store"); return service.view(actor, taskId);
+    @GetMapping("/view")
+    public RunEvents.View view(
+            @AuthenticationPrincipal UserIdentity actor,
+            @PathVariable UUID taskId,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return service.view(actor, taskId);
     }
+
     /**
      * @param actor 认证
      * @param taskId 任务
@@ -45,10 +56,17 @@ public final class RunEventController {
      * @param response 禁止缓存
      * @return 升序页
      */
-    @GetMapping("/events") public RunEvents.Page page(@AuthenticationPrincipal UserIdentity actor, @PathVariable UUID taskId,
-            @RequestParam(required = false) String after, @RequestParam(defaultValue = "100") int limit, HttpServletResponse response) {
-        response.setHeader("Cache-Control", "no-store"); return service.page(actor, taskId, after, limit);
+    @GetMapping("/events")
+    public RunEvents.Page page(
+            @AuthenticationPrincipal UserIdentity actor,
+            @PathVariable UUID taskId,
+            @RequestParam(required = false) String after,
+            @RequestParam(defaultValue = "100") int limit,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return service.page(actor, taskId, after, limit);
     }
+
     /**
      * @param actor 认证
      * @param taskId 任务
@@ -59,11 +77,20 @@ public final class RunEventController {
      * @return 只读 SSE；超时轮换连接由客户端补读
      */
     @GetMapping(value = "/events/stream", produces = "text/event-stream")
-    public SseEmitter stream(@AuthenticationPrincipal UserIdentity actor, @PathVariable UUID taskId,
-            @RequestHeader(value = "Last-Event-ID", required = false) String lastId, @RequestParam(required = false) String after,
-            HttpServletRequest request, HttpServletResponse response) {
-        response.setHeader("Cache-Control", "no-store"); response.setHeader("X-Accel-Buffering", "no");
+    public SseEmitter stream(
+            @AuthenticationPrincipal UserIdentity actor,
+            @PathVariable UUID taskId,
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastId,
+            @RequestParam(required = false) String after,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("X-Accel-Buffering", "no");
         var session = request.getSession(false);
-        return streams.open(actor, taskId, session == null ? null : session.getId(), lastId == null ? after : lastId);
+        return streams.open(
+                actor,
+                taskId,
+                session == null ? null : session.getId(),
+                lastId == null ? after : lastId);
     }
 }

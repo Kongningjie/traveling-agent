@@ -32,21 +32,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @ActiveProfiles("local")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class BudgetLedgerIntegrationTest {
-    @Autowired
-    private BudgetLedger ledger;
-    @Autowired
-    private BudgetMapper mapper;
-    @Autowired
-    private PlatformTransactionManager transactions;
-    @Autowired
-    private JdbcTemplate jdbc;
-    @Autowired
-    private ExecutionControlProperties properties;
+    @Autowired private BudgetLedger ledger;
+    @Autowired private BudgetMapper mapper;
+    @Autowired private PlatformTransactionManager transactions;
+    @Autowired private JdbcTemplate jdbc;
+    @Autowired private ExecutionControlProperties properties;
 
     private final UUID runId = UUID.randomUUID();
     private final Instant started = Instant.now();
-    private final BudgetLedger.Target target = new BudgetLedger.Target("__meter_test__", "test-region", "TEST");
-    private final RunLimits limits = new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
+    private final BudgetLedger.Target target =
+            new BudgetLedger.Target("__meter_test__", "test-region", "TEST");
+    private final RunLimits limits =
+            new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
 
     /** 仅清理本测试随机运行的子记录和预算，不删除其他用户或运行的计量。 */
     @AfterEach
@@ -64,15 +61,17 @@ class BudgetLedgerIntegrationTest {
         ledger.create(runId);
         var calls = new ArrayList<Callable<Boolean>>();
         for (int i = 0; i < 60; i++) {
-            calls.add(() -> {
-                try {
-                    ledger.reserve(runId, CallKind.MODEL, limits, target, 10, started);
-                    return true;
-                } catch (CallRejectedException rejected) {
-                    assertThat(rejected.reason()).isEqualTo(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
-                    return false;
-                }
-            });
+            calls.add(
+                    () -> {
+                        try {
+                            ledger.reserve(runId, CallKind.MODEL, limits, target, 10, started);
+                            return true;
+                        } catch (CallRejectedException rejected) {
+                            assertThat(rejected.reason())
+                                    .isEqualTo(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
+                            return false;
+                        }
+                    });
         }
         int accepted = 0;
         try (var executor = Executors.newFixedThreadPool(8)) {
@@ -80,8 +79,12 @@ class BudgetLedgerIntegrationTest {
         }
         assertThat(accepted).isEqualTo(30);
         assertThat(ledger.read(runId).modelCalls()).isEqualTo(30);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM traveling_agent.call_meter WHERE run_id=?",
-                Integer.class, runId)).isEqualTo(30);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM traveling_agent.call_meter WHERE run_id=?",
+                                Integer.class,
+                                runId))
+                .isEqualTo(30);
     }
 
     /** 验证记录插入失败会回滚预占，不产生只扣次数却没有请求身份的事务裂缝。 */
@@ -89,11 +92,16 @@ class BudgetLedgerIntegrationTest {
     void reservationAndMeterInsertRollBackTogether() {
         ledger.create(runId);
         var invalid = new BudgetLedger.Target(null, "test-region", "TEST");
-        assertThatThrownBy(() -> ledger.reserve(runId, CallKind.MODEL, limits, invalid, 10, started))
+        assertThatThrownBy(
+                        () -> ledger.reserve(runId, CallKind.MODEL, limits, invalid, 10, started))
                 .isInstanceOf(RuntimeException.class);
         assertThat(ledger.read(runId).modelCalls()).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM traveling_agent.call_meter WHERE run_id=?",
-                Integer.class, runId)).isZero();
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM traveling_agent.call_meter WHERE run_id=?",
+                                Integer.class,
+                                runId))
+                .isZero();
     }
 
     /** 验证已知、未知和崩溃未决用量区别计量，重复回调和建账不能重置数据。 */
@@ -105,7 +113,10 @@ class BudgetLedgerIntegrationTest {
         ledger.finish(known.id(), new TokenUsage(90, 90), Duration.ofMillis(20));
         ledger.reserve(runId, CallKind.MODEL, limits, target, 30, started);
         assertThat(ledger.hasUncertainUsage(target, started.minusSeconds(1), started)).isFalse();
-        assertThat(ledger.hasUncertainUsage(target, started.minusSeconds(1), started.plusSeconds(1))).isTrue();
+        assertThat(
+                        ledger.hasUncertainUsage(
+                                target, started.minusSeconds(1), started.plusSeconds(1)))
+                .isTrue();
         var unknown = ledger.reserve(runId, CallKind.MODEL, limits, target, 20, started);
         ledger.finish(unknown.id(), null, Duration.ofMillis(10));
 
@@ -116,10 +127,18 @@ class BudgetLedgerIntegrationTest {
         assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(55);
         assertThat(recreated.hasUsageOverrun(target, started.minusSeconds(1))).isFalse();
         assertThat(recreated.hasUncertainUsage(target, started.minusSeconds(1), started)).isTrue();
-        assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?",
-                String.class, unknown.id())).isEqualTo("UNKNOWN");
-        assertThat(jdbc.queryForObject("SELECT input_tokens FROM traveling_agent.call_meter WHERE id=?",
-                Long.class, unknown.id())).isNull();
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT status FROM traveling_agent.call_meter WHERE id=?",
+                                String.class,
+                                unknown.id()))
+                .isEqualTo("UNKNOWN");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT input_tokens FROM traveling_agent.call_meter WHERE id=?",
+                                Long.class,
+                                unknown.id()))
+                .isNull();
     }
 
     /** 验证实际用量超过保守上界后额度变为不确定，阻止沿用失真的快照继续调用。 */
@@ -132,8 +151,11 @@ class BudgetLedgerIntegrationTest {
         assertThat(ledger.tokensSince(target, started.minusSeconds(1))).isEqualTo(2);
         assertThat(ledger.hasUsageOverrun(target, started.minusSeconds(1))).isTrue();
         assertThat(ledger.hasUsageOverrun(target, started.plusSeconds(1))).isFalse();
-        assertThat(ledger.hasUsageOverrun(new BudgetLedger.Target("__other_model__", "test-region", "TEST"),
-                started.minusSeconds(1))).isFalse();
+        assertThat(
+                        ledger.hasUsageOverrun(
+                                new BudgetLedger.Target("__other_model__", "test-region", "TEST"),
+                                started.minusSeconds(1)))
+                .isFalse();
     }
 
     /** 真实PG验证重建服务后UNKNOWN/RESERVED仍按上限扣算，余额充足放行、余额不足拒绝且不改历史。 */
@@ -146,13 +168,26 @@ class BudgetLedgerIntegrationTest {
         var known = ledger.reserve(runId, CallKind.MODEL, limits, target, 10, started);
         ledger.finish(known.id(), new TokenUsage(3, 2), Duration.ofMillis(1));
         var recreated = new PostgresBudgetLedger(mapper, transactions);
-        var quota = new com.lawrence.travel.domain.execution.control.FreeQuotaEvidence(target.modelId(),
-                target.region(), target.api(), 100, started.minusSeconds(1), started.plusSeconds(60),
-                started.plusSeconds(600), true);
-        var gate = new com.lawrence.travel.application.execution.ModelCallAdmission(true,
-                java.util.Map.of("planner", target.modelId()), java.util.Map.of(target.modelId(), quota),
-                limits, recreated, new com.lawrence.travel.infrastructure.execution.SemaphoreModelRequestSlots(1),
-                java.time.Clock.systemUTC());
+        var quota =
+                new com.lawrence.travel.domain.execution.control.FreeQuotaEvidence(
+                        target.modelId(),
+                        target.region(),
+                        target.api(),
+                        100,
+                        started.minusSeconds(1),
+                        started.plusSeconds(60),
+                        started.plusSeconds(600),
+                        true);
+        var gate =
+                new com.lawrence.travel.application.execution.ModelCallAdmission(
+                        true,
+                        java.util.Map.of("planner", target.modelId()),
+                        java.util.Map.of(target.modelId(), quota),
+                        limits,
+                        recreated,
+                        new com.lawrence.travel.infrastructure.execution.SemaphoreModelRequestSlots(
+                                1),
+                        java.time.Clock.systemUTC());
         assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(55);
         try (var permit = gate.begin(runId, "planner", target.region(), target.api(), 45)) {
             assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(100);
@@ -161,10 +196,18 @@ class BudgetLedgerIntegrationTest {
         assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(56);
         assertThatThrownBy(() -> gate.begin(runId, "planner", target.region(), target.api(), 45))
                 .hasMessage("QUOTA_INSUFFICIENT");
-        assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?", String.class,
-                unknown.id())).isEqualTo("UNKNOWN");
-        assertThat(jdbc.queryForObject("SELECT status FROM traveling_agent.call_meter WHERE id=?", String.class,
-                pending.id())).isEqualTo("RESERVED");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT status FROM traveling_agent.call_meter WHERE id=?",
+                                String.class,
+                                unknown.id()))
+                .isEqualTo("UNKNOWN");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT status FROM traveling_agent.call_meter WHERE id=?",
+                                String.class,
+                                pending.id()))
+                .isEqualTo("RESERVED");
         assertThat(recreated.read(runId).modelCalls()).isEqualTo(4);
     }
 
@@ -172,10 +215,20 @@ class BudgetLedgerIntegrationTest {
     @Test
     void rejectsAdmissionInsideAnAmbientBusinessTransaction() {
         ledger.create(runId);
-        new TransactionTemplate(transactions).executeWithoutResult(status ->
-                assertThatThrownBy(() -> ledger.reserve(runId, CallKind.MODEL, limits, target, 10, started))
-                        .isInstanceOf(IllegalStateException.class)
-                        .hasMessageContaining("ambient business transaction"));
+        new TransactionTemplate(transactions)
+                .executeWithoutResult(
+                        status ->
+                                assertThatThrownBy(
+                                                () ->
+                                                        ledger.reserve(
+                                                                runId,
+                                                                CallKind.MODEL,
+                                                                limits,
+                                                                target,
+                                                                10,
+                                                                started))
+                                        .isInstanceOf(IllegalStateException.class)
+                                        .hasMessageContaining("ambient business transaction"));
         assertThat(ledger.read(runId).modelCalls()).isZero();
     }
 

@@ -10,15 +10,35 @@ public interface AgentRuntimePort {
      * @return 可取消句柄；产物不代表业务提交
      */
     Invocation start(java.util.UUID runId, String role, String prompt);
-    /** @param runId 原运行 @param role 固定模型角色 @param prompt 不可信数据上下文 @return 不暴露任何工具的结构化调用句柄；原预算和取消机制不变 */
+
+    /**
+     * @param runId 原运行
+     * @param role 固定模型角色
+     * @param prompt 不可信数据上下文
+     * @return 不暴露任何工具的结构化调用句柄；原预算和取消机制不变
+     */
     Invocation startWithoutTools(java.util.UUID runId, String role, String prompt);
 
-    /** @param runId 原运行 @param role 固定角色 @param prompt 当前完整请求 @param basis 实际读取版本 @return 独立业务上下文；非生产替身默认沿用无工具调用 */
-    default Invocation startContextual(java.util.UUID runId, String role, String prompt, com.lawrence.travel.application.memory.AgentContext.Basis basis) { return startWithoutTools(runId, role, prompt); }
+    /**
+     * @param runId 原运行
+     * @param role 固定角色
+     * @param prompt 当前完整请求
+     * @param basis 实际读取版本
+     * @return 独立业务上下文；非生产替身默认沿用无工具调用
+     */
+    default Invocation startContextual(
+            java.util.UUID runId,
+            String role,
+            String prompt,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis) {
+        return startWithoutTools(runId, role, prompt);
+    }
 
     /** 隔离本次执行的结果及取消能力，不暴露 SDK 类型。 */
     interface Invocation extends AutoCloseable {
-        /** @return 异步产物，失败时携带固定错误分类 */
+        /**
+         * @return 异步产物，失败时携带固定错误分类
+         */
         java.util.concurrent.CompletionStage<String> result();
 
         /** 请求取消实际连接和迟到结果；不代表供应商没有产生用量。 */
@@ -28,7 +48,6 @@ public interface AgentRuntimePort {
 
     /**
      * 读取适配器声明的框架接线状态，不发起模型请求或业务状态提交。
-     *
      * @return 非空状态标识；待验证状态不能解释为真实模型可用
      */
     String integrationStatus();

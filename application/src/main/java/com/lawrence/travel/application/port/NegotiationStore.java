@@ -9,8 +9,13 @@ import java.util.UUID;
 
 /** 可靠输入和卡片；写入须参与同一业务事务。 */
 public interface NegotiationStore extends StageProjection {
-    /** @param scope 私有归属 @param input 输入 @param facts 已经校验来源的模型提取结果；保留原文但不重复模型调用 */
+    /**
+     * @param scope 私有归属
+     * @param input 输入
+     * @param facts 已经校验来源的模型提取结果；保留原文但不重复模型调用
+     */
     void interpreted(TaskScope scope, UUID input, List<Negotiation.Fact> facts);
+
     /**
      * @param scope 归属
      * @param id 输入
@@ -19,17 +24,20 @@ public interface NegotiationStore extends StageProjection {
      * @return 首次登记，重放不再次取代
      */
     boolean receiveChange(TaskScope scope, UUID id, String text, List<Negotiation.Fact> facts);
+
     /**
      * @param scope 归属
      * @param id 输入
      * @return 初次稳定响应或空
      */
     Negotiation.Receipt receipt(TaskScope scope, UUID id);
+
     /**
      * @param scope 归属
      * @param result 初次稳定响应
      */
     void saveReceipt(TaskScope scope, Negotiation.Receipt result);
+
     /**
      * @param scope 归属
      * @param id 回答
@@ -42,22 +50,35 @@ public interface NegotiationStore extends StageProjection {
      * @param authorization 有限授权
      * @return 原卡片，重放先检查内容
      */
-    Negotiation.Card receiveAnswer(TaskScope scope, UUID id, UUID decision, long revision, long constraints, String action, Map<UUID, UUID> selected, String text, Set<UUID> authorization);
+    Negotiation.Card receiveAnswer(
+            TaskScope scope,
+            UUID id,
+            UUID decision,
+            long revision,
+            long constraints,
+            String action,
+            Map<UUID, UUID> selected,
+            String text,
+            Set<UUID> authorization);
+
     /**
      * @param scope 归属
      * @return 最近一百条消息
      */
     List<Negotiation.Message> messages(TaskScope scope);
+
     /**
      * @param scope 归属
      * @return 当前有效卡片或空
      */
     Negotiation.Card card(TaskScope scope);
+
     /**
      * @param scope 归属
      * @return 本任务明确拒绝的稳定选项身份，跨轮次保留
      */
     Set<UUID> rejected(TaskScope scope);
+
     /**
      * @param scope 归属
      * @param inputId 阶段输入

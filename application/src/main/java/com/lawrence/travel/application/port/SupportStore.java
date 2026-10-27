@@ -97,7 +97,8 @@ public interface SupportStore {
      * @param user 登录主体
      * @param id 幂等ID
      * @param code 固定客户端故障
-     * @param component 固定组件 @return 只有成功保存才返回问题编号
+     * @param component 固定组件
+     * @return 只有成功保存才返回问题编号
      */
     UUID client(UUID user, UUID id, String code, String component);
 

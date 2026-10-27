@@ -25,20 +25,33 @@ public final class EventStreams implements AutoCloseable {
     private final SubscriptionAccess access;
     private final Duration heartbeatInterval;
     private final ConcurrentHashMap<UUID, Connection> connections = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService timer = Executors.newScheduledThreadPool(4, task -> {
-        var thread = new Thread(task, "task-event-stream"); thread.setDaemon(true); return thread;
-    });
+    private final ScheduledExecutorService timer =
+            Executors.newScheduledThreadPool(
+                    4,
+                    task -> {
+                        var thread = new Thread(task, "task-event-stream");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
     private boolean closed;
+
     /**
      * @param service 持久补读用例
      * @param access 仍有效的会话及账号
      * @param heartbeatInterval 正心跳间隔，必须小于六十秒连接轮换时间
      */
-    public EventStreams(RunEventService service, SubscriptionAccess access, Duration heartbeatInterval) {
-        if (heartbeatInterval == null || heartbeatInterval.isNegative() || heartbeatInterval.isZero()
-                || heartbeatInterval.compareTo(Duration.ofSeconds(60)) >= 0) throw new IllegalArgumentException("INVALID_HEARTBEAT");
-        this.service = service; this.access = access; this.heartbeatInterval = heartbeatInterval;
+    public EventStreams(
+            RunEventService service, SubscriptionAccess access, Duration heartbeatInterval) {
+        if (heartbeatInterval == null
+                || heartbeatInterval.isNegative()
+                || heartbeatInterval.isZero()
+                || heartbeatInterval.compareTo(Duration.ofSeconds(60)) >= 0)
+            throw new IllegalArgumentException("INVALID_HEARTBEAT");
+        this.service = service;
+        this.access = access;
+        this.heartbeatInterval = heartbeatInterval;
     }
+
     /**
      * @param user 认证主体
      * @param task 私有任务
@@ -46,11 +59,18 @@ public final class EventStreams implements AutoCloseable {
      * @param after 已确认复合游标
      * @return 60 秒轮换连接，重连继续补读；每用户最多四条、全局最多三十二条
      */
-    public synchronized SseEmitter open(UserIdentity user, UUID task, String sessionId, String after) {
+    public synchronized SseEmitter open(
+            UserIdentity user, UUID task, String sessionId, String after) {
         service.page(user, task, after, 1); // 先鉴权及检查游标，响应开始后不能再可靠返回 HTTP 错误。
-        if (!access.active(sessionId, user)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED");
-        if (closed) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "STREAM_UNAVAILABLE");
-        if (connections.size() >= 32 || connections.values().stream().filter(value -> value.user.id().equals(user.id())).count() >= 4)
+        if (!access.active(sessionId, user))
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED");
+        if (closed)
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "STREAM_UNAVAILABLE");
+        if (connections.size() >= 32
+                || connections.values().stream()
+                                .filter(value -> value.user.id().equals(user.id()))
+                                .count()
+                        >= 4)
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "STREAM_LIMIT");
         var connection = new Connection(user, task, sessionId, after);
         connections.put(connection.id, connection);
@@ -59,15 +79,23 @@ public final class EventStreams implements AutoCloseable {
         connection.emitter.onError(ignored -> connection.stop());
         try {
             connection.emitter.send(SseEmitter.event().comment("connected"));
-            connection.future = timer.scheduleWithFixedDelay(connection::poll, 250, 500, TimeUnit.MILLISECONDS);
+            connection.future =
+                    timer.scheduleWithFixedDelay(connection::poll, 250, 500, TimeUnit.MILLISECONDS);
             if (connection.stopped.get()) connection.future.cancel(false);
-        } catch (IOException | RuntimeException failure) { connection.stop(); }
+        } catch (IOException | RuntimeException failure) {
+            connection.stop();
+        }
         return connection.emitter;
     }
+
     /** 关闭传输连接和定时领取，不中断可能正在数据库查询的线程，也不取消业务任务。 */
-    @Override public synchronized void close() {
-        closed = true; connections.values().forEach(Connection::stop); timer.shutdown();
+    @Override
+    public synchronized void close() {
+        closed = true;
+        connections.values().forEach(Connection::stop);
+        timer.shutdown();
     }
+
     /** 单连接游标及短期认证引用，仅在本地内存保留，不序列化或打印。 */
     private final class Connection {
         private final UUID id = UUID.randomUUID();
@@ -79,33 +107,50 @@ public final class EventStreams implements AutoCloseable {
         private final AtomicBoolean stopped = new AtomicBoolean();
         private volatile ScheduledFuture<?> future;
         private long heartbeat = System.nanoTime();
+
         /**
          * @param user 初始认证
          * @param task 任务
          * @param sessionId 不输出的会话引用
          * @param cursor 起始水位
          */
-        private Connection(UserIdentity user, UUID task, String sessionId, String cursor) { this.user = user; this.task = task; this.sessionId = sessionId; this.cursor = cursor; }
+        private Connection(UserIdentity user, UUID task, String sessionId, String cursor) {
+            this.user = user;
+            this.task = task;
+            this.sessionId = sessionId;
+            this.cursor = cursor;
+        }
+
         /** 每条连接串行拉取；只在 send 成功后推进水位，断线允许重放，不能跳过未交付页。 */
         private void poll() {
             if (stopped.get()) return;
             try {
-                if (!access.active(sessionId, user)) { stop(); return; }
+                if (!access.active(sessionId, user)) {
+                    stop();
+                    return;
+                }
                 var page = service.page(user, task, cursor, 100);
                 for (var event : page.events()) {
                     if (stopped.get()) return;
-                    emitter.send(SseEmitter.event().id(event.id()).name("run-event").data(event)); cursor = event.id();
+                    emitter.send(SseEmitter.event().id(event.id()).name("run-event").data(event));
+                    cursor = event.id();
                 }
                 if (System.nanoTime() - heartbeat >= heartbeatInterval.toNanos()) {
-                    emitter.send(SseEmitter.event().comment("heartbeat")); heartbeat = System.nanoTime();
+                    emitter.send(SseEmitter.event().comment("heartbeat"));
+                    heartbeat = System.nanoTime();
                 }
-            } catch (IOException | RuntimeException failure) { stop(); }
+            } catch (IOException | RuntimeException failure) {
+                stop();
+            }
         }
+
         /** 幂等释放；完成回调可再次进入，不能改变后台业务状态。 */
         private void stop() {
             if (!stopped.compareAndSet(false, true)) return;
-            connections.remove(id); sessionId = null;
-            var scheduled = future; if (scheduled != null) scheduled.cancel(false);
+            connections.remove(id);
+            sessionId = null;
+            var scheduled = future;
+            if (scheduled != null) scheduled.cancel(false);
             emitter.complete();
         }
     }

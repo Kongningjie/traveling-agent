@@ -15,17 +15,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 离线验证冻结预算边界和精确免费范围，不调用真实模型或读取真实密钥。 */
 class ExecutionControlPolicyTest {
-    private final RunLimits limits = new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
+    private final RunLimits limits =
+            new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
     private final Instant now = Instant.parse("2026-10-15T10:00:00Z");
 
     /** 验证最后一次调用可完成，只有新增下一次才暂停，所有类别共享原快照。 */
     @Test
     void permitsExactLastCallsButRejectsAdditionalCalls() {
-        var last = new RunBudget(29, 59, 1, Duration.ZERO).reserve(CallKind.MODEL, limits)
-                .reserve(CallKind.TOOL, limits).reserve(CallKind.REPAIR, limits);
+        var last =
+                new RunBudget(29, 59, 1, Duration.ZERO)
+                        .reserve(CallKind.MODEL, limits)
+                        .reserve(CallKind.TOOL, limits)
+                        .reserve(CallKind.REPAIR, limits);
         assertThat(last).isEqualTo(new RunBudget(30, 60, 2, Duration.ZERO));
         for (CallKind kind : CallKind.values()) {
-            assertThatThrownBy(() -> last.reserve(kind, limits)).isInstanceOf(CallRejectedException.class)
+            assertThatThrownBy(() -> last.reserve(kind, limits))
+                    .isInstanceOf(CallRejectedException.class)
                     .hasMessage("CALL_BUDGET_EXHAUSTED");
         }
     }
@@ -37,7 +42,10 @@ class ExecutionControlPolicyTest {
                 .isEqualTo(Duration.ofSeconds(180));
         assertThat(limits.requestTimeout(new RunBudget(0, 0, 0, Duration.ofSeconds(899))))
                 .isEqualTo(Duration.ofSeconds(1));
-        assertThatThrownBy(() -> new RunBudget(0, 0, 0, Duration.ofMinutes(15)).reserve(CallKind.MODEL, limits))
+        assertThatThrownBy(
+                        () ->
+                                new RunBudget(0, 0, 0, Duration.ofMinutes(15))
+                                        .reserve(CallKind.MODEL, limits))
                 .hasMessage("ACTIVE_TIME_EXHAUSTED");
     }
 
@@ -45,13 +53,19 @@ class ExecutionControlPolicyTest {
     @Test
     void rejectsScopeMismatchAndMissingStopProtection() {
         var valid = evidence(true);
-        assertThatThrownBy(() -> valid.requireUsable("another-model", "cn-beijing", "REALTIME", 1, now))
+        assertThatThrownBy(
+                        () ->
+                                valid.requireUsable(
+                                        "another-model", "cn-beijing", "REALTIME", 1, now))
                 .hasMessage("QUOTA_UNVERIFIED");
         assertThatThrownBy(() -> valid.requireUsable("model", "other-region", "REALTIME", 1, now))
                 .hasMessage("QUOTA_UNVERIFIED");
         assertThatThrownBy(() -> valid.requireUsable("model", "cn-beijing", "BATCH", 1, now))
                 .hasMessage("QUOTA_UNVERIFIED");
-        assertThatThrownBy(() -> evidence(false).requireUsable("model", "cn-beijing", "REALTIME", 1, now))
+        assertThatThrownBy(
+                        () ->
+                                evidence(false)
+                                        .requireUsable("model", "cn-beijing", "REALTIME", 1, now))
                 .hasMessage("QUOTA_UNVERIFIED");
     }
 
@@ -61,11 +75,22 @@ class ExecutionControlPolicyTest {
         var valid = evidence(true);
         assertThatThrownBy(() -> valid.requireUsable("model", "cn-beijing", "REALTIME", 101, now))
                 .hasMessage("QUOTA_INSUFFICIENT");
-        assertThatThrownBy(() -> valid.requireUsable("model", "cn-beijing", "REALTIME", 1, now.minusSeconds(2)))
+        assertThatThrownBy(
+                        () ->
+                                valid.requireUsable(
+                                        "model", "cn-beijing", "REALTIME", 1, now.minusSeconds(2)))
                 .hasMessage("QUOTA_EXPIRED");
         valid.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(10));
-        var expired = new FreeQuotaEvidence("model", "cn-beijing", "REALTIME", 100,
-                now.minusSeconds(1), now.plusSeconds(10), now, true);
+        var expired =
+                new FreeQuotaEvidence(
+                        "model",
+                        "cn-beijing",
+                        "REALTIME",
+                        100,
+                        now.minusSeconds(1),
+                        now.plusSeconds(10),
+                        now,
+                        true);
         assertThatThrownBy(() -> expired.requireUsable("model", "cn-beijing", "REALTIME", 1, now))
                 .hasMessage("QUOTA_EXPIRED");
         valid.requireUsable("model", "cn-beijing", "REALTIME", 100, now);
@@ -74,12 +99,23 @@ class ExecutionControlPolicyTest {
     /** 跨越旧快照截止后仍按供应商实际截止判定，不刷新核实时间，截止本身为排他边界。 */
     @Test
     void ignoresLocalSnapshotDeadlineButPreservesActualExpiry() {
-        var stored = new FreeQuotaEvidence("model", "cn-beijing", "REALTIME", 100,
-                now.minusSeconds(86400), now.minusSeconds(3600), now.plusSeconds(60), true);
+        var stored =
+                new FreeQuotaEvidence(
+                        "model",
+                        "cn-beijing",
+                        "REALTIME",
+                        100,
+                        now.minusSeconds(86400),
+                        now.minusSeconds(3600),
+                        now.plusSeconds(60),
+                        true);
         stored.requireUsable("model", "cn-beijing", "REALTIME", 100, now);
         stored.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(59));
         assertThat(stored.verifiedAt()).isEqualTo(now.minusSeconds(86400));
-        assertThatThrownBy(() -> stored.requireUsable("model", "cn-beijing", "REALTIME", 1, now.plusSeconds(60)))
+        assertThatThrownBy(
+                        () ->
+                                stored.requireUsable(
+                                        "model", "cn-beijing", "REALTIME", 1, now.plusSeconds(60)))
                 .hasMessage("QUOTA_EXPIRED");
     }
 
@@ -88,12 +124,15 @@ class ExecutionControlPolicyTest {
     void rejectsInvalidLimitsSnapshotsAndTokenUsage() {
         assertThatThrownBy(() -> new RunBudget(-1, 0, 0, Duration.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new RunLimits(0, 60, 2, Duration.ofSeconds(1), Duration.ofMinutes(1)))
+        assertThatThrownBy(
+                        () -> new RunLimits(0, 60, 2, Duration.ofSeconds(1), Duration.ofMinutes(1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TokenUsage(-1, 1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TokenUsage(-1, 1))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new RunBudget(0, 0, 0, Duration.ofNanos(1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TokenUsage(Long.MAX_VALUE, 1)).isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> new TokenUsage(Long.MAX_VALUE, 1))
+                .isInstanceOf(ArithmeticException.class);
     }
 
     /**
@@ -102,7 +141,14 @@ class ExecutionControlPolicyTest {
      * @return 100 Token 的固定测试快照
      */
     private FreeQuotaEvidence evidence(boolean stopConfirmed) {
-        return new FreeQuotaEvidence("model", "cn-beijing", "REALTIME", 100,
-                now.minusSeconds(1), now.plusSeconds(10), now.plusSeconds(20), stopConfirmed);
+        return new FreeQuotaEvidence(
+                "model",
+                "cn-beijing",
+                "REALTIME",
+                100,
+                now.minusSeconds(1),
+                now.plusSeconds(10),
+                now.plusSeconds(20),
+                stopConfirmed);
     }
 }

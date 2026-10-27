@@ -21,15 +21,21 @@ public final class IdentityService {
      * @param addressRegistrations 每地址注册次数
      * @param window 固定窗口
      */
-    public record Limits(int addressLogins, int accountLogins, int addressRegistrations, Duration window) {
+    public record Limits(
+            int addressLogins, int accountLogins, int addressRegistrations, Duration window) {
         /** 配额和窗口必须有界且为正。 */
         public Limits {
-            if (addressLogins < 1 || accountLogins < 1 || addressRegistrations < 1 || window == null
-                    || window.compareTo(Duration.ofSeconds(1)) < 0 || window.compareTo(Duration.ofHours(1)) > 0) {
+            if (addressLogins < 1
+                    || accountLogins < 1
+                    || addressRegistrations < 1
+                    || window == null
+                    || window.compareTo(Duration.ofSeconds(1)) < 0
+                    || window.compareTo(Duration.ofHours(1)) > 0) {
                 throw new IllegalArgumentException("INVALID_AUTH_LIMITS");
             }
         }
     }
+
     private final AccountStore accounts;
     private final PasswordHasher passwords;
     private final AuthRateLimiter rates;
@@ -43,8 +49,12 @@ public final class IdentityService {
      * @param rates 速率端口
      * @param limits 配额配置
      */
-    public IdentityService(AccountStore accounts, PasswordHasher passwords, AuthRateLimiter rates, Limits limits) {
-        this.accounts = accounts; this.passwords = passwords; this.rates = rates; this.limits = limits;
+    public IdentityService(
+            AccountStore accounts, PasswordHasher passwords, AuthRateLimiter rates, Limits limits) {
+        this.accounts = accounts;
+        this.passwords = passwords;
+        this.rates = rates;
+        this.limits = limits;
         dummyHash = passwords.hash(UUID.randomUUID().toString());
     }
 
@@ -76,8 +86,12 @@ public final class IdentityService {
         String name = validate(rawName, rawPassword);
         rates.take("login:account:" + name, limits.accountLogins(), limits.window());
         var account = accounts.findByLoginName(name);
-        boolean matches = passwords.matches(rawPassword, account.map(AccountStore.Account::passwordHash).orElse(dummyHash));
-        if (!matches || account.isEmpty() || !account.get().enabled()) throw new IdentityFailure(INVALID_CREDENTIALS);
+        boolean matches =
+                passwords.matches(
+                        rawPassword,
+                        account.map(AccountStore.Account::passwordHash).orElse(dummyHash));
+        if (!matches || account.isEmpty() || !account.get().enabled())
+            throw new IdentityFailure(INVALID_CREDENTIALS);
         return account.get().identity();
     }
 
@@ -87,7 +101,9 @@ public final class IdentityService {
      * @return 当前可用身份
      */
     public UserIdentity current(UUID id) {
-        return accounts.findById(id).filter(AccountStore.Account::enabled).map(AccountStore.Account::identity)
+        return accounts.findById(id)
+                .filter(AccountStore.Account::enabled)
+                .map(AccountStore.Account::identity)
                 .orElseThrow(() -> new IdentityFailure(INVALID_CREDENTIALS));
     }
 
@@ -98,7 +114,11 @@ public final class IdentityService {
      * @return 规范名
      */
     private static String validate(String name, String password) {
-        try { CredentialRules.requirePassword(password); return CredentialRules.loginName(name); }
-        catch (DomainViolation invalid) { throw new IdentityFailure(INVALID_INPUT); }
+        try {
+            CredentialRules.requirePassword(password);
+            return CredentialRules.loginName(name);
+        } catch (DomainViolation invalid) {
+            throw new IdentityFailure(INVALID_INPUT);
+        }
     }
 }

@@ -8,6 +8,7 @@ public interface PasswordHasher {
      * @return 只允许写入账号仓储的哈希
      */
     String hash(String raw);
+
     /**
      * 恒定算法验证，不返回存储凭据。
      * @param raw 原始密码

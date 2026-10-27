@@ -14,12 +14,28 @@ public interface AccountStore {
      * @param enabled 账号可用状态
      * @param preferenceRevision 稳定偏好版本
      */
-    record Account(UUID id, String loginName, String passwordHash, boolean enabled, long preferenceRevision) {
-        /** @return 仅可向外层返回的非凭据身份 */
-        public UserIdentity identity() { return new UserIdentity(id, loginName); }
-        /** @return 固定脱敏描述，避免默认 record 文本泄露哈希 */
-        @Override public String toString() { return "Account[redacted]"; }
+    record Account(
+            UUID id,
+            String loginName,
+            String passwordHash,
+            boolean enabled,
+            long preferenceRevision) {
+        /**
+         * @return 仅可向外层返回的非凭据身份
+         */
+        public UserIdentity identity() {
+            return new UserIdentity(id, loginName);
+        }
+
+        /**
+         * @return 固定脱敏描述，避免默认 record 文本泄露哈希
+         */
+        @Override
+        public String toString() {
+            return "Account[redacted]";
+        }
     }
+
     /**
      * 原子创建账号，同规范名竞争至多一方成功；不自动登录。
      * @param id 服务端生成身份
@@ -28,12 +44,14 @@ public interface AccountStore {
      * @return 是否成功插入
      */
     boolean insert(UUID id, String loginName, String passwordHash);
+
     /**
      * 查找内部凭据。
      * @param loginName 已规范化登录名
      * @return 账号或空
      */
     Optional<Account> findByLoginName(String loginName);
+
     /**
      * 校验当前账号状态。
      * @param id 从已认证会话取得的账号 ID

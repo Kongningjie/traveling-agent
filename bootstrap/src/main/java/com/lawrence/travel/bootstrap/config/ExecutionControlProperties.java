@@ -15,8 +15,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param limits 已确认执行上限
  */
 @ConfigurationProperties("travel")
-public record ExecutionControlProperties(boolean externalCallsEnabled, Map<String, String> models,
-                                          Map<String, FreeQuotaEvidence> quotaEvidence, Limits limits) {
+public record ExecutionControlProperties(
+        boolean externalCallsEnabled,
+        Map<String, String> models,
+        Map<String, FreeQuotaEvidence> quotaEvidence,
+        Limits limits) {
     /** 校验配置结构并复制映射，防止运行时修改白名单绕过核实。 */
     public ExecutionControlProperties {
         models = Map.copyOf(Objects.requireNonNullElse(models, Map.of()));
@@ -35,9 +38,15 @@ public record ExecutionControlProperties(boolean externalCallsEnabled, Map<Strin
      * @param modelTimeout 单模型请求超时
      * @param activeTimePerRun 全运行累计主动时间
      */
-    public record Limits(int activeRuns, int modelConcurrency, int researchConcurrencyPerRun,
-                          long modelCallsPerRun, long toolCallsPerRun, int repairRounds,
-                          Duration modelTimeout, Duration activeTimePerRun) {
+    public record Limits(
+            int activeRuns,
+            int modelConcurrency,
+            int researchConcurrencyPerRun,
+            long modelCallsPerRun,
+            long toolCallsPerRun,
+            int repairRounds,
+            Duration modelTimeout,
+            Duration activeTimePerRun) {
         /**
          * 拒绝无界并发配置；其余限制由领域类型继续检查。
          * @throws IllegalArgumentException 任一并发上限小于一
@@ -53,8 +62,12 @@ public record ExecutionControlProperties(boolean externalCallsEnabled, Map<Strin
          * @return 经领域约束检查的限制
          */
         public RunLimits runLimits() {
-            return new RunLimits(modelCallsPerRun, toolCallsPerRun, repairRounds,
-                    modelTimeout, activeTimePerRun);
+            return new RunLimits(
+                    modelCallsPerRun,
+                    toolCallsPerRun,
+                    repairRounds,
+                    modelTimeout,
+                    activeTimePerRun);
         }
     }
 }

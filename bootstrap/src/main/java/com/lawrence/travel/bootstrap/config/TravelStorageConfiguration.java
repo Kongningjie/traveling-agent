@@ -20,5 +20,9 @@ public class TravelStorageConfiguration {
      * @param changes 失效旧执行
      * @return 从服务端身份派生归属的用例
      */
-    @Bean TravelStorageService travelStorageService(TravelStore store, BusinessTransactions transactions, TaskChangeObserver changes) { return new TravelStorageService(store, transactions, changes); }
+    @Bean
+    TravelStorageService travelStorageService(
+            TravelStore store, BusinessTransactions transactions, TaskChangeObserver changes) {
+        return new TravelStorageService(store, transactions, changes);
+    }
 }

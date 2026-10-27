@@ -30,7 +30,10 @@ public class TravelToolsConfiguration {
      * @param evidenceHosts 已筛选原文域名
      */
     @ConfigurationProperties("travel.tools")
-    public record Properties(boolean enabled, Map<String, TravelToolService.Grant> grants, Set<String> evidenceHosts) {
+    public record Properties(
+            boolean enabled,
+            Map<String, TravelToolService.Grant> grants,
+            Set<String> evidenceHosts) {
         /** 缺失配置不能扩大资源或域名权限。 */
         public Properties {
             grants = grants == null ? Map.of() : Map.copyOf(grants);
@@ -46,8 +49,10 @@ public class TravelToolsConfiguration {
      */
     @Bean
     TravelToolPort travelToolPort(Environment environment, Properties properties) {
-        return new TravelHttpTools(() -> environment.getProperty("AMAP_API_KEY"),
-                () -> environment.getProperty("TAVILY_API_KEY"), properties.evidenceHosts());
+        return new TravelHttpTools(
+                () -> environment.getProperty("AMAP_API_KEY"),
+                () -> environment.getProperty("TAVILY_API_KEY"),
+                properties.evidenceHosts());
     }
 
     /**
@@ -57,7 +62,8 @@ public class TravelToolsConfiguration {
      * @return 工具配额及证据仓储
      */
     @Bean
-    ToolEvidenceJournal toolEvidenceJournal(ToolEvidenceMapper mapper, PlatformTransactionManager manager) {
+    ToolEvidenceJournal toolEvidenceJournal(
+            ToolEvidenceMapper mapper, PlatformTransactionManager manager) {
         return new PostgresToolEvidenceJournal(mapper, manager);
     }
 
@@ -73,9 +79,23 @@ public class TravelToolsConfiguration {
      * @return 默认关闭真实调用的应用服务
      */
     @Bean
-    TravelToolService travelToolService(TravelToolPort tools, ToolEvidenceJournal journal, BudgetLedger ledger,
-                                      ExecutionControlProperties execution, Properties properties, com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.port.ExecutionTrace trace) {
-        return new TravelToolService(tools, journal, ledger, execution.limits().runLimits(),
-                properties.grants(), properties.enabled(), Clock.systemUTC(),safety,trace);
+    TravelToolService travelToolService(
+            TravelToolPort tools,
+            ToolEvidenceJournal journal,
+            BudgetLedger ledger,
+            ExecutionControlProperties execution,
+            Properties properties,
+            com.lawrence.travel.application.safety.SafetyGate safety,
+            com.lawrence.travel.application.port.ExecutionTrace trace) {
+        return new TravelToolService(
+                tools,
+                journal,
+                ledger,
+                execution.limits().runLimits(),
+                properties.grants(),
+                properties.enabled(),
+                Clock.systemUTC(),
+                safety,
+                trace);
     }
 }

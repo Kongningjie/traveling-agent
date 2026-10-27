@@ -22,29 +22,74 @@ import java.util.UUID;
  * @param artifactId 已提交原始阶段产物引用，存储投影时由来源阶段解析
  * @param status 原始认知状态；撤回和冲突通过追加通知表达
  */
-public record FieldEvidence(EvidenceRecord.Reference reference, String targetId, String fieldPath, String value,
-                            SourceType sourceType, URI sourceUrl, UUID userMessageId, Instant retrievedAt,
-                            Instant publishedAt, LocalDate validForDate, Instant expiresAt, String quote,
-                            UUID artifactId, EvidenceRecord.Status status) {
+public record FieldEvidence(
+        EvidenceRecord.Reference reference,
+        String targetId,
+        String fieldPath,
+        String value,
+        SourceType sourceType,
+        URI sourceUrl,
+        UUID userMessageId,
+        Instant retrievedAt,
+        Instant publishedAt,
+        LocalDate validForDate,
+        Instant expiresAt,
+        String quote,
+        UUID artifactId,
+        EvidenceRecord.Status status) {
     /** 来源可信程度不等同于事实真实性，种子与估算不能伪装成官方已核实。 */
-    public enum SourceType { OFFICIAL, MAP_PROVIDER, USER, SEED, ESTIMATE, SEARCH_LEAD, UNKNOWN }
+    public enum SourceType {
+        OFFICIAL,
+        MAP_PROVIDER,
+        USER,
+        SEED,
+        ESTIMATE,
+        SEARCH_LEAD,
+        UNKNOWN
+    }
+
     /** 有界内容和明确时间；来源 URI 禁止认证字段、查询及片段，避免将密钥带入证据。 */
     public FieldEvidence {
-        if (reference == null || targetId == null || targetId.isBlank() || targetId.length() > 200
-                || fieldPath == null || !fieldPath.matches("[a-zA-Z][a-zA-Z0-9.]{0,79}") || value == null || value.length() > 16000
-                || sourceType == null || retrievedAt == null || expiresAt == null || !expiresAt.isAfter(retrievedAt)
-                || quote == null || quote.length() > 4000 || status == null
+        if (reference == null
+                || targetId == null
+                || targetId.isBlank()
+                || targetId.length() > 200
+                || fieldPath == null
+                || !fieldPath.matches("[a-zA-Z][a-zA-Z0-9.]{0,79}")
+                || value == null
+                || value.length() > 16000
+                || sourceType == null
+                || retrievedAt == null
+                || expiresAt == null
+                || !expiresAt.isAfter(retrievedAt)
+                || quote == null
+                || quote.length() > 4000
+                || status == null
                 || (publishedAt != null && publishedAt.isAfter(retrievedAt))
                 || (sourceUrl == null && userMessageId == null && sourceType != SourceType.UNKNOWN)
-                || (sourceUrl != null && (!"https".equals(sourceUrl.getScheme()) || sourceUrl.getHost() == null
-                    || sourceUrl.getUserInfo() != null || sourceUrl.getQuery() != null || sourceUrl.getFragment() != null || sourceUrl.getPort() != -1))
-                || (status == EvidenceRecord.Status.KNOWN && (value.isBlank() || quote.isBlank()
-                    || sourceType == SourceType.SEARCH_LEAD || sourceType == SourceType.UNKNOWN))) throw new IllegalArgumentException("FIELD_EVIDENCE_INVALID");
+                || (sourceUrl != null
+                        && (!"https".equals(sourceUrl.getScheme())
+                                || sourceUrl.getHost() == null
+                                || sourceUrl.getUserInfo() != null
+                                || sourceUrl.getQuery() != null
+                                || sourceUrl.getFragment() != null
+                                || sourceUrl.getPort() != -1))
+                || (status == EvidenceRecord.Status.KNOWN
+                        && (value.isBlank()
+                                || quote.isBlank()
+                                || sourceType == SourceType.SEARCH_LEAD
+                                || sourceType == SourceType.UNKNOWN)))
+            throw new IllegalArgumentException("FIELD_EVIDENCE_INVALID");
     }
+
     /**
      * @param now 检查时刻
      * @param date 使用日期；有明确日期的证据必须精确匹配
      * @return 时间及日期适用；未知仍可能可缓存，但不能据此判断事实已知
      */
-    public boolean reusableAt(Instant now, LocalDate date) { return !now.isBefore(retrievedAt) && now.isBefore(expiresAt) && java.util.Objects.equals(date, validForDate); }
+    public boolean reusableAt(Instant now, LocalDate date) {
+        return !now.isBefore(retrievedAt)
+                && now.isBefore(expiresAt)
+                && java.util.Objects.equals(date, validForDate);
+    }
 }

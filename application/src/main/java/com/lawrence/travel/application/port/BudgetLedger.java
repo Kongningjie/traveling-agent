@@ -10,8 +10,15 @@ import java.util.UUID;
 
 /** 持久化计量端口；调用前原子预占，未知请求不退还次数或 Token 预占。 */
 public interface BudgetLedger {
-    /** @param runId 输入或旅行预算 @param fallback 原旅行限制 @return 输入预算采用独立上限，旧实现保持兼容 */
-    default RunLimits limitsFor(UUID runId, RunLimits fallback) { return fallback; }
+    /**
+     * @param runId 输入或旅行预算
+     * @param fallback 原旅行限制
+     * @return 输入预算采用独立上限，旧实现保持兼容
+     */
+    default RunLimits limitsFor(UUID runId, RunLimits fallback) {
+        return fallback;
+    }
+
     /**
      * 建立预算身份；重复调用不能重置旧计数。
      * @param runId 本次运行稳定标识
@@ -29,8 +36,13 @@ public interface BudgetLedger {
      * @return 已提交的计量身份及新预算
      * @throws IllegalStateException 调用方仍在业务事务中，不能保证返回前完成独立预占提交
      */
-    Reservation reserve(UUID runId, CallKind kind, RunLimits limits, Target target,
-                        long tokenUpperBound, Instant now);
+    Reservation reserve(
+            UUID runId,
+            CallKind kind,
+            RunLimits limits,
+            Target target,
+            long tokenUpperBound,
+            Instant now);
 
     /**
      * 读取现有预算，不存在时拒绝，不能自动创建零值掩盖恢复错误。
@@ -85,12 +97,12 @@ public interface BudgetLedger {
      * @param region 实际地域
      * @param api 实际接口产品
      */
-    record Target(String modelId, String region, String api) { }
+    record Target(String modelId, String region, String api) {}
 
     /**
      * 请求预占结果，用于回调计量和保守超时计算。
      * @param id 请求预占标识
      * @param budget 已持久化的新预算快照
      */
-    record Reservation(UUID id, RunBudget budget) { }
+    record Reservation(UUID id, RunBudget budget) {}
 }

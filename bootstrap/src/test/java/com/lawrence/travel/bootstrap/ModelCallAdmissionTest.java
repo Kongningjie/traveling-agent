@@ -34,7 +34,8 @@ import static org.mockito.Mockito.when;
 /** 通过替身仓储和真实并发槽验证准入编排，不构建 SDK，不访问供应商。 */
 class ModelCallAdmissionTest {
     private final Instant now = Instant.parse("2026-10-15T10:00:00Z");
-    private final RunLimits limits = new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
+    private final RunLimits limits =
+            new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
     private final BudgetLedger ledger = mock(BudgetLedger.class);
     private final SemaphoreModelRequestSlots slots = new SemaphoreModelRequestSlots(4);
     private final UUID runId = UUID.randomUUID();
@@ -67,8 +68,15 @@ class ModelCallAdmissionTest {
     /** 验证即使全局开关打开，缺少额度快照的已配置型号也不能放行。 */
     @Test
     void enabledConfigurationWithoutQuotaEvidenceStillFailsClosed() {
-        var admission = new ModelCallAdmission(true, Map.of("planner", "test-model"), Map.of(),
-                limits, ledger, slots, Clock.fixed(now, ZoneOffset.UTC));
+        var admission =
+                new ModelCallAdmission(
+                        true,
+                        Map.of("planner", "test-model"),
+                        Map.of(),
+                        limits,
+                        ledger,
+                        slots,
+                        Clock.fixed(now, ZoneOffset.UTC));
         assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
                 .hasMessage("QUOTA_UNVERIFIED");
         verifyNoInteractions(ledger);
@@ -88,12 +96,35 @@ class ModelCallAdmissionTest {
         when(ledger.hasUncertainUsage(any(), any(), any())).thenReturn(true);
         when(ledger.tokensSince(any(), any())).thenReturn(90L);
         reserveSuccessfully();
-        var quota = new FreeQuotaEvidence("test-model", "cn-beijing", "REALTIME", 100,
-                now.minusSeconds(1), now.plusSeconds(60), now.plusSeconds(120), true);
-        var roles = Map.of("coordinator", "test-model", "planner", "test-model",
-                "research", "test-model", "reviewer", "test-model");
-        var admission = new ModelCallAdmission(true, roles, Map.of("test-model", quota),
-                limits, ledger, slots, Clock.fixed(now, ZoneOffset.UTC));
+        var quota =
+                new FreeQuotaEvidence(
+                        "test-model",
+                        "cn-beijing",
+                        "REALTIME",
+                        100,
+                        now.minusSeconds(1),
+                        now.plusSeconds(60),
+                        now.plusSeconds(120),
+                        true);
+        var roles =
+                Map.of(
+                        "coordinator",
+                        "test-model",
+                        "planner",
+                        "test-model",
+                        "research",
+                        "test-model",
+                        "reviewer",
+                        "test-model");
+        var admission =
+                new ModelCallAdmission(
+                        true,
+                        roles,
+                        Map.of("test-model", quota),
+                        limits,
+                        ledger,
+                        slots,
+                        Clock.fixed(now, ZoneOffset.UTC));
         for (String role : roles.keySet()) {
             try (var permit = admission.begin(runId, role, "cn-beijing", "REALTIME", 10)) {
                 assertThat(permit.target().modelId()).isEqualTo("test-model");
@@ -116,11 +147,13 @@ class ModelCallAdmissionTest {
         reserveSuccessfully();
         var admission = gate(true);
         var permits = new java.util.ArrayList<ModelCallAdmission.Permit>();
-        for (int i = 0; i < 4; i++) permits.add(admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10));
+        for (int i = 0; i < 4; i++)
+            permits.add(admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10));
         assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
                 .hasMessage("MODEL_CONCURRENCY_FULL");
         var parent = permits.getFirst();
-        assertThat(parent.target()).isEqualTo(new BudgetLedger.Target("test-model", "cn-beijing", "REALTIME"));
+        assertThat(parent.target())
+                .isEqualTo(new BudgetLedger.Target("test-model", "cn-beijing", "REALTIME"));
         assertThat(parent.timeout()).isEqualTo(Duration.ofSeconds(180));
         parent.complete(new TokenUsage(3, 2));
         parent.close();
@@ -146,19 +179,26 @@ class ModelCallAdmissionTest {
     @Test
     void failuresReleaseSlotsWithoutRefundingLedger() {
         when(ledger.reserve(any(), any(), any(), any(), anyLong(), any()))
-                .thenThrow(new CallRejectedException(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED));
+                .thenThrow(
+                        new CallRejectedException(
+                                CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED));
         for (int i = 0; i < 5; i++) {
-            assertThatThrownBy(() -> gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10))
+            assertThatThrownBy(
+                            () -> gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10))
                     .hasMessage("CALL_BUDGET_EXHAUSTED");
         }
         reserveSuccessfully();
-        doThrow(new IllegalStateException("Meter unavailable")).when(ledger).finish(any(), any(), any());
+        doThrow(new IllegalStateException("Meter unavailable"))
+                .when(ledger)
+                .finish(any(), any(), any());
         var admission = gate(true);
         var permit = admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10);
         assertThatThrownBy(permit::close).hasMessage("Meter unavailable");
         assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
                 .hasMessage("QUOTA_UNVERIFIED");
-        var leases = new java.util.ArrayList<com.lawrence.travel.application.port.ModelRequestSlots.Lease>();
+        var leases =
+                new java.util.ArrayList<
+                        com.lawrence.travel.application.port.ModelRequestSlots.Lease>();
         for (int i = 0; i < 4; i++) leases.add(slots.tryAcquire());
         assertThat(leases).doesNotContainNull();
         leases.forEach(com.lawrence.travel.application.port.ModelRequestSlots.Lease::close);
@@ -167,7 +207,8 @@ class ModelCallAdmissionTest {
     /** 配置只存在于测试中的持久化成功返回，不是真实请求或实际计量数据。 */
     private void reserveSuccessfully() {
         doReturn(new BudgetLedger.Reservation(callId, new RunBudget(1, 0, 0, Duration.ZERO)))
-                .when(ledger).reserve(any(), eq(CallKind.MODEL), any(), any(), anyLong(), any());
+                .when(ledger)
+                .reserve(any(), eq(CallKind.MODEL), any(), any(), anyLong(), any());
     }
 
     /**
@@ -176,9 +217,23 @@ class ModelCallAdmissionTest {
      * @return 只有 planner 测试角色的门禁
      */
     private ModelCallAdmission gate(boolean enabled) {
-        var evidence = new FreeQuotaEvidence("test-model", "cn-beijing", "REALTIME", 100,
-                now.minusSeconds(1), now.plusSeconds(60), now.plusSeconds(120), true);
-        return new ModelCallAdmission(enabled, Map.of("planner", "test-model"), Map.of("test-model", evidence),
-                limits, ledger, slots, Clock.fixed(now, ZoneOffset.UTC));
+        var evidence =
+                new FreeQuotaEvidence(
+                        "test-model",
+                        "cn-beijing",
+                        "REALTIME",
+                        100,
+                        now.minusSeconds(1),
+                        now.plusSeconds(60),
+                        now.plusSeconds(120),
+                        true);
+        return new ModelCallAdmission(
+                enabled,
+                Map.of("planner", "test-model"),
+                Map.of("test-model", evidence),
+                limits,
+                ledger,
+                slots,
+                Clock.fixed(now, ZoneOffset.UTC));
     }
 }

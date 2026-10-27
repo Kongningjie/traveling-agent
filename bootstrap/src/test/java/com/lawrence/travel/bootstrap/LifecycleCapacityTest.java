@@ -39,7 +39,6 @@ class LifecycleCapacityTest {
 
     /**
      * * 只清理受管且到期的目录，未知文件触发失败且整份备份不部分删除。
-     *
      * @throws Exception 合成文件写入失败
      */
     @Test

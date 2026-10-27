@@ -26,10 +26,23 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class EngineConfiguration {
-    /** @param mapper 诊断 @param ownership 归属 @param tx 事务 @param json 元数据 @return 只存执行事实的PG轨迹 */
-    @Bean com.lawrence.travel.application.port.ExecutionTrace executionTrace(com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper mapper, com.lawrence.travel.infrastructure.execution.jobs.QuotaMapper ownership, BusinessTransactions tx, TravelJson json) {
-        return new com.lawrence.travel.infrastructure.execution.jobs.PostgresExecutionTrace(mapper, ownership, tx, json);
+    /**
+     * @param mapper 诊断
+     * @param ownership 归属
+     * @param tx 事务
+     * @param json 元数据
+     * @return 只存执行事实的PG轨迹
+     */
+    @Bean
+    com.lawrence.travel.application.port.ExecutionTrace executionTrace(
+            com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper mapper,
+            com.lawrence.travel.infrastructure.execution.jobs.QuotaMapper ownership,
+            BusinessTransactions tx,
+            TravelJson json) {
+        return new com.lawrence.travel.infrastructure.execution.jobs.PostgresExecutionTrace(
+                mapper, ownership, tx, json);
     }
+
     /**
      * @param mapper 执行 SQL
      * @param tasks 任务 SQL
@@ -40,19 +53,43 @@ public class EngineConfiguration {
      * @param projection 同事务候选报告投影
      * @return 唯一业务执行仓储
      */
-    @Bean ExecutionEngineStore executionEngineStore(EngineMapper mapper, TravelMapper tasks, BudgetMapper budgets,
-            TravelJson json, org.springframework.transaction.PlatformTransactionManager manager, ExecutionControlProperties controls,
+    @Bean
+    ExecutionEngineStore executionEngineStore(
+            EngineMapper mapper,
+            TravelMapper tasks,
+            BudgetMapper budgets,
+            TravelJson json,
+            org.springframework.transaction.PlatformTransactionManager manager,
+            ExecutionControlProperties controls,
             com.lawrence.travel.application.port.StageProjection projection) {
-        return new PostgresExecutionEngine(mapper, tasks, budgets, json, manager, controls.limits().runLimits(),
-                controls.limits().activeRuns(), controls.limits().researchConcurrencyPerRun(), Duration.ofSeconds(60), 3, projection);
+        return new PostgresExecutionEngine(
+                mapper,
+                tasks,
+                budgets,
+                json,
+                manager,
+                controls.limits().runLimits(),
+                controls.limits().activeRuns(),
+                controls.limits().researchConcurrencyPerRun(),
+                Duration.ofSeconds(60),
+                3,
+                projection);
     }
+
     /**
      * @param store 执行权威
      * @param handlers 显式业务处理器，当前允许为空
      * @param trace 受控事实轨迹
      * @return 唯一阶段执行器
      */
-    @Bean StageExecutor stageExecutor(ExecutionEngineStore store, List<StageHandler> handlers, com.lawrence.travel.application.port.ExecutionTrace trace) { return new StageExecutor(store, handlers, trace); }
+    @Bean
+    StageExecutor stageExecutor(
+            ExecutionEngineStore store,
+            List<StageHandler> handlers,
+            com.lawrence.travel.application.port.ExecutionTrace trace) {
+        return new StageExecutor(store, handlers, trace);
+    }
+
     /**
      * @param store 执行权威
      * @param executor 阶段处理
@@ -64,21 +101,38 @@ public class EngineConfiguration {
      * @return 后台阶段调度，关闭时停止领取
      */
     @org.springframework.context.annotation.DependsOn("lifecycleReady")
-    @Bean(destroyMethod = "close") PersistentStageWorker persistentStageWorker(ExecutionEngineStore store, StageExecutor executor,
-            ExecutionResources resources, ExecutionControlProperties controls, @Value("${travel.engine.enabled:true}") boolean enabled,
+    @Bean(destroyMethod = "close")
+    PersistentStageWorker persistentStageWorker(
+            ExecutionEngineStore store,
+            StageExecutor executor,
+            ExecutionResources resources,
+            ExecutionControlProperties controls,
+            @Value("${travel.engine.enabled:true}") boolean enabled,
             com.lawrence.travel.application.lifecycle.LifecycleService lifecycle,
             com.lawrence.travel.application.port.StorageAdmission storage) {
-        var worker = new PersistentStageWorker(store, executor, resources, controls.limits().researchConcurrencyPerRun(), Duration.ofSeconds(15));
+        var worker =
+                new PersistentStageWorker(
+                        store,
+                        executor,
+                        resources,
+                        controls.limits().researchConcurrencyPerRun(),
+                        Duration.ofSeconds(15));
         worker.readiness(() -> lifecycle.ready() && storage.accepting());
-        if (enabled) worker.start(); return worker;
+        if (enabled) worker.start();
+        return worker;
     }
 
     /**
-     *
      * @param store 执行权威
      * @param transactions 同源事务
      * @param worker 尽力取消句柄
      * @return 运行用例与任务变更观察者
      */
-    @Bean RunService runService(ExecutionEngineStore store, BusinessTransactions transactions, PersistentStageWorker worker) { return new RunService(store, transactions, worker); }
+    @Bean
+    RunService runService(
+            ExecutionEngineStore store,
+            BusinessTransactions transactions,
+            PersistentStageWorker worker) {
+        return new RunService(store, transactions, worker);
+    }
 }

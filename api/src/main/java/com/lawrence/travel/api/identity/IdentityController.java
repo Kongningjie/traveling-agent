@@ -31,22 +31,35 @@ public final class IdentityController {
      * @param password 仅当前请求使用的原始密码
      */
     public record CredentialsRequest(String username, String password) {
-        /** @return 固定脱敏文本 */
-        @Override public String toString() { return "CredentialsRequest[redacted]"; }
+        /**
+         * @return 固定脱敏文本
+         */
+        @Override
+        public String toString() {
+            return "CredentialsRequest[redacted]";
+        }
     }
+
     /**
      * CSRF 令牌只发给同源客户端，不写日志。
      * @param headerName 后续写请求头名称
      * @param token 本会话 CSRF 值
      */
     public record CsrfView(String headerName, String token) {
-        /** @return 固定脱敏文本，禁止误打印令牌 */
-        @Override public String toString() { return "CsrfView[redacted]"; }
+        /**
+         * @return 固定脱敏文本，禁止误打印令牌
+         */
+        @Override
+        public String toString() {
+            return "CsrfView[redacted]";
+        }
     }
+
     private final IdentityService identity;
     private final AuthenticationManager authentication;
     private final SessionAuthenticationStrategy sessions;
     private final SecurityContextRepository contexts;
+
     /**
      * 框架会话与应用用例显式协作。
      * @param identity 账号用例
@@ -54,10 +67,17 @@ public final class IdentityController {
      * @param sessions 会话与 CSRF 轮换策略
      * @param contexts Redis Session 上的安全上下文仓储
      */
-    public IdentityController(IdentityService identity, AuthenticationManager authentication,
-                              SessionAuthenticationStrategy sessions, SecurityContextRepository contexts) {
-        this.identity = identity; this.authentication = authentication; this.sessions = sessions; this.contexts = contexts;
+    public IdentityController(
+            IdentityService identity,
+            AuthenticationManager authentication,
+            SessionAuthenticationStrategy sessions,
+            SecurityContextRepository contexts) {
+        this.identity = identity;
+        this.authentication = authentication;
+        this.sessions = sessions;
+        this.contexts = contexts;
     }
+
     /**
      * 首次请求强制产生并保存 CSRF，建立匿名会话供注册／登录校验。
      * @param request 当前请求
@@ -68,6 +88,7 @@ public final class IdentityController {
         var token = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
         return new CsrfView(token.getHeaderName(), token.getToken());
     }
+
     /**
      * 注册不登录，返回不含哈希的新身份。
      * @param body 当前请求凭据
@@ -75,9 +96,12 @@ public final class IdentityController {
      * @return 201 账号身份
      */
     @PostMapping("/register")
-    public ResponseEntity<UserIdentity> register(@RequestBody CredentialsRequest body, HttpServletRequest request) {
-        return ResponseEntity.status(201).body(identity.register(body.username(), body.password(), request.getRemoteAddr()));
+    public ResponseEntity<UserIdentity> register(
+            @RequestBody CredentialsRequest body, HttpServletRequest request) {
+        return ResponseEntity.status(201)
+                .body(identity.register(body.username(), body.password(), request.getRemoteAddr()));
     }
+
     /**
      * 成功后先轮换 Session ID／CSRF，再显式保存不含密码的安全上下文。
      * @param body 当前请求凭据
@@ -86,8 +110,13 @@ public final class IdentityController {
      * @return 已认证身份；不会返回 Session ID
      */
     @PostMapping("/login")
-    public UserIdentity login(@RequestBody CredentialsRequest body, HttpServletRequest request, HttpServletResponse response) {
-        var input = UsernamePasswordAuthenticationToken.unauthenticated(body.username(), body.password());
+    public UserIdentity login(
+            @RequestBody CredentialsRequest body,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        var input =
+                UsernamePasswordAuthenticationToken.unauthenticated(
+                        body.username(), body.password());
         input.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         Authentication result = authentication.authenticate(input);
         sessions.onAuthentication(result, request, response);
@@ -97,11 +126,14 @@ public final class IdentityController {
         contexts.saveContext(context, request, response);
         return (UserIdentity) result.getPrincipal();
     }
+
     /**
      * 身份只取安全上下文，忽略浏览器传入的用户查询参数。
      * @param authentication 已经账号状态过滤的认证
      * @return 最小账号身份
      */
     @GetMapping("/me")
-    public UserIdentity me(Authentication authentication) { return (UserIdentity) authentication.getPrincipal(); }
+    public UserIdentity me(Authentication authentication) {
+        return (UserIdentity) authentication.getPrincipal();
+    }
 }

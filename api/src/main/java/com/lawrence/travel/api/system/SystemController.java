@@ -16,7 +16,6 @@ public class SystemController {
 
     /**
      * 注入负责聚合工程状态的应用服务。
-     *
      * @param service 已由 bootstrap 装配的应用服务，不可为 null
      */
     public SystemController(SystemOverviewService service) {
@@ -25,19 +24,22 @@ public class SystemController {
 
     /**
      * 返回工程接线信息；占位标识不代表依赖实时探针或业务功能验收结果。
-     *
      * @return 不含凭证、会话标识和用户数据的诊断响应
      */
     @GetMapping("/info")
     public SystemInfoResponse info() {
         SystemOverview overview = service.describe();
-        return new SystemInfoResponse(overview.application(), overview.mode(), overview.modules(),
-                overview.agentStatus(), overview.storageStatus(), overview.externalCallsEnabled());
+        return new SystemInfoResponse(
+                overview.application(),
+                overview.mode(),
+                overview.modules(),
+                overview.agentStatus(),
+                overview.storageStatus(),
+                overview.externalCallsEnabled());
     }
 
     /**
      * 系统信息 HTTP 响应，仅承载可公开的工程诊断字段。
-     *
      * @param application 应用名称
      * @param mode 当前配置的运行模式，如 local 或 smoke
      * @param modules 工程模块名称列表
@@ -45,7 +47,11 @@ public class SystemController {
      * @param storageStatus 存储验证占位标识，不代替健康检查
      * @param externalCallsEnabled 骨架是否启用真实外部服务调用，当前固定为 false
      */
-    public record SystemInfoResponse(String application, String mode, List<String> modules,
-                                     String agentStatus, String storageStatus, boolean externalCallsEnabled) {
-    }
+    public record SystemInfoResponse(
+            String application,
+            String mode,
+            List<String> modules,
+            String agentStatus,
+            String storageStatus,
+            boolean externalCallsEnabled) {}
 }

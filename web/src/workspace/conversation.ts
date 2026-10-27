@@ -11,12 +11,10 @@ export function conversationInput(text: string): {
   text: string;
   facts: Fact[];
 } {
-  if (!text.trim() || text.length > 4000)
-    throw new Error("INVALID_CONVERSATION_INPUT");
+  if (!text.trim() || text.length > 4000) throw new Error("INVALID_CONVERSATION_INPUT");
   const characters = Array.from(text.trim().replace(/\s+/g, " "));
   return {
-    title:
-      characters.slice(0, 36).join("") + (characters.length > 36 ? "…" : ""),
+    title: characters.slice(0, 36).join("") + (characters.length > 36 ? "…" : ""),
     text,
     facts: [],
   };

@@ -22,7 +22,12 @@ public class BudgetPersistenceConfiguration {
      * @return 应用层持久化端口
      */
     @Bean
-    BudgetLedger budgetLedger(BudgetMapper mapper, PlatformTransactionManager manager, com.lawrence.travel.infrastructure.execution.jobs.QuotaMapper quotas, com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper diagnostics, com.lawrence.travel.application.execution.JobPolicy policy) {
+    BudgetLedger budgetLedger(
+            BudgetMapper mapper,
+            PlatformTransactionManager manager,
+            com.lawrence.travel.infrastructure.execution.jobs.QuotaMapper quotas,
+            com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper diagnostics,
+            com.lawrence.travel.application.execution.JobPolicy policy) {
         return new PostgresBudgetLedger(mapper, manager, quotas, diagnostics, policy);
     }
 }

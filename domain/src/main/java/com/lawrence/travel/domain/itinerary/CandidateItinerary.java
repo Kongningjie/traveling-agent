@@ -16,9 +16,14 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.STALE_REVISIO
  * @param sourceRunId 来源运行
  * @param generation 来源执行代次
  */
-public record CandidateItinerary(UUID id, ItineraryVersion snapshot, UUID sourceRunId, long generation) {
+public record CandidateItinerary(
+        UUID id, ItineraryVersion snapshot, UUID sourceRunId, long generation) {
     /** 候选必须能追溯运行和内容。 */
-    public CandidateItinerary { DomainViolation.require(id != null && snapshot != null && sourceRunId != null && generation > 0, INVALID_INPUT); }
+    public CandidateItinerary {
+        DomainViolation.require(
+                id != null && snapshot != null && sourceRunId != null && generation > 0,
+                INVALID_INPUT);
+    }
 
     /**
      * 检查候选来源仍属于当前任务；完整接受还需报告、证据、前置指针及未解析输入门槛。
@@ -26,12 +31,17 @@ public record CandidateItinerary(UUID id, ItineraryVersion snapshot, UUID source
      * @param run 当前来源运行值
      */
     public void requireCurrent(TravelTask task, ExecutionRun run) {
-        DomainViolation.require(task != null && run != null && sourceRunId.equals(run.id()), INVALID_INPUT);
+        DomainViolation.require(
+                task != null && run != null && sourceRunId.equals(run.id()), INVALID_INPUT);
         snapshot.scope().requireSame(task.scope());
         snapshot.scope().requireSame(run.scope());
-        DomainViolation.require(generation == task.executionGeneration() && generation == run.generation(), STALE_GENERATION);
-        DomainViolation.require(snapshot.constraintRevision() == task.constraintRevision()
-                && snapshot.constraintRevision() == run.constraintRevision(), STALE_REVISION);
+        DomainViolation.require(
+                generation == task.executionGeneration() && generation == run.generation(),
+                STALE_GENERATION);
+        DomainViolation.require(
+                snapshot.constraintRevision() == task.constraintRevision()
+                        && snapshot.constraintRevision() == run.constraintRevision(),
+                STALE_REVISION);
         DomainViolation.require(!run.state().terminal(), ILLEGAL_TRANSITION);
     }
 }

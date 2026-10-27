@@ -46,14 +46,31 @@ class TravelToolIntegrationTest {
         String group = "test-" + runId;
         try (var threads = Executors.newFixedThreadPool(6)) {
             List<Future<Boolean>> results = new ArrayList<>();
-            for (int index = 0; index < 12; index++) results.add(threads.submit(() -> {
-                try { journal.reserve(runId, group, verified, verified.plusSeconds(60), 1); return true; }
-                catch (IllegalStateException expected) { return false; }
-            }));
+            for (int index = 0; index < 12; index++)
+                results.add(
+                        threads.submit(
+                                () -> {
+                                    try {
+                                        journal.reserve(
+                                                runId,
+                                                group,
+                                                verified,
+                                                verified.plusSeconds(60),
+                                                1);
+                                        return true;
+                                    } catch (IllegalStateException expected) {
+                                        return false;
+                                    }
+                                }));
             int winners = 0;
             for (var result : results) if (result.get()) winners++;
             assertThat(winners).isEqualTo(1);
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM tool_evidence WHERE run_id=?", Integer.class, runId)).isEqualTo(1);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM tool_evidence WHERE run_id=?",
+                                    Integer.class,
+                                    runId))
+                    .isEqualTo(1);
         }
     }
 
@@ -64,13 +81,28 @@ class TravelToolIntegrationTest {
         Instant verified = Instant.now().minusSeconds(5);
         String group = "test-" + runId;
         UUID first = journal.reserve(runId, group, verified, verified.plusSeconds(60), 5);
-        journal.finish(first, new TravelToolPort.Evidence(URI.create("https://www.dpm.org.cn/"), Instant.now(), "{\"status\":\"UNKNOWN\"}"));
+        journal.finish(
+                first,
+                new TravelToolPort.Evidence(
+                        URI.create("https://www.dpm.org.cn/"),
+                        Instant.now(),
+                        "{\"status\":\"UNKNOWN\"}"));
         journal.finish(first, null);
-        assertThat(jdbc.queryForObject("SELECT status FROM tool_evidence WHERE id=?", String.class, first)).isEqualTo("COMPLETED");
-        assertThat(jdbc.queryForObject("SELECT length(content_hash) FROM tool_evidence WHERE id=?", Integer.class, first)).isEqualTo(64);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT status FROM tool_evidence WHERE id=?", String.class, first))
+                .isEqualTo("COMPLETED");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT length(content_hash) FROM tool_evidence WHERE id=?",
+                                Integer.class,
+                                first))
+                .isEqualTo(64);
         UUID second = journal.reserve(runId, group, verified, verified.plusSeconds(60), 5);
         journal.finish(second, null);
-        assertThatThrownBy(() -> journal.reserve(runId, group, verified, verified.plusSeconds(60), 5)).hasMessage("TOOL_USAGE_UNKNOWN");
+        assertThatThrownBy(
+                        () -> journal.reserve(runId, group, verified, verified.plusSeconds(60), 5))
+                .hasMessage("TOOL_USAGE_UNKNOWN");
     }
 
     /** 外层业务事务不能让未提交的预占提前获得网络发送资格。 */
@@ -78,8 +110,22 @@ class TravelToolIntegrationTest {
     void rejectsAmbientBusinessTransaction() {
         ledger.create(runId);
         var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
-        tx.executeWithoutResult(status -> assertThatThrownBy(() -> journal.reserve(runId, "test-" + runId,
-                Instant.now().minusSeconds(1), Instant.now().plusSeconds(60), 5)).hasMessage("TOOL_AMBIENT_TRANSACTION"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM tool_evidence WHERE run_id=?", Integer.class, runId)).isZero();
+        tx.executeWithoutResult(
+                status ->
+                        assertThatThrownBy(
+                                        () ->
+                                                journal.reserve(
+                                                        runId,
+                                                        "test-" + runId,
+                                                        Instant.now().minusSeconds(1),
+                                                        Instant.now().plusSeconds(60),
+                                                        5))
+                                .hasMessage("TOOL_AMBIENT_TRANSACTION"));
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM tool_evidence WHERE run_id=?",
+                                Integer.class,
+                                runId))
+                .isZero();
     }
 }

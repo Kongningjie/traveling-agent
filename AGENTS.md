@@ -40,6 +40,10 @@
 - 遵循 `docs/standards/编码规范.md`。Java 的每个手写类、接口、枚举、record、构造器和方法（含 private、测试方法）都必须有解释职责与契约的中文 Javadoc；TypeScript 类型、组件及手写函数使用对应 TSDoc／组件说明。此处“注解”指文档注释，不能为了凑数量增加无意义的运行时注解。
 - 写清输入限制、结果含义、异常、事务、副作用及线程安全等实际契约；对覆盖方法可使用 `{@inheritDoc}`，并解释新增行为。注释须随代码维护，不能仅把方法名翻译一遍。
 - 在复杂业务块中详细说明约束、执行顺序和原因，特别是状态转换、锁顺序、租约、幂等键、预算计数、Patch 范围和证据／偏好版本检查。
+- **可读性必须落实到源码排版**：禁止把方法/构造器的签名与非空方法体挤在同一行，禁止同一行串联多个独立业务语句；复杂分支、异常路径和事务边界须展开，不能为减少行数压缩代码。
+- Javadoc/TSDoc应先说明职责或实际契约，再逐行写`@param`、`@return`/`@returns`、`@throws`；各标签单独一行，说明与标签之间留空行。不得把多个标签写在一行，也不以“处理数据”等模板化文字代替解释。
+- 默认实现、兼容替身和生产实现的能力须在注释中区分；返回true/空集合的兼容默认值不能写成已经实现持久化、续租或鉴权。仅支持继承契约的覆盖方法可保留`{@inheritDoc}`并说明差异。
+- Java统一四空格AOSP排版，前端统一两空格和100列目标宽度；格式器不为凑行宽拆改SQL、提示词等字符串。Java变更用`./scripts/format-java.ps1 -Check`，前端变更用`npm --prefix web run format:check`核对；纯文档任务不运行源码格式检查。格式工具版本与校验摘要固定，不自动升级业务依赖。
 - 生成代码、第三方文件和工具生成的锁文件不手工逐项补注释；既有骨架注释已在 DEV-0004 补齐，后续手写类型和方法须持续满足本规则，不能以历史补齐代替新增代码检查。
 - 六个后端模块：api → application → domain；agent、infrastructure 依赖 application／domain；bootstrap 唯一装配启动。domain 不依赖框架，适配器之间不得相互直调，Controller／Agent 工具不能直接访问 Mapper。
 - Java 21、Spring Boot 4.1.1、MyBatis Starter 4.1.0、AgentScope Java 2.0.4 HarnessAgent；Vue 3＋TypeScript。详细版本以父 POM、Wrapper、package-lock 和本地技术栈文档为准，不能擅自升级或改栈。

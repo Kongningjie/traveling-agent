@@ -16,5 +16,8 @@ public class AccountPersistenceConfiguration {
      * @param mapper 本模块 Mapper
      * @return PostgreSQL 账号仓储
      */
-    @Bean AccountStore accountStore(AccountMapper mapper) { return new PostgresAccountStore(mapper); }
+    @Bean
+    AccountStore accountStore(AccountMapper mapper) {
+        return new PostgresAccountStore(mapper);
+    }
 }

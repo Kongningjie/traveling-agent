@@ -13,10 +13,7 @@ import type { CandidateView, Card, View } from "../src/workspace/types.ts";
 
 test("身份使用服务端loginName契约，剔除额外字段而不伪造用户名", () => {
   assert.deepEqual(decodeUser(identity), identity);
-  assert.deepEqual(
-    decodeUser({ ...identity, extra: "__SYNTHETIC_PRIVATE_FIELD__" }),
-    identity,
-  );
+  assert.deepEqual(decodeUser({ ...identity, extra: "__SYNTHETIC_PRIVATE_FIELD__" }), identity);
 });
 test("旧username形状和异常身份在渲染前拒绝，固定错误不带原始响应", () => {
   for (const value of [
@@ -76,24 +73,11 @@ test("候选未同步、需求变化、未审核、阻断UNKNOWN均不能接受"
   const { view, candidate } = context();
   assert.equal(canAccept(view, candidate, true), true);
   assert.equal(canAccept(view, candidate, false), false);
+  assert.equal(canAccept({ ...view, pendingInput: true }, candidate, true), false);
+  assert.equal(canAccept({ ...view, constraintRevision: 3 }, candidate, true), false);
+  assert.equal(canAccept({ ...view, currentVersionId: "new" }, candidate, true), false);
   assert.equal(
-    canAccept({ ...view, pendingInput: true }, candidate, true),
-    false,
-  );
-  assert.equal(
-    canAccept({ ...view, constraintRevision: 3 }, candidate, true),
-    false,
-  );
-  assert.equal(
-    canAccept({ ...view, currentVersionId: "new" }, candidate, true),
-    false,
-  );
-  assert.equal(
-    canAccept(
-      view,
-      { ...candidate, candidate: { ...candidate.candidate, review: null } },
-      true,
-    ),
+    canAccept(view, { ...candidate, candidate: { ...candidate.candidate, review: null } }, true),
     false,
   );
   assert.equal(
@@ -138,10 +122,7 @@ test("证据链接拒绝脚本、文件和嵌入凭证", () => {
   assert.equal(sourceLink("javascript:alert(1)"), undefined);
   assert.equal(sourceLink("file:///tmp/source"), undefined);
   assert.equal(sourceLink("https://name:placeholder@example.test/"), undefined);
-  assert.equal(
-    sourceLink("https://example.test/source"),
-    "https://example.test/source",
-  );
+  assert.equal(sourceLink("https://example.test/source"), "https://example.test/source");
 });
 test("每个写入先获取CSRF并携带同源Cookie策略，不持久化令牌", async () => {
   const original = globalThis.fetch;
@@ -200,8 +181,7 @@ test("网络失败不自动重试POST，不向异常输出响应正文", async (
 });
 test("409只返回固定说明，不回显后端正文或自动接受", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response("private server details", { status: 409 });
+  globalThis.fetch = async () => new Response("private server details", { status: 409 });
   try {
     await assert.rejects(
       new Api().get("/api/v1/tasks"),
@@ -219,8 +199,5 @@ test("需求更新后保留的旧行程必须提示重新校验，不能展示�
   const { view, candidate } = context();
   const trip = { ...candidate.candidate.snapshot, constraintRevision: 1 };
   assert.equal(currentNeedsValidation(view, trip), true);
-  assert.equal(
-    currentNeedsValidation({ ...view, constraintRevision: 1 }, trip),
-    false,
-  );
+  assert.equal(currentNeedsValidation({ ...view, constraintRevision: 1 }, trip), false);
 });

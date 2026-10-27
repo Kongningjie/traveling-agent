@@ -36,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** 显式免费验证入口；任一角色失败立即停止，不自动改型号或删除真实计量记录。 */
 @EnabledIfEnvironmentVariable(named = "TRAVEL_LIVE_MODEL_TESTS", matches = "true")
 @ActiveProfiles("local")
-@SpringBootTest(properties = {"travel.external-calls-enabled=true", "logging.level.io.agentscope=OFF"},
+@SpringBootTest(
+        properties = {"travel.external-calls-enabled=true", "logging.level.io.agentscope=OFF"},
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class HarnessLiveIntegrationTest {
     @Autowired ModelCallAdmission admission;
@@ -56,24 +57,59 @@ public class HarnessLiveIntegrationTest {
             var probe = new ValidationTool();
             var toolkit = new Toolkit();
             toolkit.registerTool(probe);
-            try (var transport = new GuardedDashScopeTransport(admission, runId, role, new OkHttpClient())) {
-                var model = DashScopeChatModel.builder().apiKey(environment.getRequiredProperty("DASHSCOPE_API_KEY"))
-                        .modelName(properties.models().get(role)).baseUrl("https://dashscope.aliyuncs.com")
-                        .endpointType(EndpointType.MULTIMODAL).stream(false).enableThinking(false).enableSearch(false)
-                        .httpTransport(transport).defaultOptions(GenerateOptions.builder().maxTokens(256)
-                                .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
-                try (var harness = RestrictedHarnessFactory.create(model, toolkit, workspace.resolve(role), role)) {
-                    var result = harness.call(List.of(Msg.builder().name("user").role(MsgRole.USER)
-                            .content(TextBlock.builder().text("必须先调用 lookup_validation_value 获取校验值，"
-                                    + "再通过结构化输出返回 answer，只包含工具给出的数字，不要猜测。").build()).build()),
-                            RestrictedHarnessFactory.StructuredReply.class).block(Duration.ofMinutes(4));
-                    assertThat(result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class).answer())
+            try (var transport =
+                    new GuardedDashScopeTransport(admission, runId, role, new OkHttpClient())) {
+                var model =
+                        DashScopeChatModel.builder()
+                                .apiKey(environment.getRequiredProperty("DASHSCOPE_API_KEY"))
+                                .modelName(properties.models().get(role))
+                                .baseUrl("https://dashscope.aliyuncs.com")
+                                .endpointType(EndpointType.MULTIMODAL)
+                                .stream(false)
+                                .enableThinking(false)
+                                .enableSearch(false)
+                                .httpTransport(transport)
+                                .defaultOptions(
+                                        GenerateOptions.builder()
+                                                .maxTokens(256)
+                                                .executionConfig(
+                                                        ExecutionConfig.builder()
+                                                                .maxAttempts(1)
+                                                                .build())
+                                                .build())
+                                .build();
+                try (var harness =
+                        RestrictedHarnessFactory.create(
+                                model, toolkit, workspace.resolve(role), role)) {
+                    var result =
+                            harness.call(
+                                            List.of(
+                                                    Msg.builder()
+                                                            .name("user")
+                                                            .role(MsgRole.USER)
+                                                            .content(
+                                                                    TextBlock.builder()
+                                                                            .text(
+                                                                                    "必须先调用 lookup_validation_value 获取校验值，"
+                                                                                            + "再通过结构化输出返回 answer，只包含工具给出的数字，不要猜测。")
+                                                                            .build())
+                                                            .build()),
+                                            RestrictedHarnessFactory.StructuredReply.class)
+                                    .block(Duration.ofMinutes(4));
+                    assertThat(
+                                    result.getStructuredData(
+                                                    RestrictedHarnessFactory.StructuredReply.class)
+                                            .answer())
                             .isEqualTo(probe.value);
                     assertThat(probe.calls.get()).isGreaterThanOrEqualTo(1);
                     assertThat(ledger.read(runId).modelCalls()).isBetween(2L, 5L);
-                    assertThat(jdbc.queryForObject("SELECT count(*) FROM call_meter WHERE run_id = ? "
-                            + "AND (status <> 'COMPLETED' OR input_tokens IS NULL OR output_tokens IS NULL)",
-                            Integer.class, runId)).isZero();
+                    assertThat(
+                                    jdbc.queryForObject(
+                                            "SELECT count(*) FROM call_meter WHERE run_id = ? "
+                                                    + "AND (status <> 'COMPLETED' OR input_tokens IS NULL OR output_tokens IS NULL)",
+                                            Integer.class,
+                                            runId))
+                            .isZero();
                     System.out.println("LIVE_MODEL_PASS role=" + role + " run=" + runId);
                 }
             }
@@ -81,32 +117,55 @@ public class HarnessLiveIntegrationTest {
         UUID runId = UUID.randomUUID();
         ledger.create(runId);
         try (var invocation = runtime.start(runId, "planner", "请在 answer 中只返回 OK。")) {
-            assertThat(invocation.result().toCompletableFuture().get(200, TimeUnit.SECONDS)).isEqualTo("OK");
+            assertThat(invocation.result().toCompletableFuture().get(200, TimeUnit.SECONDS))
+                    .isEqualTo("OK");
         }
         UUID cancelledRun = UUID.randomUUID();
         ledger.create(cancelledRun);
         try (var invocation = runtime.start(cancelledRun, "planner", "请详细介绍十个中国城市，每个城市至少一百字。")) {
             long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
-            while (ledger.read(cancelledRun).modelCalls() == 0 && System.nanoTime() < deadline) Thread.sleep(20);
+            while (ledger.read(cancelledRun).modelCalls() == 0 && System.nanoTime() < deadline)
+                Thread.sleep(20);
             assertThat(ledger.read(cancelledRun).modelCalls()).isPositive();
             invocation.close();
-            assertThatThrownBy(() -> invocation.result().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertThatThrownBy(
+                            () ->
+                                    invocation
+                                            .result()
+                                            .toCompletableFuture()
+                                            .get(10, TimeUnit.SECONDS))
                     .hasCauseInstanceOf(IllegalStateException.class);
             deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-            while (jdbc.queryForObject("SELECT count(*) FROM call_meter WHERE run_id = ? AND status='RESERVED'",
-                    Integer.class, cancelledRun) > 0 && System.nanoTime() < deadline) Thread.sleep(20);
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM call_meter WHERE run_id = ? AND status='RESERVED'",
-                    Integer.class, cancelledRun)).isZero();
+            while (jdbc.queryForObject(
+                                    "SELECT count(*) FROM call_meter WHERE run_id = ? AND status='RESERVED'",
+                                    Integer.class,
+                                    cancelledRun)
+                            > 0
+                    && System.nanoTime() < deadline) Thread.sleep(20);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM call_meter WHERE run_id = ? AND status='RESERVED'",
+                                    Integer.class,
+                                    cancelledRun))
+                    .isZero();
             System.out.println("LIVE_CANCEL_PASS run=" + cancelledRun);
         }
     }
 
     /** 每次测试生成随机值，证明模型使用了工具结果而非固定常识。 */
     public static class ValidationTool {
-        private final String value = String.valueOf(java.util.concurrent.ThreadLocalRandom.current().nextInt(100000, 999999));
+        private final String value =
+                String.valueOf(
+                        java.util.concurrent.ThreadLocalRandom.current().nextInt(100000, 999999));
         private final AtomicInteger calls = new AtomicInteger();
-        /** @return 随机非敏感校验值 */
+
+        /**
+         * @return 随机非敏感校验值
+         */
         @Tool(name = "lookup_validation_value", description = "返回本次随机校验数字，回答前必须调用。")
-        public String lookup() { calls.incrementAndGet(); return value; }
+        public String lookup() {
+            calls.incrementAndGet();
+            return value;
+        }
     }
 }

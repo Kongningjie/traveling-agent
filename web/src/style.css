@@ -315,10 +315,31 @@ summary {
   overflow-y: auto;
 }
 /* 列表选择和更多操作是相邻按钮，不嵌套交互元素或误触切换聊天。 */
-.task-row{display:flex;align-items:center;position:relative;border-radius:10px;margin:3px 0}
-.task-row:hover{background:#edf0f2}.task-row.active{background:#e9eeec}
-.task-row .task-button{flex:1;min-width:0;width:auto;margin:0;background:transparent}
-.task-row:hover .conversation-more,.task-row:focus-within .conversation-more,.task-row.active .conversation-more{opacity:1}
+.task-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: 10px;
+  margin: 3px 0;
+}
+.task-row:hover {
+  background: #edf0f2;
+}
+.task-row.active {
+  background: #e9eeec;
+}
+.task-row .task-button {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  background: transparent;
+}
+.task-row:hover .conversation-more,
+.task-row:focus-within .conversation-more,
+.task-row.active .conversation-more {
+  opacity: 1;
+}
 .task-button {
   display: flex;
   gap: 10px;
@@ -1246,11 +1267,48 @@ summary {
 }
 
 /* 助手回复保持换行，操作确认与撤回均为显式交互。 */
-.dialogue-reply { white-space: pre-wrap; overflow-wrap: anywhere; }
-.dialogue-actions { display: flex; gap: 12px; margin: 8px 0 20px; }
-.operation-confirmation { margin: 12px 0 24px; }
-.operation-confirmation button + button { margin-left: 10px; }
+.dialogue-reply {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dialogue-actions {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0 20px;
+}
+.operation-confirmation {
+  margin: 12px 0 24px;
+}
+.operation-confirmation button + button {
+  margin-left: 10px;
+}
 /* 上传与发送并列，辅助提示不挤占按钮的点击空间。 */
-.attach-button{display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;border:0;border-radius:50%;background:transparent;color:#344d44;padding:8px}
-.attach-button:hover{background:#edf3ef}.attach-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
-.composer-toolbar > span{flex:1}.feedback-dialog{width:min(720px,calc(100vw - 32px))}
+.attach-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #344d44;
+  padding: 8px;
+}
+.attach-button:hover {
+  background: #edf3ef;
+}
+.attach-button svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.composer-toolbar > span {
+  flex: 1;
+}
+.feedback-dialog {
+  width: min(720px, calc(100vw - 32px));
+}

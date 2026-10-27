@@ -18,5 +18,8 @@ public class EnginePersistenceConfiguration {
      * @param manager PostgreSQL 事务管理
      * @return 同源事务边界
      */
-    @Bean BusinessTransactions businessTransactions(PlatformTransactionManager manager) { return new SpringBusinessTransactions(manager); }
+    @Bean
+    BusinessTransactions businessTransactions(PlatformTransactionManager manager) {
+        return new SpringBusinessTransactions(manager);
+    }
 }

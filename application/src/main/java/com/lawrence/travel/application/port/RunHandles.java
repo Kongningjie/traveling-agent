@@ -10,6 +10,7 @@ public interface RunHandles {
      * @param runId 已持久停止的运行；中断不代表实际请求已退出
      */
     void cancel(UUID runId);
+
     /**
      * @param scope 已切换运行的任务
      * @param currentGeneration 当前代次；只中断更旧代次，旧请求重放不能误中断新执行

@@ -22,26 +22,38 @@ import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.I
  * JSONB 编解码与键排序摘要；数组顺序保留，拒绝重复键及尾随第二份 JSON。
  */
 public final class TravelJson {
-    private final JsonMapper mapper = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .enable(tools.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .enable(tools.jackson.databind.cfg.DateTimeFeature.WRITE_DATES_WITH_ZONE_ID)
-            .disable(tools.jackson.databind.cfg.DateTimeFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
-            .disable(tools.jackson.databind.cfg.DateTimeFeature.WRITE_DATES_WITH_CONTEXT_TIME_ZONE).build();
+    private final JsonMapper mapper =
+            JsonMapper.builder()
+                    .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                    .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .enable(
+                            tools.jackson.databind.DeserializationFeature
+                                    .USE_BIG_DECIMAL_FOR_FLOATS)
+                    .enable(tools.jackson.databind.cfg.DateTimeFeature.WRITE_DATES_WITH_ZONE_ID)
+                    .disable(
+                            tools.jackson.databind.cfg.DateTimeFeature
+                                    .ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
+                    .disable(
+                            tools.jackson.databind.cfg.DateTimeFeature
+                                    .WRITE_DATES_WITH_CONTEXT_TIME_ZONE)
+                    .build();
 
     /**
      * 创建线程安全的固定格式编解码器，不复用含供应商配置的可变 Mapper。
      */
-    public TravelJson() { }
+    public TravelJson() {}
 
     /**
      * @param value 可序列化内容
      * @return 对象键递归排序后的 JSON，不改变数组顺序
      */
     public String encode(Object value) {
-        try { return mapper.writeValueAsString(normalize(mapper.readValue(mapper.writeValueAsString(value), Object.class))); }
-        catch (RuntimeException failure) { throw new TravelStorageFailure(INVALID_INPUT); }
+        try {
+            return mapper.writeValueAsString(
+                    normalize(mapper.readValue(mapper.writeValueAsString(value), Object.class)));
+        } catch (RuntimeException failure) {
+            throw new TravelStorageFailure(INVALID_INPUT);
+        }
     }
 
     /**
@@ -51,39 +63,60 @@ public final class TravelJson {
      * @return 固定类型结果；错误不携带正文
      */
     public <T> T decode(String text, Class<T> type) {
-        try { return mapper.readValue(text, type); }
-        catch (RuntimeException failure) { throw new TravelStorageFailure(INVALID_INPUT); }
+        try {
+            return mapper.readValue(text, type);
+        } catch (RuntimeException failure) {
+            throw new TravelStorageFailure(INVALID_INPUT);
+        }
     }
 
-    /** @param text 不可信模型业务JSON @return 严格领域结果，不修复或容忍非法结构
-     * @throws DialogueDecodeFailure 只含固定类别和白名单路径 */
-    public com.lawrence.travel.domain.interaction.DialogueIntent.Result decodeDialogue(String text) {
+    /**
+     * @param text 不可信模型业务JSON
+     * @return 严格领域结果，不修复或容忍非法结构
+     * @throws DialogueDecodeFailure 只含固定类别和白名单路径
+     */
+    public com.lawrence.travel.domain.interaction.DialogueIntent.Result decodeDialogue(
+            String text) {
         try {
-            var result = mapper.readValue(text, com.lawrence.travel.domain.interaction.DialogueIntent.Result.class);
-            if (result == null) throw new DialogueDecodeFailure(
-                    Kind.SHAPE,
-                    Field.ROOT);
+            var result =
+                    mapper.readValue(
+                            text,
+                            com.lawrence.travel.domain.interaction.DialogueIntent.Result.class);
+            if (result == null) throw new DialogueDecodeFailure(Kind.SHAPE, Field.ROOT);
             return result;
         } catch (tools.jackson.core.JacksonException failure) {
             // 不读取message、source、非法值或cause；Jackson路径只用于匹配编译期字段白名单。
             var kind = Kind.UNKNOWN;
             if (failure instanceof tools.jackson.core.exc.StreamReadException) kind = Kind.SYNTAX;
-            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format && format.getTargetType() != null && format.getTargetType().isEnum()) kind = Kind.ENUM;
-            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format && format.getTargetType() == UUID.class) kind = Kind.UUID;
-            else if (failure instanceof tools.jackson.databind.exc.ValueInstantiationException) kind = Kind.CONSTRAINT;
-            else if (failure instanceof tools.jackson.databind.exc.MismatchedInputException) kind = Kind.SHAPE;
+            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format
+                    && format.getTargetType() != null
+                    && format.getTargetType().isEnum()) kind = Kind.ENUM;
+            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format
+                    && format.getTargetType() == UUID.class) kind = Kind.UUID;
+            else if (failure instanceof tools.jackson.databind.exc.ValueInstantiationException)
+                kind = Kind.CONSTRAINT;
+            else if (failure instanceof tools.jackson.databind.exc.MismatchedInputException)
+                kind = Kind.SHAPE;
             throw new DialogueDecodeFailure(kind, dialogueField(failure));
         }
     }
 
-    /** @param failure 仅在栈内读取路径，不保存解析器引用 @return 未知或过深路径一律ROOT，不输出动态属性名 */
+    /**
+     * @param failure 仅在栈内读取路径，不保存解析器引用
+     * @return 未知或过深路径一律ROOT，不输出动态属性名
+     */
     private static Field dialogueField(tools.jackson.core.JacksonException failure) {
         if (failure.getPath().size() > 8) return Field.ROOT;
         // 动态键中若含点号等分隔符，不能伪装成facts.operation一类嵌套路径。
-        if (failure.getPath().stream().map(tools.jackson.core.JacksonException.Reference::getPropertyName)
-                .filter(java.util.Objects::nonNull).anyMatch(name -> !name.matches("[A-Za-z]{1,32}"))) return Field.ROOT;
-        String key = failure.getPath().stream().map(tools.jackson.core.JacksonException.Reference::getPropertyName)
-                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining("."));
+        if (failure.getPath().stream()
+                .map(tools.jackson.core.JacksonException.Reference::getPropertyName)
+                .filter(java.util.Objects::nonNull)
+                .anyMatch(name -> !name.matches("[A-Za-z]{1,32}"))) return Field.ROOT;
+        String key =
+                failure.getPath().stream()
+                        .map(tools.jackson.core.JacksonException.Reference::getPropertyName)
+                        .filter(java.util.Objects::nonNull)
+                        .collect(java.util.stream.Collectors.joining("."));
         return switch (key) {
             case "intents" -> Field.INTENTS;
             case "intents.kind" -> Field.INTENT_KIND;
@@ -113,8 +146,14 @@ public final class TravelJson {
      */
     public Map<UUID, TravelTask.PendingInput> pendingInputs(String text) {
         try {
-            return mapper.readValue(text, mapper.getTypeFactory().constructMapType(Map.class, UUID.class, TravelTask.PendingInput.class));
-        } catch (RuntimeException failure) { throw new TravelStorageFailure(INVALID_INPUT); }
+            return mapper.readValue(
+                    text,
+                    mapper.getTypeFactory()
+                            .constructMapType(
+                                    Map.class, UUID.class, TravelTask.PendingInput.class));
+        } catch (RuntimeException failure) {
+            throw new TravelStorageFailure(INVALID_INPUT);
+        }
     }
 
     /**
@@ -122,8 +161,14 @@ public final class TravelJson {
      * @return SHA256 小写摘要
      */
     public String hash(String text) {
-        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); }
-        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException("SHA256_UNAVAILABLE"); }
+        try {
+            return HexFormat.of()
+                    .formatHex(
+                            MessageDigest.getInstance("SHA-256")
+                                    .digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA256_UNAVAILABLE");
+        }
     }
 
     /**
@@ -138,16 +183,42 @@ public final class TravelJson {
         Object decoded = decode(text, Object.class);
         require(decoded instanceof Map<?, ?>);
         Map<?, ?> payload = (Map<?, ?>) decoded;
-        require(Integer.valueOf(version.schemaVersion()).equals(payload.get("schemaVersion")) && version.schemaVersion() == 1);
+        require(
+                Integer.valueOf(version.schemaVersion()).equals(payload.get("schemaVersion"))
+                        && version.schemaVersion() == 1);
         require(version.scope().taskId().toString().equals(payload.get("taskId")));
-        require(Long.toString(version.constraintRevision()).equals(String.valueOf(payload.get("constraintRevision"))));
-        require(java.util.Objects.equals(version.baseVersionId() == null ? null : version.baseVersionId().toString(), payload.get("baseVersionId"))
-                && payload.containsKey("baseVersionId"));
-        for (String field : List.of("cityStays", "days", "items", "transportLegs", "accommodationStays", "costEntries", "alternatives", "evidenceRefs")) {
+        require(
+                Long.toString(version.constraintRevision())
+                        .equals(String.valueOf(payload.get("constraintRevision"))));
+        require(
+                java.util.Objects.equals(
+                                version.baseVersionId() == null
+                                        ? null
+                                        : version.baseVersionId().toString(),
+                                payload.get("baseVersionId"))
+                        && payload.containsKey("baseVersionId"));
+        for (String field :
+                List.of(
+                        "cityStays",
+                        "days",
+                        "items",
+                        "transportLegs",
+                        "accommodationStays",
+                        "costEntries",
+                        "alternatives",
+                        "evidenceRefs")) {
             require(payload.get(field) instanceof List<?>);
         }
-        var references = new java.util.HashSet<com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference>();
-        for (Object value : (List<?>) payload.get("evidenceRefs")) require(references.add(decode(encode(value), com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference.class)));
+        var references =
+                new java.util.HashSet<
+                        com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference>();
+        for (Object value : (List<?>) payload.get("evidenceRefs"))
+            require(
+                    references.add(
+                            decode(
+                                    encode(value),
+                                    com.lawrence.travel.domain.knowledge.EvidenceRecord.Reference
+                                            .class)));
         require(references.equals(version.evidenceRefs()));
         String canonical = encode(decoded);
         require(hash(canonical).equals(version.payloadHash()));
@@ -161,24 +232,38 @@ public final class TravelJson {
     private Object normalize(Object value) {
         if (value instanceof Map<?, ?> object) {
             var sorted = new TreeMap<String, Object>();
-            object.forEach((key, element) -> {
-                // targetIds 是集合语义；重试时不应受 Set 的 JVM 迭代顺序影响。
-                Object normalized = normalize(element);
-                if (setKey(key) && normalized instanceof List<?> ids) {
-                    normalized = ids.stream().sorted(java.util.Comparator.comparing(Object::toString)).toList();
-                }
-                sorted.put(key.toString(), normalized);
-            });
+            object.forEach(
+                    (key, element) -> {
+                        // targetIds 是集合语义；重试时不应受 Set 的 JVM 迭代顺序影响。
+                        Object normalized = normalize(element);
+                        if (setKey(key) && normalized instanceof List<?> ids) {
+                            normalized =
+                                    ids.stream()
+                                            .sorted(
+                                                    java.util.Comparator.comparing(
+                                                            Object::toString))
+                                            .toList();
+                        }
+                        sorted.put(key.toString(), normalized);
+                    });
             return sorted;
         }
         if (value instanceof List<?> list) return list.stream().map(this::normalize).toList();
         return value;
     }
-    /** @param key JSON集合语义字段 @return 是否固定排序，防止同一证据集合因 JVM 迭代顺序造成假冲突 */
-    private static boolean setKey(Object key) { return "targetIds".equals(key) || "evidenceRefs".equals(key); }
+
+    /**
+     * @param key JSON集合语义字段
+     * @return 是否固定排序，防止同一证据集合因 JVM 迭代顺序造成假冲突
+     */
+    private static boolean setKey(Object key) {
+        return "targetIds".equals(key) || "evidenceRefs".equals(key);
+    }
 
     /**
      * @param condition 格式条件；失败只输出固定分类
      */
-    private static void require(boolean condition) { if (!condition) throw new TravelStorageFailure(INVALID_INPUT); }
+    private static void require(boolean condition) {
+        if (!condition) throw new TravelStorageFailure(INVALID_INPUT);
+    }
 }

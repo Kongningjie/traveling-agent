@@ -24,10 +24,26 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.ILLEGAL_TRANS
  * @param allowedAuthorizationScope 可以明确授权的对象边界
  * @param state 决策生命周期
  */
-public record DecisionRequest(UUID id, TaskScope scope, UUID runId, long generation, long revision, long constraintRevision,
-                              Map<UUID, Question> remaining, boolean freeTextAllowed, Set<UUID> allowedAuthorizationScope, State state) {
+public record DecisionRequest(
+        UUID id,
+        TaskScope scope,
+        UUID runId,
+        long generation,
+        long revision,
+        long constraintRevision,
+        Map<UUID, Question> remaining,
+        boolean freeTextAllowed,
+        Set<UUID> allowedAuthorizationScope,
+        State state) {
     /** 卡片终态不能被旧回答复活。 */
-    public enum State { /** 仍有问题。 */ OPEN, /** 全部明确处理。 */ ANSWERED, /** 被新要求取代。 */ SUPERSEDED }
+    public enum State {
+        /** 仍有问题。 */
+        OPEN,
+        /** 全部明确处理。 */
+        ANSWERED,
+        /** 被新要求取代。 */
+        SUPERSEDED
+    }
 
     /**
      * 选项推荐只用于展示。
@@ -36,27 +52,53 @@ public record DecisionRequest(UUID id, TaskScope scope, UUID runId, long generat
      * @param options 选项 ID 与可展示文本
      * @param recommendedOption 推荐选项，可空
      */
-    public record Question(UUID id, String prompt, Map<UUID, String> options, UUID recommendedOption) {
+    public record Question(
+            UUID id, String prompt, Map<UUID, String> options, UUID recommendedOption) {
         /** 推荐项必须来自选项集合，问题与选项文本不能为空。 */
         public Question {
-            DomainViolation.require(id != null && prompt != null && !prompt.isBlank() && options != null, INVALID_INPUT);
-            DomainViolation.require(options.entrySet().stream().allMatch(entry -> entry.getKey() != null && entry.getValue() != null), INVALID_INPUT);
+            DomainViolation.require(
+                    id != null && prompt != null && !prompt.isBlank() && options != null,
+                    INVALID_INPUT);
+            DomainViolation.require(
+                    options.entrySet().stream()
+                            .allMatch(entry -> entry.getKey() != null && entry.getValue() != null),
+                    INVALID_INPUT);
             options = Map.copyOf(options);
-            DomainViolation.require(options.values().stream().allMatch(value -> !value.isBlank())
-                    && (recommendedOption == null || options.containsKey(recommendedOption)), INVALID_INPUT);
+            DomainViolation.require(
+                    options.values().stream().allMatch(value -> !value.isBlank())
+                            && (recommendedOption == null
+                                    || options.containsKey(recommendedOption)),
+                    INVALID_INPUT);
         }
     }
 
     /** 复制集合并验证问题 ID 与键一致，避免部分回答误删其他问题。 */
     public DecisionRequest {
-        DomainViolation.require(id != null && scope != null && runId != null && generation > 0 && revision > 0
-                && constraintRevision > 0 && remaining != null && allowedAuthorizationScope != null && state != null, INVALID_INPUT);
-        DomainViolation.require(remaining.entrySet().stream().allMatch(entry -> entry.getKey() != null && entry.getValue() != null)
-                && allowedAuthorizationScope.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
+        DomainViolation.require(
+                id != null
+                        && scope != null
+                        && runId != null
+                        && generation > 0
+                        && revision > 0
+                        && constraintRevision > 0
+                        && remaining != null
+                        && allowedAuthorizationScope != null
+                        && state != null,
+                INVALID_INPUT);
+        DomainViolation.require(
+                remaining.entrySet().stream()
+                                .allMatch(
+                                        entry -> entry.getKey() != null && entry.getValue() != null)
+                        && allowedAuthorizationScope.stream().allMatch(java.util.Objects::nonNull),
+                INVALID_INPUT);
         remaining = Map.copyOf(remaining);
         allowedAuthorizationScope = Set.copyOf(allowedAuthorizationScope);
-        DomainViolation.require(remaining.entrySet().stream().allMatch(entry -> entry.getKey().equals(entry.getValue().id()))
-                && (state != State.OPEN || !remaining.isEmpty()) && (state != State.ANSWERED || remaining.isEmpty()), INVALID_INPUT);
+        DomainViolation.require(
+                remaining.entrySet().stream()
+                                .allMatch(entry -> entry.getKey().equals(entry.getValue().id()))
+                        && (state != State.OPEN || !remaining.isEmpty())
+                        && (state != State.ANSWERED || remaining.isEmpty()),
+                INVALID_INPUT);
     }
 
     /**
@@ -67,33 +109,77 @@ public record DecisionRequest(UUID id, TaskScope scope, UUID runId, long generat
      * @param nextConstraintRevision 同事务保存后的需求版本，不得倒退
      * @return 剩余问题及问题版本更新的新卡片；重复回答由外层先做持久幂等检查
      */
-    public DecisionRequest applyConfirmed(DecisionAnswer answer, TravelTask current, Set<UUID> resolved, long nextConstraintRevision) {
-        DomainViolation.require(answer != null && current != null && resolved != null, INVALID_INPUT);
-        DomainViolation.require(resolved.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
+    public DecisionRequest applyConfirmed(
+            DecisionAnswer answer,
+            TravelTask current,
+            Set<UUID> resolved,
+            long nextConstraintRevision) {
+        DomainViolation.require(
+                answer != null && current != null && resolved != null, INVALID_INPUT);
+        DomainViolation.require(
+                resolved.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
         scope.requireSame(current.scope());
-        DomainViolation.require(state == State.OPEN && id.equals(answer.decisionId()) && revision == answer.expectedDecisionRevision()
-                && constraintRevision == answer.expectedConstraintRevision() && constraintRevision == current.constraintRevision()
-                && generation == current.executionGeneration(), STALE_DECISION);
-        DomainViolation.require(answer.state() == DecisionAnswer.State.INTERPRETED && answer.kind() != DecisionAnswer.Kind.UNDECIDED, ILLEGAL_TRANSITION);
-        DomainViolation.require(!resolved.isEmpty() && remaining.keySet().containsAll(resolved) && nextConstraintRevision >= constraintRevision
-                && (freeTextAllowed || answer.freeText().isBlank())
-                && allowedAuthorizationScope.containsAll(answer.authorizationScope()), INVALID_INPUT);
+        DomainViolation.require(
+                state == State.OPEN
+                        && id.equals(answer.decisionId())
+                        && revision == answer.expectedDecisionRevision()
+                        && constraintRevision == answer.expectedConstraintRevision()
+                        && constraintRevision == current.constraintRevision()
+                        && generation == current.executionGeneration(),
+                STALE_DECISION);
+        DomainViolation.require(
+                answer.state() == DecisionAnswer.State.INTERPRETED
+                        && answer.kind() != DecisionAnswer.Kind.UNDECIDED,
+                ILLEGAL_TRANSITION);
+        DomainViolation.require(
+                !resolved.isEmpty()
+                        && remaining.keySet().containsAll(resolved)
+                        && nextConstraintRevision >= constraintRevision
+                        && (freeTextAllowed || answer.freeText().isBlank())
+                        && allowedAuthorizationScope.containsAll(answer.authorizationScope()),
+                INVALID_INPUT);
         for (var selection : answer.selectedOptions().entrySet()) {
             Question question = remaining.get(selection.getKey());
-            DomainViolation.require(question != null && question.options().containsKey(selection.getValue()), INVALID_INPUT);
+            DomainViolation.require(
+                    question != null && question.options().containsKey(selection.getValue()),
+                    INVALID_INPUT);
         }
-        DomainViolation.require(!answer.freeText().isBlank() || answer.selectedOptions().keySet().containsAll(resolved), INVALID_INPUT);
+        DomainViolation.require(
+                !answer.freeText().isBlank()
+                        || answer.selectedOptions().keySet().containsAll(resolved),
+                INVALID_INPUT);
         var next = new HashMap<>(remaining);
         resolved.forEach(next::remove);
         // 需求推进后剩余问题必须获得新的问题及需求绑定，不能让部分回答永久废掉整张卡。
-        return new DecisionRequest(id, scope, runId, generation, Math.incrementExact(revision), nextConstraintRevision,
-                next, freeTextAllowed, allowedAuthorizationScope, next.isEmpty() ? State.ANSWERED : State.OPEN);
+        return new DecisionRequest(
+                id,
+                scope,
+                runId,
+                generation,
+                Math.incrementExact(revision),
+                nextConstraintRevision,
+                next,
+                freeTextAllowed,
+                allowedAuthorizationScope,
+                next.isEmpty() ? State.ANSWERED : State.OPEN);
     }
 
-    /** @return 新要求取代后的卡片；只作用于尚待回答的问题，不覆盖已采纳历史 */
+    /**
+     * @return 新要求取代后的卡片；只作用于尚待回答的问题，不覆盖已采纳历史
+     */
     public DecisionRequest supersede() {
-        DomainViolation.require(state == State.OPEN || state == State.SUPERSEDED, ILLEGAL_TRANSITION);
-        return new DecisionRequest(id, scope, runId, generation, revision, constraintRevision,
-                remaining, freeTextAllowed, allowedAuthorizationScope, State.SUPERSEDED);
+        DomainViolation.require(
+                state == State.OPEN || state == State.SUPERSEDED, ILLEGAL_TRANSITION);
+        return new DecisionRequest(
+                id,
+                scope,
+                runId,
+                generation,
+                revision,
+                constraintRevision,
+                remaining,
+                freeTextAllowed,
+                allowedAuthorizationScope,
+                State.SUPERSEDED);
     }
 }

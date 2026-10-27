@@ -25,12 +25,23 @@ class HarnessRuntimeTest {
     void forwardsAdmissionReasonWithoutRetrying() {
         var admission = mock(ModelCallAdmission.class);
         when(admission.begin(any(), any(), any(), any(), anyLong()))
-                .thenThrow(new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED));
-        var runtime = new HarnessAgentRuntimeAdapter(admission, Map.of("planner", "test-model"),
-                () -> "test-placeholder", workspace);
+                .thenThrow(
+                        new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED));
+        var runtime =
+                new HarnessAgentRuntimeAdapter(
+                        admission,
+                        Map.of("planner", "test-model"),
+                        () -> "test-placeholder",
+                        workspace);
         try (var invocation = runtime.start(UUID.randomUUID(), "planner", "test")) {
-            assertThatThrownBy(() -> invocation.result().toCompletableFuture().get(10, TimeUnit.SECONDS))
-                    .rootCause().hasMessage("QUOTA_UNVERIFIED");
+            assertThatThrownBy(
+                            () ->
+                                    invocation
+                                            .result()
+                                            .toCompletableFuture()
+                                            .get(10, TimeUnit.SECONDS))
+                    .rootCause()
+                    .hasMessage("QUOTA_UNVERIFIED");
             verify(admission, times(1)).begin(any(), any(), any(), any(), anyLong());
         }
     }

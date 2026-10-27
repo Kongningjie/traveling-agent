@@ -14,17 +14,24 @@ import java.util.UUID;
  * @param input JSON 对象输入
  * @param dependencies 前置阶段
  */
-public record StagePlan(UUID id, ExecutionStep.Key key, PlanningMode mode, String input, List<UUID> dependencies) {
+public record StagePlan(
+        UUID id, ExecutionStep.Key key, PlanningMode mode, String input, List<UUID> dependencies) {
     /**
      * 校验结构；跨资源依赖及 JSON 摘要由提交事务再次验证。
      */
     public StagePlan {
-        DomainViolation.require(id != null && key != null && input != null && dependencies != null,
+        DomainViolation.require(
+                id != null && key != null && input != null && dependencies != null,
                 DomainViolation.Code.INVALID_INPUT);
         dependencies = List.copyOf(dependencies);
-        DomainViolation.require(dependencies.size() == dependencies.stream().distinct().count() && !dependencies.contains(id)
-                && key.branchKey().length() <= 128, DomainViolation.Code.INVALID_INPUT);
-        DomainViolation.require((key.type() == com.lawrence.travel.domain.execution.StageType.PLAN) == (mode != null),
+        DomainViolation.require(
+                dependencies.size() == dependencies.stream().distinct().count()
+                        && !dependencies.contains(id)
+                        && key.branchKey().length() <= 128,
+                DomainViolation.Code.INVALID_INPUT);
+        DomainViolation.require(
+                (key.type() == com.lawrence.travel.domain.execution.StageType.PLAN)
+                        == (mode != null),
                 DomainViolation.Code.INVALID_INPUT);
     }
 }

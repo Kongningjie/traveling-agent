@@ -39,8 +39,8 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT c.id,t.id AS task_id FROM travel_task t LEFT JOIN dialogue_chat c ON"
-                + " c.user_id=t.user_id AND c.task_id=t.id WHERE t.user_id=#{user} AND t.id=#{id}"
-                + " FOR NO KEY UPDATE OF t")
+                    + " c.user_id=t.user_id AND c.task_id=t.id WHERE t.user_id=#{user} AND t.id=#{id}"
+                    + " FOR NO KEY UPDATE OF t")
     Scope task(@Param("user") UUID user, @Param("id") UUID id);
 
     /**
@@ -50,8 +50,8 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT d.chat_id AS id,c.task_id FROM uploaded_document d JOIN dialogue_chat c ON"
-                + " c.user_id=d.user_id AND c.id=d.chat_id WHERE d.user_id=#{user} AND d.id=#{id}"
-                + " AND NOT d.deleted FOR NO KEY UPDATE OF c")
+                    + " c.user_id=d.user_id AND c.id=d.chat_id WHERE d.user_id=#{user} AND d.id=#{id}"
+                    + " AND NOT d.deleted FOR NO KEY UPDATE OF c")
     Scope document(@Param("user") UUID user, @Param("id") UUID id);
 
     /**
@@ -69,14 +69,14 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT encode(sha256(convert_to(concat_ws('|',#{c}::text,#{t}::text,(SELECT"
-                + " work_revision::text||':'||document_revision::text FROM dialogue_chat WHERE"
-                + " user_id=#{user} AND id=#{c}),(SELECT lock_version::text FROM travel_task WHERE"
-                + " user_id=#{user} AND id=#{t}),(SELECT max(sequence)::text FROM dialogue_input"
-                + " WHERE user_id=#{user} AND chat_id=#{c}),(SELECT string_agg(id::text||hash,','"
-                + " ORDER BY id) FROM uploaded_document WHERE user_id=#{user} AND chat_id=#{c} AND"
-                + " NOT deleted AND (#{doc}::uuid IS NULL OR id=#{doc})),(SELECT"
-                + " string_agg(id::text,',' ORDER BY id) FROM itinerary_snapshot WHERE"
-                + " user_id=#{user} AND task_id=#{t})),'UTF8')),'hex')")
+                    + " work_revision::text||':'||document_revision::text FROM dialogue_chat WHERE"
+                    + " user_id=#{user} AND id=#{c}),(SELECT lock_version::text FROM travel_task WHERE"
+                    + " user_id=#{user} AND id=#{t}),(SELECT max(sequence)::text FROM dialogue_input"
+                    + " WHERE user_id=#{user} AND chat_id=#{c}),(SELECT string_agg(id::text||hash,','"
+                    + " ORDER BY id) FROM uploaded_document WHERE user_id=#{user} AND chat_id=#{c} AND"
+                    + " NOT deleted AND (#{doc}::uuid IS NULL OR id=#{doc})),(SELECT"
+                    + " string_agg(id::text,',' ORDER BY id) FROM itinerary_snapshot WHERE"
+                    + " user_id=#{user} AND task_id=#{t})),'UTF8')),'hex')")
     String revision(
             @Param("user") UUID user,
             @Param("c") UUID c,
@@ -92,9 +92,9 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT (SELECT count(*) FROM uploaded_document WHERE user_id=#{user} AND chat_id=#{c}"
-                + " AND NOT deleted AND (#{doc}::uuid IS NULL OR id=#{doc})) AS documents,(SELECT"
-                + " count(*) FROM itinerary_snapshot WHERE user_id=#{user} AND task_id=#{t}) AS"
-                + " versions")
+                    + " AND NOT deleted AND (#{doc}::uuid IS NULL OR id=#{doc})) AS documents,(SELECT"
+                    + " count(*) FROM itinerary_snapshot WHERE user_id=#{user} AND task_id=#{t}) AS"
+                    + " versions")
     Counts counts(
             @Param("user") UUID user,
             @Param("c") UUID c,
@@ -116,13 +116,13 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT kind,id,name FROM (SELECT 0 AS rank,'CHAT' AS kind,id,title AS name FROM"
-                + " dialogue_chat WHERE user_id=#{user} AND id=#{c} AND #{doc}::uuid IS NULL UNION"
-                + " ALL SELECT 1,'TASK',id,title FROM travel_task WHERE user_id=#{user} AND id=#{t}"
-                + " AND #{doc}::uuid IS NULL UNION ALL SELECT 2,'DOCUMENT',id,name FROM"
-                + " uploaded_document WHERE user_id=#{user} AND chat_id=#{c} AND NOT deleted AND"
-                + " (#{doc}::uuid IS NULL OR id=#{doc}) UNION ALL SELECT 3,'VERSION',id,'行程版本"
-                + " '||created_at::date FROM itinerary_snapshot WHERE user_id=#{user} AND"
-                + " task_id=#{t} AND #{doc}::uuid IS NULL) r ORDER BY rank,id LIMIT 41")
+                    + " dialogue_chat WHERE user_id=#{user} AND id=#{c} AND #{doc}::uuid IS NULL UNION"
+                    + " ALL SELECT 1,'TASK',id,title FROM travel_task WHERE user_id=#{user} AND id=#{t}"
+                    + " AND #{doc}::uuid IS NULL UNION ALL SELECT 2,'DOCUMENT',id,name FROM"
+                    + " uploaded_document WHERE user_id=#{user} AND chat_id=#{c} AND NOT deleted AND"
+                    + " (#{doc}::uuid IS NULL OR id=#{doc}) UNION ALL SELECT 3,'VERSION',id,'行程版本"
+                    + " '||created_at::date FROM itinerary_snapshot WHERE user_id=#{user} AND"
+                    + " task_id=#{t} AND #{doc}::uuid IS NULL) r ORDER BY rank,id LIMIT 41")
     List<Lifecycle.Resource> resources(
             @Param("user") UUID user,
             @Param("c") UUID c,
@@ -164,8 +164,8 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT id::text FROM execution_run WHERE user_id=#{user} AND task_id=#{task} AND state"
-                + " IN('QUEUED','RUNNING','WAITING_USER','PAUSED_QUOTA','PAUSED_BUDGET','WAITING_ACCEPTANCE')"
-                + " ORDER BY id")
+                    + " IN('QUEUED','RUNNING','WAITING_USER','PAUSED_QUOTA','PAUSED_BUDGET','WAITING_ACCEPTANCE')"
+                    + " ORDER BY id")
     List<String> runs(@Param("user") UUID user, @Param("task") UUID task);
 
     /**
@@ -174,7 +174,7 @@ public interface LifecycleMapper {
     @Select(
             value =
                     "SELECT"
-                        + " apply_deletion(#{e.sequence},#{e.id},#{e.user},#{e.kind},#{e.target},#{e.chat},#{e.task},#{e.deletedAt})",
+                            + " apply_deletion(#{e.sequence},#{e.id},#{e.user},#{e.kind},#{e.target},#{e.chat},#{e.task},#{e.deletedAt})",
             affectData = true)
     String apply(@Param("e") Lifecycle.Entry e);
 
@@ -254,9 +254,9 @@ public interface LifecycleMapper {
      */
     @org.apache.ibatis.annotations.Delete(
             "DELETE FROM problem_group WHERE id IN(SELECT g.id FROM problem_group g WHERE"
-                + " last_at<#{cutoff} AND NOT EXISTS(SELECT 1 FROM problem_event e WHERE"
-                + " e.group_id=g.id) AND NOT EXISTS(SELECT 1 FROM problem_group d WHERE"
-                + " d.duplicate_of=g.id) ORDER BY last_at,g.id LIMIT 1000)")
+                    + " last_at<#{cutoff} AND NOT EXISTS(SELECT 1 FROM problem_event e WHERE"
+                    + " e.group_id=g.id) AND NOT EXISTS(SELECT 1 FROM problem_group d WHERE"
+                    + " d.duplicate_of=g.id) ORDER BY last_at,g.id LIMIT 1000)")
     int pruneGroups(@Param("cutoff") Instant cutoff);
 
     /**
@@ -265,10 +265,10 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT count(*) FILTER(WHERE purged_at IS NULL) AS pending,count(*) FILTER(WHERE"
-                + " purged_at IS NULL AND deleted_at<CAST(#{now} AS timestamptz)-interval '24"
-                + " hour') AS overdue,count(*) FILTER(WHERE purged_at IS NULL AND attempts>0) AS"
-                + " failed,(SELECT dropped FROM diagnostic_capacity WHERE id=1) AS"
-                + " diagnostics_dropped FROM deleted_file")
+                    + " purged_at IS NULL AND deleted_at<CAST(#{now} AS timestamptz)-interval '24"
+                    + " hour') AS overdue,count(*) FILTER(WHERE purged_at IS NULL AND attempts>0) AS"
+                    + " failed,(SELECT dropped FROM diagnostic_capacity WHERE id=1) AS"
+                    + " diagnostics_dropped FROM deleted_file")
     Lifecycle.Health health(@Param("now") Instant now);
 
     /**
@@ -279,30 +279,32 @@ public interface LifecycleMapper {
      */
     @Select(
             "SELECT id::text FROM background_job WHERE user_id=#{user} AND chat_id=#{chat} AND (id"
-                + " IN(SELECT job_id FROM uploaded_document WHERE user_id=#{user} AND"
-                + " id=#{document}) OR (kind='CHAT_INPUT' AND operation_id IN(SELECT o.id FROM"
-                + " operation_context o JOIN source_read_attempt a ON a.budget_id=o.budget_id WHERE"
-                + " o.user_id=#{user} AND o.chat_id=#{chat}))) AND state NOT"
-                + " IN('COMPLETED','CANCELLED','SUPERSEDED','FAILED') ORDER BY id")
+                    + " IN(SELECT job_id FROM uploaded_document WHERE user_id=#{user} AND"
+                    + " id=#{document}) OR (kind='CHAT_INPUT' AND operation_id IN(SELECT o.id FROM"
+                    + " operation_context o JOIN source_read_attempt a ON a.budget_id=o.budget_id WHERE"
+                    + " o.user_id=#{user} AND o.chat_id=#{chat}))) AND state NOT"
+                    + " IN('COMPLETED','CANCELLED','SUPERSEDED','FAILED') ORDER BY id")
     List<String> sourceJobs(
             @Param("user") UUID user, @Param("chat") UUID chat, @Param("document") UUID document);
 
     /**
-     * @param e 本人技术墓碑 @return 对应范围是否仍有未清理文件；不查全局队列计数
+     * @param e 本人技术墓碑
+     * @return 对应范围是否仍有未清理文件；不查全局队列计数
      */
     @Select(
             "SELECT EXISTS(SELECT 1 FROM deleted_file f WHERE f.user_id=#{e.user} AND f.purged_at"
-                + " IS NULL AND ((#{e.kind}='DOCUMENT' AND f.document AND"
-                + " f.file_key='documents/'||CAST(#{e.user} AS text)||'/'||CAST(#{e.chat} AS"
-                + " text)||'/'||CAST(#{e.target} AS text)||'.bin') OR (#{e.kind}<>'DOCUMENT' AND"
-                + " ((f.document AND strpos(f.file_key,'documents/'||CAST(#{e.user} AS"
-                + " text)||'/'||CAST(#{e.chat} AS text)||'/')=1) OR (NOT f.document AND"
-                + " strpos(f.file_key,'users/'||CAST(#{e.user} AS text)||'/tasks/'||CAST(#{e.task}"
-                + " AS text)||'/')=1)))))")
+                    + " IS NULL AND ((#{e.kind}='DOCUMENT' AND f.document AND"
+                    + " f.file_key='documents/'||CAST(#{e.user} AS text)||'/'||CAST(#{e.chat} AS"
+                    + " text)||'/'||CAST(#{e.target} AS text)||'.bin') OR (#{e.kind}<>'DOCUMENT' AND"
+                    + " ((f.document AND strpos(f.file_key,'documents/'||CAST(#{e.user} AS"
+                    + " text)||'/'||CAST(#{e.chat} AS text)||'/')=1) OR (NOT f.document AND"
+                    + " strpos(f.file_key,'users/'||CAST(#{e.user} AS text)||'/tasks/'||CAST(#{e.task}"
+                    + " AS text)||'/')=1)))))")
     boolean pending(@Param("e") Lifecycle.Entry e);
 
     /**
-     * @param request 全局UUID @return 是否已使用，不返回其他用户身份或删除正文
+     * @param request 全局UUID
+     * @return 是否已使用，不返回其他用户身份或删除正文
      */
     @Select("SELECT EXISTS(SELECT 1 FROM deletion_tombstone WHERE id=#{request})")
     boolean requestUsed(@Param("request") UUID request);

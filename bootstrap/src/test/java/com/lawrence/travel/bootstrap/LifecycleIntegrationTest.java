@@ -115,9 +115,9 @@ class LifecycleIntegrationTest {
                         var budgets =
                                 jdbc.queryForList(
                                         "SELECT budget_id FROM operation_context WHERE user_id=?"
-                                            + " UNION SELECT budget_id FROM dialogue_chat WHERE"
-                                            + " user_id=? UNION SELECT id FROM execution_run WHERE"
-                                            + " user_id=?",
+                                                + " UNION SELECT budget_id FROM dialogue_chat WHERE"
+                                                + " user_id=? UNION SELECT id FROM execution_run WHERE"
+                                                + " user_id=?",
                                         UUID.class,
                                         user.id(),
                                         user.id(),
@@ -181,7 +181,6 @@ class LifecycleIntegrationTest {
 
     /**
      * * *
-     *
      * @return 无登录能力的随机测试身份
      */
     private UserIdentity actor() {
@@ -316,8 +315,8 @@ class LifecycleIntegrationTest {
         var id = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO problem_event(id,user_id,component,code,severity,created_at)"
-                    + " VALUES(?,?,'LIFECYCLE_TEST','OLD','ERROR',clock_timestamp()-interval '31"
-                    + " day')",
+                        + " VALUES(?,?,'LIFECYCLE_TEST','OLD','ERROR',clock_timestamp()-interval '31"
+                        + " day')",
                 id,
                 u.id());
         // 在同一真实PG事务内验证清理与容量归还，最后回滚，避免测试清理其他用户的过期诊断。
@@ -328,7 +327,7 @@ class LifecycleIntegrationTest {
                                             long before =
                                                     jdbc.queryForObject(
                                                             "SELECT used_bytes FROM"
-                                                                + " diagnostic_capacity WHERE id=1",
+                                                                    + " diagnostic_capacity WHERE id=1",
                                                             Long.class);
                                             lifecycleStore.prune(java.time.Instant.now());
                                             assertThat(
@@ -389,7 +388,7 @@ class LifecycleIntegrationTest {
         // 人为反转作业墙上时钟，聊天FIFO必须使用已持久化的输入sequence。
         jdbc.update(
                 "UPDATE background_job SET created_at=created_at-interval '1 day' WHERE id=(SELECT"
-                    + " job_id FROM dialogue_input WHERE id=?)",
+                        + " job_id FROM dialogue_input WHERE id=?)",
                 next);
         var first = tx.required(() -> ((DialogueStore) chats()).claim()).orElseThrow();
         assertThat(first.userId()).isEqualTo(a.id());
@@ -432,8 +431,8 @@ class LifecycleIntegrationTest {
         var version = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO"
-                    + " itinerary_snapshot(id,user_id,task_id,constraint_revision,schema_version,payload_hash,metadata,payload)"
-                    + " VALUES(?,?,?,1,1,repeat('0',64),'{}','{}')",
+                        + " itinerary_snapshot(id,user_id,task_id,constraint_revision,schema_version,payload_hash,metadata,payload)"
+                        + " VALUES(?,?,?,1,1,repeat('0',64),'{}','{}')",
                 version,
                 u.id(),
                 task);
@@ -482,7 +481,6 @@ class LifecycleIntegrationTest {
 
     /**
      * * 硬退出后PG尚保留原行，但屏障立即关闭；重放完成后才开放，旧正文不能复活。
-     *
      * @throws Exception 合成子进程或有界等待失败
      */
     @Test
@@ -554,9 +552,9 @@ class LifecycleIntegrationTest {
                                 found.addAll(
                                         jdbc.query(
                                                 "SELECT id,user_id,file_key,document,attempts FROM"
-                                                    + " deleted_file WHERE user_id=? AND purged_at"
-                                                    + " IS NULL AND next_at<=? ORDER BY"
-                                                    + " deleted_at,id LIMIT 30",
+                                                        + " deleted_file WHERE user_id=? AND purged_at"
+                                                        + " IS NULL AND next_at<=? ORDER BY"
+                                                        + " deleted_at,id LIMIT 30",
                                                 (r, n) ->
                                                         new Lifecycle.File(
                                                                 r.getObject("id", UUID.class),

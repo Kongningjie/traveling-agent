@@ -14,17 +14,26 @@ import java.util.Objects;
  * @param expiresAt 额度到期保守截止时间
  * @param stopProtectionConfirmed 用完即停已核实生效
  */
-public record FreeQuotaEvidence(String modelId, String region, String api, long remainingTokens,
-                                Instant verifiedAt, Instant validUntil, Instant expiresAt,
-                                boolean stopProtectionConfirmed) {
+public record FreeQuotaEvidence(
+        String modelId,
+        String region,
+        String api,
+        long remainingTokens,
+        Instant verifiedAt,
+        Instant validUntil,
+        Instant expiresAt,
+        boolean stopProtectionConfirmed) {
     /**
      * 校验快照结构，不把空白或负数值解释为已核实。
      * @throws IllegalArgumentException 字段缺失、额度为负或有效期顺序不合理
      */
     public FreeQuotaEvidence {
-        if (Objects.requireNonNull(modelId).isBlank() || Objects.requireNonNull(region).isBlank()
-                || Objects.requireNonNull(api).isBlank() || remainingTokens < 0
-                || !Objects.requireNonNull(validUntil).isAfter(Objects.requireNonNull(verifiedAt))) {
+        if (Objects.requireNonNull(modelId).isBlank()
+                || Objects.requireNonNull(region).isBlank()
+                || Objects.requireNonNull(api).isBlank()
+                || remainingTokens < 0
+                || !Objects.requireNonNull(validUntil)
+                        .isAfter(Objects.requireNonNull(verifiedAt))) {
             throw new IllegalArgumentException("Invalid quota evidence");
         }
         Objects.requireNonNull(expiresAt);
@@ -39,10 +48,17 @@ public record FreeQuotaEvidence(String modelId, String region, String api, long 
      * @param now 当前时间
      * @throws CallRejectedException 保护未确认、范围不匹配、核实时间在未来、实际额度到期或余额不足
      */
-    public void requireUsable(String model, String targetRegion, String targetApi,
-                              long tokenUpperBound, Instant now) {
-        if (tokenUpperBound <= 0) throw new IllegalArgumentException("Token bound must be positive");
-        if (!stopProtectionConfirmed || !modelId.equals(model) || !region.equals(targetRegion)
+    public void requireUsable(
+            String model,
+            String targetRegion,
+            String targetApi,
+            long tokenUpperBound,
+            Instant now) {
+        if (tokenUpperBound <= 0)
+            throw new IllegalArgumentException("Token bound must be positive");
+        if (!stopProtectionConfirmed
+                || !modelId.equals(model)
+                || !region.equals(targetRegion)
                 || !api.equals(targetApi)) {
             throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
         }

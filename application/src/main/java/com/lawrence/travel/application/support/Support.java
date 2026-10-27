@@ -66,7 +66,8 @@ public final class Support {
      * @param trace 原因果链
      * @param span 原尝试/Agent步骤，可空
      * @param request 原请求
-     * @param chat 所属聊天，可空 @param document 关联原件，可空
+     * @param chat 所属聊天，可空
+     * @param document 关联原件，可空
      */
     public record Link(UUID trace, UUID span, UUID request, UUID chat, UUID document) {}
 
@@ -140,7 +141,8 @@ public final class Support {
      * @param cause 固定根因
      * @param repair CODE/CONFIG/PROVIDER/CLARIFICATION
      * @param version 修复标识
-     * @param regression 回归用例 @param passed 是否明确验证通过
+     * @param regression 回归用例
+     * @param passed 是否明确验证通过
      * @param duplicateOf 重复问题目标，可空
      */
     public record Change(
@@ -158,7 +160,8 @@ public final class Support {
      * @param parent 父节点
      * @param kind 固定步骤
      * @param state 执行事实
-     * @param code 脱敏错误码 @param started 开始
+     * @param code 脱敏错误码
+     * @param started 开始
      * @param ended 结束可空
      * @param run 原运行可空
      */

@@ -8,16 +8,37 @@ import java.util.UUID;
 
 /** 短事务作业仓库；处理器在事务外执行，恢复与正常领取走同一入口。 */
 public interface JobStore {
-    /** @param scope 归属 @param id 尚未执行的CHAT_INPUT；仅用于用户明确停止等应用短命令 */
-    void completeCommand(Jobs.Scope scope,UUID id);
-    /** @param input 稳定输入和归属 @return 已保存作业；同键异内容拒绝 */
+    /**
+     * 完成用户明确触发的应用短命令，不领取长任务或调用模型。
+     * @param scope 归属
+     * @param id 尚未执行的CHAT_INPUT；仅用于用户明确停止等应用短命令
+     */
+    void completeCommand(Jobs.Scope scope, UUID id);
+
+    /**
+     * 登记稳定作业与执行上下文；相同身份只能重放相同内容。
+     * @param input 稳定输入和归属
+     * @return 已保存作业；同键异内容拒绝
+     */
     Jobs.View submit(Jobs.Submit input);
-    /** @param scope 私有范围 @param id 作业 @return 本人的状态，跨用户与缺失一致拒绝 */
+
+    /**
+     * 读取经过归属检查的作业状态，越权和缺失使用相同失败语义。
+     * @param scope 私有范围
+     * @param id 作业
+     * @return 本人的状态，跨用户与缺失一致拒绝
+     */
     Jobs.View read(Jobs.Scope scope, UUID id);
-    /** @param kinds 已装配处理器类型 @return 一个新领取或失联接管，预算不重置 */
+
+    /**
+     * 领取新作业或接管过期租约；带排除集合的默认重载仅兼容旧端口，生产实现需覆盖过滤。
+     * @param kinds 已装配处理器类型
+     * @return 一个新领取或失联接管，预算不重置
+     */
     Optional<Jobs.Claim> claim(Set<BackgroundJob.Kind> kinds);
 
     /**
+     * 领取新作业或接管过期租约；带排除集合的默认重载仅兼容旧端口，生产实现需覆盖过滤。
      * @param kinds 已装配类型
      * @param excluded 尚未实际退出的用户
      * @return 公平发现后的可靠领取，旧替身兼容原入口
@@ -26,18 +47,55 @@ public interface JobStore {
             Set<BackgroundJob.Kind> kinds, java.util.Set<UUID> excluded) {
         return claim(kinds);
     }
-    /** @param scope 已验证范围 @param id 精确作业 @return 同聊天理解入口的有序领取 */
+
+    /**
+     * 领取新作业或接管过期租约；带排除集合的默认重载仅兼容旧端口，生产实现需覆盖过滤。
+     * @param scope 已验证范围
+     * @param id 精确作业
+     * @return 同聊天理解入口的有序领取
+     */
     Optional<Jobs.Claim> claim(Jobs.Scope scope, UUID id);
-    /** @param fence 原租约 @return 是否仍可执行；已取消／过期／资料变化返回false */
+
+    /**
+     * 核对原作业围栏是否仍允许执行，不以当前最新token替旧调用重新授权。
+     * @param fence 原租约
+     * @return 是否仍可执行；已取消／过期／资料变化返回false
+     */
     boolean live(Jobs.Fence fence);
-    /** @param fence 原租约 @return 续租是否成功，不复活已过期租约 */
+
+    /**
+     * 延长仍有效的原租约，过期或已取消的执行不能被续租复活。
+     * @param fence 原租约
+     * @return 续租是否成功，不复活已过期租约
+     */
     boolean renew(Jobs.Fence fence);
-    /** @param claim 原领取 @param output 原子产物与后继；非法状态或陈旧写入拒绝 */
+
+    /**
+     * 在一个短事务中提交阶段产物、终态或等待状态及可靠后继，拒绝陈旧写入。
+     * @param claim 原领取
+     * @param output 原子产物与后继；非法状态或陈旧写入拒绝
+     */
     void finish(Jobs.Claim claim, Jobs.Output output);
-    /** @param scope 私有范围 @param id 稳定作业 @param retry true仅显式重试等待／暂停；false取消，终态幂等 */
+
+    /**
+     * 处理用户明确的重试或取消，沿用原作业和预算，终态取消保持幂等。
+     * @param scope 私有范围
+     * @param id 稳定作业
+     * @param retry true仅显式重试等待／暂停；false取消，终态幂等
+     */
     void control(Jobs.Scope scope, UUID id, boolean retry);
-    /** @param scope 归属 @param id 已等待用户的作业；明确确认／补充后终结，不再调用模型 */
+
+    /**
+     * 结束已等待用户的作业，只记录明确确认或补充，不重新调用模型。
+     * @param scope 归属
+     * @param id 已等待用户的作业；明确确认／补充后终结，不再调用模型
+     */
     void acknowledge(Jobs.Scope scope, UUID id);
-    /** @param scope 私有范围 @return 增加删除／资料水位并撤销在途旧资格，不自动删除业务事实 */
+
+    /**
+     * 提升资料/删除水位并撤销旧执行资格，不自动删除已生效的业务事实。
+     * @param scope 私有范围
+     * @return 增加删除／资料水位并撤销在途旧资格，不自动删除业务事实
+     */
     long invalidate(Jobs.Scope scope);
 }

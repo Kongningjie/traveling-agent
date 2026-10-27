@@ -24,7 +24,9 @@ public final class ProbeStreamController {
      * 绑定离线任务应用服务，Controller 不拥有后台执行生命周期。
      * @param probe 不含供应商调用的诊断用例
      */
-    public ProbeStreamController(ExecutionProbe probe) { this.probe = probe; }
+    public ProbeStreamController(ExecutionProbe probe) {
+        this.probe = probe;
+    }
 
     /**
      * 最多两条诊断连接，五秒超时；断线或发送失败仅结束订阅。
@@ -33,30 +35,42 @@ public final class ProbeStreamController {
      */
     @GetMapping(value = "/api/v1/system/probe-events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> events() throws IOException {
-        if (!subscribers.tryAcquire()) return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        if (!subscribers.tryAcquire())
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
         var emitter = new SseEmitter(5000L);
         var released = new AtomicBoolean();
-        Runnable detach = () -> {
-            if (released.compareAndSet(false, true)) subscribers.release();
-        };
+        Runnable detach =
+                () -> {
+                    if (released.compareAndSet(false, true)) subscribers.release();
+                };
         emitter.onCompletion(detach);
-        emitter.onTimeout(() -> { detach.run(); emitter.complete(); });
+        emitter.onTimeout(
+                () -> {
+                    detach.run();
+                    emitter.complete();
+                });
         emitter.onError(failure -> detach.run());
         try {
             var execution = probe.start();
             emitter.send(SseEmitter.event().name("started").data("OFFLINE_PROBE_STARTED"));
-            execution.whenComplete((value, failure) -> {
-                try {
-                    if (!released.get()) emitter.send(SseEmitter.event()
-                            .name(failure == null ? "completed" : "failed")
-                            .data(failure == null ? value : "OFFLINE_PROBE_FAILED"));
-                } catch (IOException | IllegalStateException disconnected) {
-                    // 订阅故障不得传播为业务取消，也不打印异常正文或请求信息。
-                } finally {
-                    detach.run();
-                    emitter.complete();
-                }
-            });
+            execution.whenComplete(
+                    (value, failure) -> {
+                        try {
+                            if (!released.get())
+                                emitter.send(
+                                        SseEmitter.event()
+                                                .name(failure == null ? "completed" : "failed")
+                                                .data(
+                                                        failure == null
+                                                                ? value
+                                                                : "OFFLINE_PROBE_FAILED"));
+                        } catch (IOException | IllegalStateException disconnected) {
+                            // 订阅故障不得传播为业务取消，也不打印异常正文或请求信息。
+                        } finally {
+                            detach.run();
+                            emitter.complete();
+                        }
+                    });
         } catch (RejectedExecutionException full) {
             detach.run();
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
@@ -65,7 +79,9 @@ public final class ProbeStreamController {
             emitter.complete();
             throw failure;
         }
-        return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .header("X-Accel-Buffering", "no").body(emitter);
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
     }
 }

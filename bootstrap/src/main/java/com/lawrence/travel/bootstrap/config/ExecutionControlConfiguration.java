@@ -33,9 +33,15 @@ public class ExecutionControlConfiguration {
      */
     @Bean
     @Profile("local")
-    ModelCallAdmission modelCallAdmission(ExecutionControlProperties properties, BudgetLedger ledger,
-                                           ModelRequestSlots slots) {
-        return new ModelCallAdmission(properties.externalCallsEnabled(), properties.models(),
-                properties.quotaEvidence(), properties.limits().runLimits(), ledger, slots, Clock.systemUTC());
+    ModelCallAdmission modelCallAdmission(
+            ExecutionControlProperties properties, BudgetLedger ledger, ModelRequestSlots slots) {
+        return new ModelCallAdmission(
+                properties.externalCallsEnabled(),
+                properties.models(),
+                properties.quotaEvidence(),
+                properties.limits().runLimits(),
+                ledger,
+                slots,
+                Clock.systemUTC());
     }
 }

@@ -21,14 +21,28 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.STALE_REVISIO
  * @param constraintRevision 输入需求版本
  * @param claim 领取时的执行权副本
  */
-public record ExecutionFence(TaskScope scope, UUID runId, UUID stepId, UUID attemptId, long generation,
-                             long constraintRevision, ExecutionLease claim) {
+public record ExecutionFence(
+        TaskScope scope,
+        UUID runId,
+        UUID stepId,
+        UUID attemptId,
+        long generation,
+        long constraintRevision,
+        ExecutionLease claim) {
     /** 验证必需关联，不接受空提交资格。 */
     public ExecutionFence {
-        DomainViolation.require(scope != null && runId != null && stepId != null && attemptId != null
-                && generation > 0 && constraintRevision > 0 && claim != null, INVALID_INPUT);
+        DomainViolation.require(
+                scope != null
+                        && runId != null
+                        && stepId != null
+                        && attemptId != null
+                        && generation > 0
+                        && constraintRevision > 0
+                        && claim != null,
+                INVALID_INPUT);
         scope.requireSame(claim.scope());
-        DomainViolation.require(runId.equals(claim.runId()) && stepId.equals(claim.stepId()), INVALID_INPUT);
+        DomainViolation.require(
+                runId.equals(claim.runId()) && stepId.equals(claim.stepId()), INVALID_INPUT);
     }
 
     /**
@@ -39,16 +53,31 @@ public record ExecutionFence(TaskScope scope, UUID runId, UUID stepId, UUID atte
      * @param authority 当前 Outbox 租约行值
      * @param databaseNow 当前事务数据库时间
      */
-    public void requireCurrent(TravelTask task, ExecutionRun run, ExecutionStep step,
-                               ExecutionLease authority, Instant databaseNow) {
-        DomainViolation.require(task != null && run != null && step != null && authority != null, INVALID_INPUT);
+    public void requireCurrent(
+            TravelTask task,
+            ExecutionRun run,
+            ExecutionStep step,
+            ExecutionLease authority,
+            Instant databaseNow) {
+        DomainViolation.require(
+                task != null && run != null && step != null && authority != null, INVALID_INPUT);
         scope.requireSame(task.scope());
         scope.requireSame(run.scope());
         scope.requireSame(step.scope());
-        DomainViolation.require(runId.equals(run.id()) && runId.equals(step.runId()) && stepId.equals(step.id()), INVALID_INPUT);
-        DomainViolation.require(generation == task.executionGeneration() && generation == run.generation(), STALE_GENERATION);
-        DomainViolation.require(constraintRevision == task.constraintRevision() && constraintRevision == run.constraintRevision(), STALE_REVISION);
-        DomainViolation.require(run.state() == ExecutionRun.State.RUNNING && step.state() == ExecutionStep.State.RUNNING, ILLEGAL_TRANSITION);
+        DomainViolation.require(
+                runId.equals(run.id()) && runId.equals(step.runId()) && stepId.equals(step.id()),
+                INVALID_INPUT);
+        DomainViolation.require(
+                generation == task.executionGeneration() && generation == run.generation(),
+                STALE_GENERATION);
+        DomainViolation.require(
+                constraintRevision == task.constraintRevision()
+                        && constraintRevision == run.constraintRevision(),
+                STALE_REVISION);
+        DomainViolation.require(
+                run.state() == ExecutionRun.State.RUNNING
+                        && step.state() == ExecutionStep.State.RUNNING,
+                ILLEGAL_TRANSITION);
         DomainViolation.require(attemptId.equals(step.currentAttemptId()), ATTEMPT_MISMATCH);
         authority.requireCurrent(claim, databaseNow);
     }

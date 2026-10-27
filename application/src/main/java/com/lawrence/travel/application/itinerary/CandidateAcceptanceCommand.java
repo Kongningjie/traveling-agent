@@ -15,13 +15,25 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT
  * @param expectedGeneration 预期执行代次
  * @param expectedSnapshotHash 预期完整内容 SHA256
  */
-public record CandidateAcceptanceCommand(TaskScope scope, UUID acceptanceRequestId, UUID candidateId,
-                                         UUID expectedCurrentVersionId, long expectedConstraintRevision,
-                                         long expectedGeneration, String expectedSnapshotHash) {
+public record CandidateAcceptanceCommand(
+        TaskScope scope,
+        UUID acceptanceRequestId,
+        UUID candidateId,
+        UUID expectedCurrentVersionId,
+        long expectedConstraintRevision,
+        long expectedGeneration,
+        String expectedSnapshotHash) {
     /** 构造仅检查形状，DEV-0013 在短事务中重新校验全部报告及当前状态。 */
     public CandidateAcceptanceCommand {
-        DomainViolation.require(scope != null && acceptanceRequestId != null && candidateId != null && expectedConstraintRevision > 0
-                && expectedGeneration > 0 && expectedSnapshotHash != null && expectedSnapshotHash.matches("[0-9a-fA-F]{64}"), INVALID_INPUT);
+        DomainViolation.require(
+                scope != null
+                        && acceptanceRequestId != null
+                        && candidateId != null
+                        && expectedConstraintRevision > 0
+                        && expectedGeneration > 0
+                        && expectedSnapshotHash != null
+                        && expectedSnapshotHash.matches("[0-9a-fA-F]{64}"),
+                INVALID_INPUT);
         expectedSnapshotHash = expectedSnapshotHash.toLowerCase(java.util.Locale.ROOT);
     }
 }

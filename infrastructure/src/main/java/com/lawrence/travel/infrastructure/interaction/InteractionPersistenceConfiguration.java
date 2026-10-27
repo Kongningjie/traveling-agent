@@ -8,4 +8,4 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 @MapperScan(basePackageClasses = NegotiationMapper.class)
-public class InteractionPersistenceConfiguration { }
+public class InteractionPersistenceConfiguration {}

@@ -16,9 +16,17 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT
 public record TripWindow(Set<String> cityIds, LocalDate startsOn, LocalDate endsOn, int travelers) {
     /** 首版 1～3 城市、1～10 天、人数为正；超范围明确拒绝，不截断用户需求。 */
     public TripWindow {
-        DomainViolation.require(cityIds != null && !cityIds.isEmpty() && cityIds.size() <= 3
-                && cityIds.stream().allMatch(id -> id != null && !id.isBlank()) && startsOn != null && endsOn != null
-                && !endsOn.isBefore(startsOn) && ChronoUnit.DAYS.between(startsOn, endsOn) < 10 && travelers > 0, INVALID_INPUT);
+        DomainViolation.require(
+                cityIds != null
+                        && !cityIds.isEmpty()
+                        && cityIds.size() <= 3
+                        && cityIds.stream().allMatch(id -> id != null && !id.isBlank())
+                        && startsOn != null
+                        && endsOn != null
+                        && !endsOn.isBefore(startsOn)
+                        && ChronoUnit.DAYS.between(startsOn, endsOn) < 10
+                        && travelers > 0,
+                INVALID_INPUT);
         cityIds = Set.copyOf(cityIds);
     }
 }

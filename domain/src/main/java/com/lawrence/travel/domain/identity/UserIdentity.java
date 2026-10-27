@@ -12,8 +12,11 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT
  */
 public record UserIdentity(UUID id, String loginName) implements Serializable {
     private static final long serialVersionUID = 1L;
+
     /** 身份必须来自账号记录，构造不意味着浏览器已被认证。 */
     public UserIdentity {
-        DomainViolation.require(id != null && loginName != null && loginName.matches("[a-z0-9_]{3,32}"), INVALID_INPUT);
+        DomainViolation.require(
+                id != null && loginName != null && loginName.matches("[a-z0-9_]{3,32}"),
+                INVALID_INPUT);
     }
 }

@@ -17,7 +17,6 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfiguration {
     /**
      * 装配诊断白名单和默认拒绝策略，并保留 CSRF 防护。
-     *
      * @param http Spring 提供的安全构建器，不可为 null
      * @param environment 仅用于判断 smoke 诊断白名单
      * @return 非 local 模式下的安全过滤器链
@@ -25,16 +24,29 @@ public class SecurityConfiguration {
      */
     @Bean
     @Profile("!local")
-    SecurityFilterChain securityFilterChain(HttpSecurity http, Environment environment) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, Environment environment)
+            throws Exception {
         // 采用显式诊断白名单；后续增加业务 Controller 时也不会被默认匿名放行。
         // 禁用默认认证入口并不关闭 CSRF，正式登录和退出契约在账号阶段实现。
-        return http
-                .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/api/v1/system/info").permitAll()
-                        .requestMatchers(request -> environment.acceptsProfiles(Profiles.of("smoke"))
-                                && request.getMethod().equals("GET")
-                                && request.getServletPath().equals("/api/v1/system/probe-events")).permitAll()
-                        .anyRequest().denyAll())
+        return http.authorizeHttpRequests(
+                        authorize ->
+                                authorize
+                                        .requestMatchers(
+                                                "/actuator/health",
+                                                "/actuator/health/**",
+                                                "/api/v1/system/info")
+                                        .permitAll()
+                                        .requestMatchers(
+                                                request ->
+                                                        environment.acceptsProfiles(
+                                                                        Profiles.of("smoke"))
+                                                                && request.getMethod().equals("GET")
+                                                                && request.getServletPath()
+                                                                        .equals(
+                                                                                "/api/v1/system/probe-events"))
+                                        .permitAll()
+                                        .anyRequest()
+                                        .denyAll())
                 .csrf(Customizer.withDefaults())
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -44,7 +56,6 @@ public class SecurityConfiguration {
 
     /**
      * 提供空用户源，避免自动配置生成可登录账号或将默认密码输出到启动日志。
-     *
      * @return 不含任何账号的内存用户源；local 的显式 AuthenticationManager 负责真实账号认证
      */
     @Bean

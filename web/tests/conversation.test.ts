@@ -4,7 +4,9 @@ import { conversationInput } from "../src/workspace/conversation.ts";
 import { replyMode } from "../src/workspace/guards.ts";
 import type { Card, View } from "../src/workspace/types.ts";
 
-/** @returns 只包含路由版本事实的纯内存夹具，不连接真实服务或假冒模型解析。 */
+/**
+ * @returns 只包含路由版本事实的纯内存夹具，不连接真实服务或假冒模型解析。
+ */
 function waiting(): { view: View; card: Card } {
   return {
     view: {
@@ -41,8 +43,7 @@ test("只有模糊想法也可开聊，不预填预算、人数、时间或已�
   assert.ok(body.title.length > 0);
 });
 test("自然描述保留完整原文，列表标题不截断Unicode字符且不冒充需求提取", () => {
-  const text =
-    "  想和朋友去杭州\n但日期未定，预算不是上限，想先聊聊。" + "🚉".repeat(50);
+  const text = "  想和朋友去杭州\n但日期未定，预算不是上限，想先聊聊。" + "🚉".repeat(50);
   const body = conversationInput(text);
   assert.equal(body.text, text);
   assert.equal(Array.from(body.title).length, 37);
@@ -51,8 +52,7 @@ test("自然描述保留完整原文，列表标题不截断Unicode字符且不�
   assert.deepEqual(body.facts, []);
 });
 test("拒绝空白和超长原文，不默默截断用户想法", () => {
-  for (const text of ["", " \n\t", "旅".repeat(4001)])
-    assert.throws(() => conversationInput(text));
+  for (const text of ["", " \n\t", "旅".repeat(4001)]) assert.throws(() => conversationInput(text));
   assert.equal(conversationInput("旅".repeat(4000)).text.length, 4000);
 });
 test("有效追问的自由回答仍走原问题，不取代原运行", () => {
@@ -64,31 +64,16 @@ test("旧卡片、关闭卡片和正在提交的新需求都不能借自由输�
   const { view, card } = waiting();
   assert.equal(replyMode({ ...view, generation: 3 }, card, true), "SYNCING");
   assert.equal(replyMode({ ...view, runId: "another" }, card, true), "SYNCING");
+  assert.equal(replyMode({ ...view, constraintRevision: 4 }, card, true), "SYNCING");
+  assert.equal(replyMode({ ...view, pendingInput: true }, card, true), "SYNCING");
   assert.equal(
-    replyMode({ ...view, constraintRevision: 4 }, card, true),
-    "SYNCING",
-  );
-  assert.equal(
-    replyMode({ ...view, pendingInput: true }, card, true),
-    "SYNCING",
-  );
-  assert.equal(
-    replyMode(
-      view,
-      { ...card, decision: { ...card.decision, state: "CLOSED" } },
-      true,
-    ),
+    replyMode(view, { ...card, decision: { ...card.decision, state: "CLOSED" } }, true),
     "SYNCING",
   );
 });
 test("后续补充是消息，不将自由文本或建议点击解释为接受候选或授权", () => {
   const { view, card } = waiting();
-  for (const state of [
-    "RUNNING",
-    "WAITING_ACCEPTANCE",
-    "PAUSED_QUOTA",
-    "SUCCEEDED",
-  ])
+  for (const state of ["RUNNING", "WAITING_ACCEPTANCE", "PAUSED_QUOTA", "SUCCEEDED"])
     assert.equal(replyMode({ ...view, state }, card, true), "MESSAGE");
   assert.equal(replyMode(null, null, false), "SYNCING");
 });

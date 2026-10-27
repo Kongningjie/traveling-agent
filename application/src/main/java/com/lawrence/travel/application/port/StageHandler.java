@@ -12,6 +12,7 @@ public interface StageHandler {
      * @return 当前处理器是否明确支持
      */
     boolean supports(StageType type);
+
     /**
      * @param claim 持久输入及隔离尝试
      * @return 尚待权威提交的结果

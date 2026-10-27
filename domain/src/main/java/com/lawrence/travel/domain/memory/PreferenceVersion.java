@@ -12,7 +12,9 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.STALE_REVISIO
  */
 public record PreferenceVersion(UUID userId, long revision) {
     /** 保留空偏好集合对应的零版本，拒绝缺失归属和负版本。 */
-    public PreferenceVersion { DomainViolation.require(userId != null && revision >= 0, INVALID_INPUT); }
+    public PreferenceVersion {
+        DomainViolation.require(userId != null && revision >= 0, INVALID_INPUT);
+    }
 
     /**
      * 显式偏好变化后推进版本，写事务必须在稳定版本行再次检查。

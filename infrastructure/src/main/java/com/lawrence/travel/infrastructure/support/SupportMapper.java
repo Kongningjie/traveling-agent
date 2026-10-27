@@ -28,8 +28,8 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT"
-                + " id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id,created_at"
-                + " FROM user_feedback WHERE user_id=#{user} AND id=#{id}")
+                    + " id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id,created_at"
+                    + " FROM user_feedback WHERE user_id=#{user} AND id=#{id}")
     Row own(@Param("user") UUID user, @Param("id") UUID id);
 
     /**
@@ -38,18 +38,20 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT"
-                + " id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id,created_at"
-                + " FROM user_feedback WHERE id=#{id}")
+                    + " id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id,created_at"
+                    + " FROM user_feedback WHERE id=#{id}")
     Row privateRow(@Param("id") UUID id);
 
     /**
      * @param id 反馈
      * @param problemId 问题
      * @param requestHash 幂等摘要
-     * @param targetKind 种类 @param targetScope 范围
+     * @param targetKind 种类
+     * @param targetScope 范围
      * @param targetId 对象
      * @param category 分类
-     * @param description 用户填写 @param consent 单引用许可
+     * @param description 用户填写
+     * @param consent 单引用许可
      * @param referenceId 可空
      * @param chatId 可空
      * @param createdAt 时间
@@ -104,9 +106,9 @@ public interface SupportMapper {
      */
     @Insert(
             "INSERT INTO"
-                + " problem_event(id,user_id,trace_id,span_id,request_id,component,code,severity)"
-                + " VALUES(#{id},#{user},#{link.trace},#{link.span},#{link.request},#{component},#{code},'ERROR')"
-                + " ON CONFLICT DO NOTHING")
+                    + " problem_event(id,user_id,trace_id,span_id,request_id,component,code,severity)"
+                    + " VALUES(#{id},#{user},#{link.trace},#{link.span},#{link.request},#{component},#{code},'ERROR')"
+                    + " ON CONFLICT DO NOTHING")
     int problem(
             @Param("id") UUID id,
             @Param("user") UUID user,
@@ -123,8 +125,8 @@ public interface SupportMapper {
      */
     @Insert(
             "INSERT INTO"
-                + " user_feedback(id,user_id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id)"
-                + " VALUES(#{in.id},#{user},#{problem},#{hash},#{in.target.kind},#{in.target.scope},#{in.target.id},#{in.category},#{in.description},#{in.consent},#{in.reference},#{chat})")
+                    + " user_feedback(id,user_id,problem_id,request_hash,target_kind,target_scope,target_id,category,description,consent,reference_id,chat_id)"
+                    + " VALUES(#{in.id},#{user},#{problem},#{hash},#{in.target.kind},#{in.target.scope},#{in.target.id},#{in.category},#{in.description},#{in.consent},#{in.reference},#{chat})")
     void insert(
             @Param("user") UUID user,
             @Param("in") Support.Input in,
@@ -139,10 +141,10 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT f.id,f.problem_id AS problem,f.category,f.target_kind AS kind,f.target_scope AS"
-                + " scope,f.target_id AS target,g.state,f.created_at AS created FROM user_feedback"
-                + " f JOIN problem_event e ON e.id=f.problem_id JOIN problem_group g ON"
-                + " g.id=e.group_id WHERE f.user_id=#{user} ORDER BY f.created_at DESC,f.id LIMIT"
-                + " 20 OFFSET #{offset}")
+                    + " scope,f.target_id AS target,g.state,f.created_at AS created FROM user_feedback"
+                    + " f JOIN problem_event e ON e.id=f.problem_id JOIN problem_group g ON"
+                    + " g.id=e.group_id WHERE f.user_id=#{user} ORDER BY f.created_at DESC,f.id LIMIT"
+                    + " 20 OFFSET #{offset}")
     List<Summary> feedback(@Param("user") UUID user, @Param("offset") int offset);
 
     /**
@@ -150,7 +152,8 @@ public interface SupportMapper {
      * @param problem 问题
      * @param category 类别
      * @param kind 目标
-     * @param scope 范围 @param target 精确对象
+     * @param scope 范围
+     * @param target 精确对象
      * @param state 聚合状态
      * @param created 时间
      */
@@ -180,8 +183,8 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT EXISTS(SELECT 1 FROM maintenance_grant m JOIN app_user u ON u.id=m.user_id"
-                + " WHERE m.user_id=#{actor} AND u.account_status='ACTIVE' AND (NOT #{sensitive} OR"
-                + " m.sensitive))")
+                    + " WHERE m.user_id=#{actor} AND u.account_status='ACTIVE' AND (NOT #{sensitive} OR"
+                    + " m.sensitive))")
     boolean allowed(@Param("actor") UUID actor, @Param("sensitive") boolean sensitive);
 
     /**
@@ -205,9 +208,9 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT id,component,code,severity,occurrences AS count,first_at AS first,last_at AS"
-                + " last,state,revision,cause,repair,repair_version AS"
-                + " version,regression,representative FROM problem_group WHERE severity<>'INFO' AND"
-                + " occurrences>0 ORDER BY last_at DESC,id LIMIT 20 OFFSET #{offset}")
+                    + " last,state,revision,cause,repair,repair_version AS"
+                    + " version,regression,representative FROM problem_group WHERE severity<>'INFO' AND"
+                    + " occurrences>0 ORDER BY last_at DESC,id LIMIT 20 OFFSET #{offset}")
     List<Support.Group> groups(@Param("offset") int offset);
 
     /**
@@ -216,10 +219,10 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT id,component,code,severity,occurrences AS count,first_at AS first,last_at AS"
-                + " last,state,revision,cause,repair,repair_version AS"
-                + " version,regression,representative FROM problem_group g WHERE id=#{id} OR"
-                + " EXISTS(SELECT 1 FROM problem_event e WHERE e.id=#{id} AND e.group_id=g.id) FOR"
-                + " UPDATE")
+                    + " last,state,revision,cause,repair,repair_version AS"
+                    + " version,regression,representative FROM problem_group g WHERE id=#{id} OR"
+                    + " EXISTS(SELECT 1 FROM problem_event e WHERE e.id=#{id} AND e.group_id=g.id) FOR"
+                    + " UPDATE")
     Support.Group group(@Param("id") UUID id);
 
     /**
@@ -230,8 +233,8 @@ public interface SupportMapper {
      */
     @Update(
             "UPDATE problem_group SET"
-                + " state=#{c.next},revision=revision+1,cause=#{c.cause},repair=#{c.repair},repair_version=#{c.version},regression=#{c.regression},duplicate_of=#{c.duplicateOf},maintained_by=#{actor}"
-                + " WHERE id=#{id} AND revision=#{c.revision}")
+                    + " state=#{c.next},revision=revision+1,cause=#{c.cause},repair=#{c.repair},repair_version=#{c.version},regression=#{c.regression},duplicate_of=#{c.duplicateOf},maintained_by=#{actor}"
+                    + " WHERE id=#{id} AND revision=#{c.revision}")
     int change(@Param("actor") UUID actor, @Param("id") UUID id, @Param("c") Support.Change c);
 
     /**
@@ -240,8 +243,8 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT id,trace_id AS trace,span_id AS span,request_id AS request,created_at AS"
-                + " created FROM problem_event WHERE group_id=#{group} ORDER BY created_at DESC,id"
-                + " LIMIT 100")
+                    + " created FROM problem_event WHERE group_id=#{group} ORDER BY created_at DESC,id"
+                    + " LIMIT 100")
     List<Support.Event> events(@Param("group") UUID group);
 
     /**
@@ -250,8 +253,8 @@ public interface SupportMapper {
      */
     @Select(
             "SELECT id,parent_id AS parent,kind,state,code,started_at AS started,ended_at AS"
-                + " ended,run_id AS run FROM execution_trace_span WHERE trace_id=#{trace} ORDER BY"
-                + " started_at,id LIMIT 201")
+                    + " ended,run_id AS run FROM execution_trace_span WHERE trace_id=#{trace} ORDER BY"
+                    + " started_at,id LIMIT 201")
     List<Support.Span> spans(@Param("trace") UUID trace);
 
     /**

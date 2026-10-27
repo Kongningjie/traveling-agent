@@ -12,11 +12,15 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.SCOPE_MISMATC
  */
 public record TaskScope(UUID userId, UUID taskId) {
     /** 归属字段不可缺失。 */
-    public TaskScope { DomainViolation.require(userId != null && taskId != null, INVALID_INPUT); }
+    public TaskScope {
+        DomainViolation.require(userId != null && taskId != null, INVALID_INPUT);
+    }
 
     /**
      * 比较关联归属；最终持久化路径仍须带归属条件。
      * @param other 关联对象归属
      */
-    public void requireSame(TaskScope other) { DomainViolation.require(equals(other), SCOPE_MISMATCH); }
+    public void requireSame(TaskScope other) {
+        DomainViolation.require(equals(other), SCOPE_MISMATCH);
+    }
 }

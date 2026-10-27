@@ -12,7 +12,8 @@ public record TokenUsage(long inputTokens, long outputTokens) {
      * @throws ArithmeticException 总 Token 数溢出 long
      */
     public TokenUsage {
-        if (inputTokens < 0 || outputTokens < 0) throw new IllegalArgumentException("Negative token usage");
+        if (inputTokens < 0 || outputTokens < 0)
+            throw new IllegalArgumentException("Negative token usage");
         Math.addExact(inputTokens, outputTokens);
     }
 }

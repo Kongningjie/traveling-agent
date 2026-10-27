@@ -19,7 +19,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 class LifecycleGateTest {
     /**
      * * 容量满只拒绝新正文，不阻断读取、停止、删除或CSRF。
-     *
      * @throws Exception Servlet调用失败
      */
     @Test
@@ -51,7 +50,6 @@ class LifecycleGateTest {
 
     /**
      * * 最新清单尚未恢复时私有资料失败关闭，明确停止仍可进入原鉴权用例。
-     *
      * @throws Exception Servlet调用失败
      */
     @Test

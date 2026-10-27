@@ -23,8 +23,11 @@ public final class TravelStorageService {
      * @param transactions 同源短事务
      * @param changes 原子失效旧运行，不触发模型调用
      */
-    public TravelStorageService(TravelStore store, BusinessTransactions transactions, TaskChangeObserver changes) {
-        this.store = java.util.Objects.requireNonNull(store); this.transactions = transactions; this.changes = changes;
+    public TravelStorageService(
+            TravelStore store, BusinessTransactions transactions, TaskChangeObserver changes) {
+        this.store = java.util.Objects.requireNonNull(store);
+        this.transactions = transactions;
+        this.changes = changes;
     }
 
     /**
@@ -34,7 +37,8 @@ public final class TravelStorageService {
      * @param content 初始需求
      * @return 创建或重放结果
      */
-    public TravelStore.StoredTask create(UserIdentity actor, String key, String title, TravelStore.RevisionContent content) {
+    public TravelStore.StoredTask create(
+            UserIdentity actor, String key, String title, TravelStore.RevisionContent content) {
         return store.create(requireActor(actor), key, title, content);
     }
 
@@ -66,12 +70,25 @@ public final class TravelStorageService {
      * @param sequence 输入序号
      * @return 修改登记结果，不表示执行已启动
      */
-    public TravelStore.StoredTask registerChange(UserIdentity actor, UUID taskId, String key, long expected, UUID inputId, long sequence) {
-        return transactions.required(() -> {
-            var result = store.registerChange(new TaskScope(requireActor(actor), taskId), key, expected, inputId, sequence);
-            changes.changed(new TaskScope(actor.id(), taskId));
-            return result;
-        });
+    public TravelStore.StoredTask registerChange(
+            UserIdentity actor,
+            UUID taskId,
+            String key,
+            long expected,
+            UUID inputId,
+            long sequence) {
+        return transactions.required(
+                () -> {
+                    var result =
+                            store.registerChange(
+                                    new TaskScope(requireActor(actor), taskId),
+                                    key,
+                                    expected,
+                                    inputId,
+                                    sequence);
+                    changes.changed(new TaskScope(actor.id(), taskId));
+                    return result;
+                });
     }
 
     /**
@@ -83,8 +100,15 @@ public final class TravelStorageService {
      * @param content 已确认完整需求
      * @return 追加结果；本方法不负责模型解析或确认授权
      */
-    public TravelStore.StoredTask appendRevision(UserIdentity actor, UUID taskId, String key, long expected, UUID inputId, TravelStore.RevisionContent content) {
-        return store.appendRevision(new TaskScope(requireActor(actor), taskId), key, expected, inputId, content);
+    public TravelStore.StoredTask appendRevision(
+            UserIdentity actor,
+            UUID taskId,
+            String key,
+            long expected,
+            UUID inputId,
+            TravelStore.RevisionContent content) {
+        return store.appendRevision(
+                new TaskScope(requireActor(actor), taskId), key, expected, inputId, content);
     }
 
     /**
@@ -103,7 +127,8 @@ public final class TravelStorageService {
      * @param payload 草案正文
      * @return 已存草案；不通过本方法授予接受资格
      */
-    public TravelStore.StoredSnapshot saveDraft(UserIdentity actor, ItineraryVersion version, String payload) {
+    public TravelStore.StoredSnapshot saveDraft(
+            UserIdentity actor, ItineraryVersion version, String payload) {
         if (version == null || !requireActor(actor).equals(version.scope().userId())) {
             throw new TravelStorageFailure(TravelStorageFailure.Code.NOT_FOUND);
         }
@@ -127,7 +152,8 @@ public final class TravelStorageService {
      * @param limit 大小
      * @return 快照元信息分页
      */
-    public List<ItineraryVersion> snapshots(UserIdentity actor, UUID taskId, int offset, int limit) {
+    public List<ItineraryVersion> snapshots(
+            UserIdentity actor, UUID taskId, int offset, int limit) {
         return store.snapshots(new TaskScope(requireActor(actor), taskId), offset, limit);
     }
 

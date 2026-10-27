@@ -24,13 +24,21 @@ public class IdentityConfiguration {
      * @param strength 自适应强度
      * @return 密码端口
      */
-    @Bean PasswordHasher passwordHasher(@Value("${travel.identity.password-strength:12}") int strength) { return new BcryptPasswordHasher(strength); }
+    @Bean
+    PasswordHasher passwordHasher(@Value("${travel.identity.password-strength:12}") int strength) {
+        return new BcryptPasswordHasher(strength);
+    }
+
     /**
      * 装配原子限流。
      * @param redis 既有 Redis 连接
      * @return 不降级放行的限流端口
      */
-    @Bean AuthRateLimiter authRateLimiter(StringRedisTemplate redis) { return new RedisAuthRateLimiter(redis, Clock.systemUTC()); }
+    @Bean
+    AuthRateLimiter authRateLimiter(StringRedisTemplate redis) {
+        return new RedisAuthRateLimiter(redis, Clock.systemUTC());
+    }
+
     /**
      * 明确认证用例及窗口，不在 Controller 中直调基础设施。
      * @param accounts 账号端口
@@ -42,26 +50,44 @@ public class IdentityConfiguration {
      * @param window 窗口长度
      * @return 身份用例
      */
-    @Bean IdentityService identityService(AccountStore accounts, PasswordHasher passwords, AuthRateLimiter rates,
+    @Bean
+    IdentityService identityService(
+            AccountStore accounts,
+            PasswordHasher passwords,
+            AuthRateLimiter rates,
             @Value("${travel.identity.address-logins:30}") int addressLogins,
             @Value("${travel.identity.account-logins:10}") int accountLogins,
             @Value("${travel.identity.address-registrations:10}") int registrations,
             @Value("${travel.identity.rate-window:1m}") Duration window) {
-        return new IdentityService(accounts, passwords, rates, new IdentityService.Limits(addressLogins, accountLogins, registrations, window));
+        return new IdentityService(
+                accounts,
+                passwords,
+                rates,
+                new IdentityService.Limits(addressLogins, accountLogins, registrations, window));
     }
-    /** @return 无状态应用归属守卫，后续资源用例复用 */
-    @Bean OwnershipGuard ownershipGuard() { return new OwnershipGuard(); }
+
+    /**
+     * @return 无状态应用归属守卫，后续资源用例复用
+     */
+    @Bean
+    OwnershipGuard ownershipGuard() {
+        return new OwnershipGuard();
+    }
+
     /**
      * Cookie 仅含会话 ID；本地 HTTP 是明确例外，默认配置仍要求 Secure。
      * @param secure 是否要求 HTTPS
      * @return 统一会话 Cookie 策略
      */
-    @Bean org.springframework.session.web.http.DefaultCookieSerializer sessionCookieSerializer(
+    @Bean
+    org.springframework.session.web.http.DefaultCookieSerializer sessionCookieSerializer(
             @Value("${server.servlet.session.cookie.secure:true}") boolean secure) {
         var cookies = new org.springframework.session.web.http.DefaultCookieSerializer();
-        cookies.setCookieName("SESSION"); cookies.setCookiePath("/"); cookies.setUseHttpOnlyCookie(true);
-        cookies.setSameSite("Lax"); cookies.setUseSecureCookie(secure);
+        cookies.setCookieName("SESSION");
+        cookies.setCookiePath("/");
+        cookies.setUseHttpOnlyCookie(true);
+        cookies.setSameSite("Lax");
+        cookies.setUseSecureCookie(secure);
         return cookies;
     }
-
 }

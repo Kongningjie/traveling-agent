@@ -17,8 +17,8 @@ public class ExecutionResourcesConfiguration {
      */
     @Bean(destroyMethod = "close")
     BoundedExecutionResources executionResources(ExecutionControlProperties properties) {
-        return new BoundedExecutionResources(properties.limits().activeRuns(),
-                properties.limits().researchConcurrencyPerRun());
+        return new BoundedExecutionResources(
+                properties.limits().activeRuns(), properties.limits().researchConcurrencyPerRun());
     }
 
     /**
@@ -28,5 +28,7 @@ public class ExecutionResourcesConfiguration {
      */
     @Bean
     @Profile("smoke")
-    ExecutionProbe executionProbe(ExecutionResources resources) { return new ExecutionProbe(resources); }
+    ExecutionProbe executionProbe(ExecutionResources resources) {
+        return new ExecutionProbe(resources);
+    }
 }

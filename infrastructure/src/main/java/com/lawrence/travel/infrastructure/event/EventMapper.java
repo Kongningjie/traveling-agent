@@ -21,8 +21,18 @@ public interface EventMapper {
      * @param requirements 需求 JSON
      * @param itinerary 快照 JSON，可空
      */
-    record ViewRow(UUID id, long constraintRevision, long executionGeneration, UUID currentVersionId, UUID currentRunId,
-                   String state, boolean pendingInput, long eventSequence, String requirements, String itinerary) { }
+    record ViewRow(
+            UUID id,
+            long constraintRevision,
+            long executionGeneration,
+            UUID currentVersionId,
+            UUID currentRunId,
+            String state,
+            boolean pendingInput,
+            long eventSequence,
+            String requirements,
+            String itinerary) {}
+
     /**
      * @param sequence 任务顺序
      * @param runId 原运行
@@ -32,12 +42,21 @@ public interface EventMapper {
      * @param state 当时状态
      * @param createdAt 提交事件时间
      */
-    record EventRow(long sequence, UUID runId, long generation, UUID stepId, String type, String state, Instant createdAt) { }
+    record EventRow(
+            long sequence,
+            UUID runId,
+            long generation,
+            UUID stepId,
+            String type,
+            String state,
+            Instant createdAt) {}
+
     /**
      * @param scope 私有归属
      * @return 单个 MVCC 语句内的一致视图，不能拆成两次 READ COMMITTED 查询
      */
-    @Select("""
+    @Select(
+            """
             SELECT t.id,t.constraint_revision,t.execution_generation,t.current_version_id,t.current_run_id,
             r.body->>'state' AS state,((t.pending_inputs<>'{}'::jsonb) OR EXISTS(
               SELECT 1 FROM dialogue_chat dc JOIN dialogue_input di ON di.chat_id=dc.id AND di.user_id=dc.user_id
@@ -50,22 +69,27 @@ public interface EventMapper {
             WHERE t.user_id=#{scope.userId} AND t.id=#{scope.taskId}
             """)
     ViewRow view(@Param("scope") TaskScope scope);
+
     /**
      * @param scope 私有归属
      * @return 轻量水位或空；高频订阅不得反复加载快照和需求大正文
      */
-    @Select("SELECT event_sequence FROM travel_task WHERE user_id=#{scope.userId} AND id=#{scope.taskId}")
+    @Select(
+            "SELECT event_sequence FROM travel_task WHERE user_id=#{scope.userId} AND id=#{scope.taskId}")
     Long head(@Param("scope") TaskScope scope);
+
     /**
      * @param scope 私有归属
      * @param after 精确水位
      * @param limit 含额外一条的有界大小
      * @return 只读取已提交记录，事务计数器保证序号与提交顺序一致
      */
-    @Select("""
+    @Select(
+            """
             SELECT sequence,run_id,generation,step_id,type,payload->>'state' AS state,created_at
             FROM run_event WHERE user_id=#{scope.userId} AND task_id=#{scope.taskId} AND sequence>#{after}
             ORDER BY sequence LIMIT #{limit}
             """)
-    List<EventRow> page(@Param("scope") TaskScope scope, @Param("after") long after, @Param("limit") int limit);
+    List<EventRow> page(
+            @Param("scope") TaskScope scope, @Param("after") long after, @Param("limit") int limit);
 }

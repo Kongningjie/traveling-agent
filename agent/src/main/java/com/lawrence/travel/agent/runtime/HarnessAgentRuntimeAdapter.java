@@ -52,8 +52,11 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
      * @param keySupplier 本机凭证提供器，不记录其结果
      * @param workspaceRoot 隔离工作区根目录
      */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models,
-                                     Supplier<String> keySupplier, Path workspaceRoot) {
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot) {
         this(admission, models, keySupplier, workspaceRoot, (run, role) -> new Toolkit());
     }
 
@@ -65,39 +68,161 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
      * @param workspaceRoot 工作区
      * @param toolkits 每次调用工具集工厂
      */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models,
-                                     Supplier<String> keySupplier, Path workspaceRoot,
-                                     java.util.function.BiFunction<UUID, String, Toolkit> toolkits) {
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits) {
         this(admission, models, keySupplier, workspaceRoot, toolkits, null, null);
     }
-    /** @param admission 门禁 @param models 型号 @param keySupplier 本机凭据 @param workspaceRoot 隔离目录 @param toolkits 白名单工具 @param contexts 业务上下文用例 @param json 严格JSON */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String, String> models, Supplier<String> keySupplier, Path workspaceRoot, java.util.function.BiFunction<UUID, String, Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts, com.lawrence.travel.application.port.InteractionCodec json) {
-        this(admission,models,keySupplier,workspaceRoot,toolkits,contexts,json,null,com.lawrence.travel.application.safety.SafetyGate.local());
+
+    /**
+     * @param admission 门禁
+     * @param models 型号
+     * @param keySupplier 本机凭据
+     * @param workspaceRoot 隔离目录
+     * @param toolkits 白名单工具
+     * @param contexts 业务上下文用例
+     * @param json 严格JSON
+     */
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits,
+            com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json) {
+        this(
+                admission,
+                models,
+                keySupplier,
+                workspaceRoot,
+                toolkits,
+                contexts,
+                json,
+                null,
+                com.lawrence.travel.application.safety.SafetyGate.local());
     }
-    /** @param admission 同一计量 @param models 型号 @param keySupplier 本机凭据 @param workspaceRoot 隔离工作区 @param toolkits 白名单 @param contexts 兼容权威源 @param json JSON @param sessions 统一会话 @param safety 基础安全检查 */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
-            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
-            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions, com.lawrence.travel.application.safety.SafetyGate safety) {
-        this(admission, models, keySupplier, workspaceRoot, toolkits, contexts, json, sessions, safety, null, null, null);
+
+    /**
+     * @param admission 同一计量
+     * @param models 型号
+     * @param keySupplier 本机凭据
+     * @param workspaceRoot 隔离工作区
+     * @param toolkits 白名单
+     * @param contexts 兼容权威源
+     * @param json JSON
+     * @param sessions 统一会话
+     * @param safety 基础安全检查
+     */
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits,
+            com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json,
+            com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety) {
+        this(
+                admission,
+                models,
+                keySupplier,
+                workspaceRoot,
+                toolkits,
+                contexts,
+                json,
+                sessions,
+                safety,
+                null,
+                null,
+                null);
     }
-    /** @param admission 统一准入 @param models 白名单 @param keySupplier 本机凭据 @param workspaceRoot 隔离工作区 @param toolkits 外部工具白名单 @param contexts 业务源 @param json JSON @param sessions PG会话 @param safety 安全 @param sourceReads 本地资料 @param sourceLedger 原预算计量 @param sourceLimits 预算初值 */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
-            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
-            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions,
-            com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.document.SourceReadService sourceReads,
-            com.lawrence.travel.application.port.BudgetLedger sourceLedger, com.lawrence.travel.domain.execution.control.RunLimits sourceLimits) {
-        this(admission,models,keySupplier,workspaceRoot,toolkits,contexts,json,sessions,safety,sourceReads,sourceLedger,sourceLimits,com.lawrence.travel.application.port.ExecutionTrace.disabled());
+
+    /**
+     * @param admission 统一准入
+     * @param models 白名单
+     * @param keySupplier 本机凭据
+     * @param workspaceRoot 隔离工作区
+     * @param toolkits 外部工具白名单
+     * @param contexts 业务源
+     * @param json JSON
+     * @param sessions PG会话
+     * @param safety 安全
+     * @param sourceReads 本地资料
+     * @param sourceLedger 原预算计量
+     * @param sourceLimits 预算初值
+     */
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits,
+            com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json,
+            com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety,
+            com.lawrence.travel.application.document.SourceReadService sourceReads,
+            com.lawrence.travel.application.port.BudgetLedger sourceLedger,
+            com.lawrence.travel.domain.execution.control.RunLimits sourceLimits) {
+        this(
+                admission,
+                models,
+                keySupplier,
+                workspaceRoot,
+                toolkits,
+                contexts,
+                json,
+                sessions,
+                safety,
+                sourceReads,
+                sourceLedger,
+                sourceLimits,
+                com.lawrence.travel.application.port.ExecutionTrace.disabled());
     }
-    /** @param admission 准入 @param models 型号 @param keySupplier 凭据 @param workspaceRoot 工作区 @param toolkits 白名单 @param contexts 权威源 @param json JSON @param sessions 会话 @param safety 安全 @param sourceReads 资料 @param sourceLedger 计量 @param sourceLimits 限制 @param trace 执行事实 */
-    public HarnessAgentRuntimeAdapter(ModelCallAdmission admission, Map<String,String> models, Supplier<String> keySupplier, Path workspaceRoot,
-            java.util.function.BiFunction<UUID,String,Toolkit> toolkits, com.lawrence.travel.application.memory.ContextAssembler contexts,
-            com.lawrence.travel.application.port.InteractionCodec json, com.lawrence.travel.application.memory.SessionContextService sessions,
-            com.lawrence.travel.application.safety.SafetyGate safety, com.lawrence.travel.application.document.SourceReadService sourceReads,
-            com.lawrence.travel.application.port.BudgetLedger sourceLedger, com.lawrence.travel.domain.execution.control.RunLimits sourceLimits,
+
+    /**
+     * @param admission 准入
+     * @param models 型号
+     * @param keySupplier 凭据
+     * @param workspaceRoot 工作区
+     * @param toolkits 白名单
+     * @param contexts 权威源
+     * @param json JSON
+     * @param sessions 会话
+     * @param safety 安全
+     * @param sourceReads 资料
+     * @param sourceLedger 计量
+     * @param sourceLimits 限制
+     * @param trace 执行事实
+     */
+    public HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits,
+            com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json,
+            com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety,
+            com.lawrence.travel.application.document.SourceReadService sourceReads,
+            com.lawrence.travel.application.port.BudgetLedger sourceLedger,
+            com.lawrence.travel.domain.execution.control.RunLimits sourceLimits,
             com.lawrence.travel.application.port.ExecutionTrace trace) {
-        this.trace=trace;
-        this.sourceReads=sourceReads; this.sourceLedger=sourceLedger; this.sourceLimits=sourceLimits;
-        this.contexts = contexts; this.json = json; this.sessions=sessions; this.safety=safety==null?com.lawrence.travel.application.safety.SafetyGate.local():safety;
+        this.trace = trace;
+        this.sourceReads = sourceReads;
+        this.sourceLedger = sourceLedger;
+        this.sourceLimits = sourceLimits;
+        this.contexts = contexts;
+        this.json = json;
+        this.sessions = sessions;
+        this.safety =
+                safety == null ? com.lawrence.travel.application.safety.SafetyGate.local() : safety;
         this.admission = admission;
         this.models = Map.copyOf(models);
         this.keySupplier = keySupplier;
@@ -105,7 +230,9 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         this.toolkits = toolkits;
     }
 
-    /** @return 固定框架类型，仅用于依赖接线检查 */
+    /**
+     * @return 固定框架类型，仅用于依赖接线检查
+     */
     public Class<?> frameworkType() {
         return HarnessAgent.class;
     }
@@ -121,14 +248,50 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     public Invocation start(UUID runId, String role, String prompt) {
         return startInvocation(runId, role, prompt, true);
     }
+
     /** {@inheritDoc} 原文提取等场景禁用所有框架工具，网页不能诱导额外付费动作。 */
-    @Override public Invocation startWithoutTools(UUID runId, String role, String prompt) { return startInvocation(runId, role, prompt, false); }
+    @Override
+    public Invocation startWithoutTools(UUID runId, String role, String prompt) {
+        return startInvocation(runId, role, prompt, false);
+    }
+
     /** {@inheritDoc} 业务入口强制使用数据库版本化上下文，不降级为原始调用。 */
-    @Override public Invocation startContextual(UUID runId, String role, String prompt, com.lawrence.travel.application.memory.AgentContext.Basis basis) { if ((sessions == null && contexts == null) || json == null || basis == null) throw new IllegalStateException("CONTEXT_NOT_CONFIGURED"); return startInvocation(runId, role, prompt, false, basis); }
-    /** @param runId 原运行 @param role 模型配置角色 @param prompt 有界文本 @param allowTools 是否允许既有白名单工具 @return 隔离调用，全部经过相同门禁 */
-    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) { return startInvocation(runId, role, prompt, allowTools, null); }
-    /** @param runId 原运行 @param role 角色 @param prompt 当前请求 @param allowTools 工具权限 @param basis 业务输入版本，原始探针可空 @return 压缩与主调用共用传输及预算 */
-    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools, com.lawrence.travel.application.memory.AgentContext.Basis basis) {
+    @Override
+    public Invocation startContextual(
+            UUID runId,
+            String role,
+            String prompt,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis) {
+        if ((sessions == null && contexts == null) || json == null || basis == null)
+            throw new IllegalStateException("CONTEXT_NOT_CONFIGURED");
+        return startInvocation(runId, role, prompt, false, basis);
+    }
+
+    /**
+     * @param runId 原运行
+     * @param role 模型配置角色
+     * @param prompt 有界文本
+     * @param allowTools 是否允许既有白名单工具
+     * @return 隔离调用，全部经过相同门禁
+     */
+    private Invocation startInvocation(UUID runId, String role, String prompt, boolean allowTools) {
+        return startInvocation(runId, role, prompt, allowTools, null);
+    }
+
+    /**
+     * @param runId 原运行
+     * @param role 角色
+     * @param prompt 当前请求
+     * @param allowTools 工具权限
+     * @param basis 业务输入版本，原始探针可空
+     * @return 压缩与主调用共用传输及预算
+     */
+    private Invocation startInvocation(
+            UUID runId,
+            String role,
+            String prompt,
+            boolean allowTools,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis) {
         if (admission == null) throw new IllegalStateException("EXTERNAL_DISABLED");
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
@@ -136,66 +299,260 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         if (prompt == null || prompt.isBlank() || prompt.length() > 131072) {
             throw new IllegalArgumentException("MODEL_INPUT_INVALID");
         }
-        safety.require("INPUT",prompt);
+        safety.require("INPUT", prompt);
         String key = keySupplier.get();
-        if (key == null || key.isBlank()) throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
+        if (key == null || key.isBlank())
+            throw new IllegalStateException("MODEL_CREDENTIAL_MISSING");
         // 只为有原领取身份的协调请求开放资料工具；原文提取、审核及普通探针仍无资料读取权。
-        Toolkit toolkit = basis != null && basis.attemptToken() != null && role.equals("coordinator") && sourceReads != null
-                ? new SourceToolkit(sourceReads, runId, basis.attemptToken(), sourceLedger, sourceLimits, trace)
-                : allowTools ? toolkits.apply(runId, role) : new Toolkit();
-        var source = new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.AgentContext.Source>();
-        var sessionSource=new java.util.concurrent.atomic.AtomicReference<com.lawrence.travel.application.memory.SessionContext.Source>();
-        var transport = new GuardedDashScopeTransport(admission, runId, role, client, () -> {
-            if(toolkit instanceof SafetyToolkit boundary) boundary.check();
-            if(sessionSource.get()!=null) sessions.guard(sessionSource.get()); else if (source.get() != null) contexts.guard(source.get());
-        });
-        if (toolkit instanceof SourceToolkit sources) transport.contextHeadroom(sources::contextHeadroom);
-        var model = DashScopeChatModel.builder().apiKey(key).modelName(models.get(role))
-                .baseUrl("https://dashscope.aliyuncs.com").endpointType(EndpointType.MULTIMODAL)
-                .stream(true).enableThinking(false).enableSearch(false).httpTransport(transport)
-                .defaultOptions(GenerateOptions.builder().maxTokens(role.equals("planner") ? 12288 : 4096)
-                        .executionConfig(ExecutionConfig.builder().maxAttempts(1).build()).build()).build();
-        var harness = RestrictedHarnessFactory.create(model, toolkit,
-                workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()), role);
+        Toolkit toolkit =
+                basis != null
+                                && basis.attemptToken() != null
+                                && role.equals("coordinator")
+                                && sourceReads != null
+                        ? new SourceToolkit(
+                                sourceReads,
+                                runId,
+                                basis.attemptToken(),
+                                sourceLedger,
+                                sourceLimits,
+                                trace)
+                        : allowTools ? toolkits.apply(runId, role) : new Toolkit();
+        var source =
+                new java.util.concurrent.atomic.AtomicReference<
+                        com.lawrence.travel.application.memory.AgentContext.Source>();
+        var sessionSource =
+                new java.util.concurrent.atomic.AtomicReference<
+                        com.lawrence.travel.application.memory.SessionContext.Source>();
+        var transport =
+                new GuardedDashScopeTransport(
+                        admission,
+                        runId,
+                        role,
+                        client,
+                        () -> {
+                            if (toolkit instanceof SafetyToolkit boundary) boundary.check();
+                            if (sessionSource.get() != null) sessions.guard(sessionSource.get());
+                            else if (source.get() != null) contexts.guard(source.get());
+                        });
+        if (toolkit instanceof SourceToolkit sources)
+            transport.contextHeadroom(sources::contextHeadroom);
+        var model =
+                DashScopeChatModel.builder()
+                        .apiKey(key)
+                        .modelName(models.get(role))
+                        .baseUrl("https://dashscope.aliyuncs.com")
+                        .endpointType(EndpointType.MULTIMODAL)
+                        .stream(true)
+                        .enableThinking(false)
+                        .enableSearch(false)
+                        .httpTransport(transport)
+                        .defaultOptions(
+                                GenerateOptions.builder()
+                                        .maxTokens(role.equals("planner") ? 12288 : 4096)
+                                        .executionConfig(
+                                                ExecutionConfig.builder().maxAttempts(1).build())
+                                        .build())
+                        .build();
+        var harness =
+                RestrictedHarnessFactory.create(
+                        model,
+                        toolkit,
+                        workspaceRoot
+                                .resolve(runId.toString())
+                                .resolve(UUID.randomUUID().toString()),
+                        role);
         var invocation = new ActiveInvocation(harness, transport, safety);
-        var firstHarness=new AtomicBoolean(true);
-        Supplier<HarnessAgent> factory=() -> firstHarness.compareAndSet(true,false)?harness:RestrictedHarnessFactory.create(model,toolkit,workspaceRoot.resolve(runId.toString()).resolve(UUID.randomUUID().toString()),role);
-        var correlation=com.lawrence.travel.application.execution.ExecutionCorrelation.current(); var parent=com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan(); var traceParent=com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent();
-        Thread.startVirtualThread(() -> {
-            try(var ids=com.lawrence.travel.application.execution.ExecutionCorrelation.bind(correlation); var span=com.lawrence.travel.application.execution.ExecutionCorrelation.bindSpan(parent); var traceBinding=com.lawrence.travel.application.execution.ExecutionCorrelation.bindTrace(traceParent);
-                    var roleSpan=trace.open(runId,role.equals("reviewer")?com.lawrence.travel.application.port.ExecutionTrace.Kind.REVIEW:role.equals("planner")?com.lawrence.travel.application.port.ExecutionTrace.Kind.PLAN:role.equals("research")?com.lawrence.travel.application.port.ExecutionTrace.Kind.DELEGATE:com.lawrence.travel.application.port.ExecutionTrace.Kind.COORDINATE,Map.of("role",role,"schema","structured-reply-v1"))) {
-                transport.traceParent(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());
-                java.util.function.Function<Boolean,List<Msg>> prepare=emergency -> {
-                    try(var contextSpan=trace.open(runId,com.lawrence.travel.application.port.ExecutionTrace.Kind.CONTEXT,Map.of("role",role,"schema","session-context-v1"))) {
-                    try {
-                    if(sessions!=null && basis!=null) {
-                        var prepared=sessions.prepare(runId,role,prompt,basis,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport),emergency,sessionSource::set);
-                        return sessionMessages(prepared);
+        var firstHarness = new AtomicBoolean(true);
+        Supplier<HarnessAgent> factory =
+                () ->
+                        firstHarness.compareAndSet(true, false)
+                                ? harness
+                                : RestrictedHarnessFactory.create(
+                                        model,
+                                        toolkit,
+                                        workspaceRoot
+                                                .resolve(runId.toString())
+                                                .resolve(UUID.randomUUID().toString()),
+                                        role);
+        var correlation = com.lawrence.travel.application.execution.ExecutionCorrelation.current();
+        var parent = com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
+        var traceParent =
+                com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent();
+        Thread.startVirtualThread(
+                () -> {
+                    try (var ids =
+                                    com.lawrence.travel.application.execution.ExecutionCorrelation
+                                            .bind(correlation);
+                            var span =
+                                    com.lawrence.travel.application.execution.ExecutionCorrelation
+                                            .bindSpan(parent);
+                            var traceBinding =
+                                    com.lawrence.travel.application.execution.ExecutionCorrelation
+                                            .bindTrace(traceParent);
+                            var roleSpan =
+                                    trace.open(
+                                            runId,
+                                            role.equals("reviewer")
+                                                    ? com.lawrence.travel.application.port
+                                                            .ExecutionTrace.Kind.REVIEW
+                                                    : role.equals("planner")
+                                                            ? com.lawrence.travel.application.port
+                                                                    .ExecutionTrace.Kind.PLAN
+                                                            : role.equals("research")
+                                                                    ? com.lawrence.travel
+                                                                            .application.port
+                                                                            .ExecutionTrace.Kind
+                                                                            .DELEGATE
+                                                                    : com.lawrence.travel
+                                                                            .application.port
+                                                                            .ExecutionTrace.Kind
+                                                                            .COORDINATE,
+                                            Map.of(
+                                                    "role",
+                                                    role,
+                                                    "schema",
+                                                    "structured-reply-v1"))) {
+                        transport.traceParent(
+                                com.lawrence.travel.application.execution.ExecutionCorrelation
+                                        .traceParent());
+                        java.util.function.Function<Boolean, List<Msg>> prepare =
+                                emergency -> {
+                                    try (var contextSpan =
+                                            trace.open(
+                                                    runId,
+                                                    com.lawrence.travel.application.port
+                                                            .ExecutionTrace.Kind.CONTEXT,
+                                                    Map.of(
+                                                            "role",
+                                                            role,
+                                                            "schema",
+                                                            "session-context-v1"))) {
+                                        try {
+                                            if (sessions != null && basis != null) {
+                                                var prepared =
+                                                        sessions.prepare(
+                                                                runId,
+                                                                role,
+                                                                prompt,
+                                                                basis,
+                                                                new TracedCompression(
+                                                                        new HarnessContextCompression(
+                                                                                model,
+                                                                                json,
+                                                                                source::set),
+                                                                        trace,
+                                                                        runId,
+                                                                        transport),
+                                                                emergency,
+                                                                sessionSource::set);
+                                                return sessionMessages(prepared);
+                                            }
+                                            String text =
+                                                    basis == null
+                                                            ? prompt
+                                                            : contexts.prepare(
+                                                                            runId,
+                                                                            role,
+                                                                            basis,
+                                                                            prompt,
+                                                                            new TracedCompression(
+                                                                                    new HarnessContextCompression(
+                                                                                            model,
+                                                                                            json,
+                                                                                            source
+                                                                                                    ::set),
+                                                                                    trace,
+                                                                                    runId,
+                                                                                    transport))
+                                                                    .prompt();
+                                            return List.of(
+                                                    Msg.builder()
+                                                            .name("user")
+                                                            .role(MsgRole.USER)
+                                                            .content(
+                                                                    TextBlock.builder()
+                                                                            .text(text)
+                                                                            .build())
+                                                            .build());
+                                        } catch (RuntimeException failure) {
+                                            contextSpan.fail(
+                                                    com.lawrence.travel.application.port
+                                                            .ExecutionTrace.Failure.FAILED);
+                                            throw failure;
+                                        }
+                                    } finally {
+                                        transport.traceParent(
+                                                com.lawrence.travel.application.execution
+                                                        .ExecutionCorrelation.traceParent());
+                                    }
+                                };
+                        invocation.execute(
+                                () -> prepare.apply(false),
+                                () -> {
+                                    if (sessions == null || basis == null)
+                                        throw new CallRejectedException(
+                                                CallRejectedException.Reason
+                                                        .CONTEXT_BUDGET_EXHAUSTED);
+                                    return prepare.apply(true);
+                                },
+                                factory,
+                                () -> {
+                                    if (firstHarness.compareAndSet(true, false)) harness.close();
+                                });
+                        if (invocation.result.isCompletedExceptionally())
+                            roleSpan.fail(
+                                    invocation.cancelled.get()
+                                            ? com.lawrence.travel.application.port.ExecutionTrace
+                                                    .Failure.CANCELLED
+                                            : com.lawrence.travel.application.port.ExecutionTrace
+                                                    .Failure.FAILED);
+                    } catch (RuntimeException failure) {
+                        try {
+                            transport.close();
+                            harness.close();
+                        } finally {
+                            invocation.result.completeExceptionally(
+                                    new IllegalStateException("TRACE_EXECUTION_FAILED"));
+                            invocation.exited.countDown();
+                        }
                     }
-                    String text=basis==null?prompt:contexts.prepare(runId,role,basis,prompt,new TracedCompression(new HarnessContextCompression(model,json,source::set),trace,runId,transport)).prompt();
-                    return List.of(Msg.builder().name("user").role(MsgRole.USER).content(TextBlock.builder().text(text).build()).build());
-                    } catch(RuntimeException failure) {contextSpan.fail(com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);throw failure;}
-                    } finally {transport.traceParent(com.lawrence.travel.application.execution.ExecutionCorrelation.traceParent());}
-                };
-                invocation.execute(() -> prepare.apply(false),() -> {
-                    if(sessions==null || basis==null) throw new CallRejectedException(CallRejectedException.Reason.CONTEXT_BUDGET_EXHAUSTED);
-                    return prepare.apply(true);
-                },factory,() -> { if(firstHarness.compareAndSet(true,false)) harness.close(); });
-                if(invocation.result.isCompletedExceptionally())roleSpan.fail(invocation.cancelled.get()?com.lawrence.travel.application.port.ExecutionTrace.Failure.CANCELLED:com.lawrence.travel.application.port.ExecutionTrace.Failure.FAILED);
-            } catch(RuntimeException failure) {try {transport.close();harness.close();}finally{invocation.result.completeExceptionally(new IllegalStateException("TRACE_EXECUTION_FAILED"));invocation.exited.countDown();}}
-        });
+                });
         return invocation;
     }
 
-    /** @param prepared 已校验权威快照 @return 历史单独标识，发送超限时只可卸载历史；末条完整权威区和本轮请求永不裁剪 */
-    static List<Msg> sessionMessages(com.lawrence.travel.application.memory.SessionContext.Prepared prepared) {
-        return java.util.stream.IntStream.range(0, prepared.messages().size()).mapToObj(index -> {
-            var m = prepared.messages().get(index);
-            return Msg.builder().name(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?"assistant":"user")
-                    .role(m.role()==com.lawrence.travel.application.memory.SessionContext.Role.ASSISTANT?MsgRole.ASSISTANT:MsgRole.USER)
-                    .content(TextBlock.builder().text(m.text()).build())
-                    .metadata(Map.of(SourceResultBudgetMiddleware.OPTIONAL_HISTORY, index < prepared.messages().size() - 1)).build();
-        }).toList();
+    /**
+     * @param prepared 已校验权威快照
+     * @return 历史单独标识，发送超限时只可卸载历史；末条完整权威区和本轮请求永不裁剪
+     */
+    static List<Msg> sessionMessages(
+            com.lawrence.travel.application.memory.SessionContext.Prepared prepared) {
+        return java.util.stream.IntStream.range(0, prepared.messages().size())
+                .mapToObj(
+                        index -> {
+                            var m = prepared.messages().get(index);
+                            return Msg.builder()
+                                    .name(
+                                            m.role()
+                                                            == com.lawrence.travel.application
+                                                                    .memory.SessionContext.Role
+                                                                    .ASSISTANT
+                                                    ? "assistant"
+                                                    : "user")
+                                    .role(
+                                            m.role()
+                                                            == com.lawrence.travel.application
+                                                                    .memory.SessionContext.Role
+                                                                    .ASSISTANT
+                                                    ? MsgRole.ASSISTANT
+                                                    : MsgRole.USER)
+                                    .content(TextBlock.builder().text(m.text()).build())
+                                    .metadata(
+                                            Map.of(
+                                                    SourceResultBudgetMiddleware.OPTIONAL_HISTORY,
+                                                    index < prepared.messages().size() - 1))
+                                    .build();
+                        })
+                .toList();
     }
 
     /**
@@ -208,13 +565,30 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             if (current instanceof CallRejectedException rejected) return rejected.getMessage();
             if (current instanceof HttpTransportException) {
                 String code = current.getMessage();
-                if (code != null && (java.util.Set.of("MODEL_CANCELLED", "MODEL_FREE_QUOTA_EXHAUSTED",
-                        "MODEL_ACCESS_DENIED", "MODEL_INVALID_PARAMETER", "MODEL_CONTEXT_LIMIT_SAFE", "MODEL_CONTEXT_LIMIT", "MODEL_NOT_FOUND",
-                        "MODEL_RATE_LIMITED", "MODEL_TRANSPORT_FAILED", "MODEL_OPTIONS_REJECTED",
-                        "MODEL_ENDPOINT_REJECTED", "MODEL_INPUT_TOO_LARGE", "MODEL_INPUT_INVALID",
-                        "MODEL_MEDIA_NOT_ALLOWED", "MODEL_ID_REJECTED", "MODEL_STREAM_INVALID",
-                        "MODEL_STREAM_INCOMPLETE", "MODEL_STREAM_TOO_LARGE", "MODEL_STREAM_PROVIDER_ERROR", "MODEL_OUTPUT_TRUNCATED").contains(code)
-                        || code.matches("MODEL_PROVIDER_HTTP_[1-5][0-9]{2}"))) return code;
+                if (code != null
+                        && (java.util.Set.of(
+                                                "MODEL_CANCELLED",
+                                                "MODEL_FREE_QUOTA_EXHAUSTED",
+                                                "MODEL_ACCESS_DENIED",
+                                                "MODEL_INVALID_PARAMETER",
+                                                "MODEL_CONTEXT_LIMIT_SAFE",
+                                                "MODEL_CONTEXT_LIMIT",
+                                                "MODEL_NOT_FOUND",
+                                                "MODEL_RATE_LIMITED",
+                                                "MODEL_TRANSPORT_FAILED",
+                                                "MODEL_OPTIONS_REJECTED",
+                                                "MODEL_ENDPOINT_REJECTED",
+                                                "MODEL_INPUT_TOO_LARGE",
+                                                "MODEL_INPUT_INVALID",
+                                                "MODEL_MEDIA_NOT_ALLOWED",
+                                                "MODEL_ID_REJECTED",
+                                                "MODEL_STREAM_INVALID",
+                                                "MODEL_STREAM_INCOMPLETE",
+                                                "MODEL_STREAM_TOO_LARGE",
+                                                "MODEL_STREAM_PROVIDER_ERROR",
+                                                "MODEL_OUTPUT_TRUNCATED")
+                                        .contains(code)
+                                || code.matches("MODEL_PROVIDER_HTTP_[1-5][0-9]{2}"))) return code;
             }
         }
         return "MODEL_EXECUTION_FAILED";
@@ -223,12 +597,14 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     /** 本次调用独占的资源句柄，取消不提前释放传输层许可。 */
     private static final class ActiveInvocation implements Invocation {
         private final HarnessAgent harness;
-        private final java.util.concurrent.atomic.AtomicReference<HarnessAgent> activeHarness=new java.util.concurrent.atomic.AtomicReference<>();
+        private final java.util.concurrent.atomic.AtomicReference<HarnessAgent> activeHarness =
+                new java.util.concurrent.atomic.AtomicReference<>();
         private final GuardedDashScopeTransport transport;
         private final com.lawrence.travel.application.safety.SafetyGate safety;
         private final CompletableFuture<String> result = new CompletableFuture<>();
         private final AtomicBoolean cancelled = new AtomicBoolean();
-        private final java.util.concurrent.CountDownLatch exited=new java.util.concurrent.CountDownLatch(1);
+        private final java.util.concurrent.CountDownLatch exited =
+                new java.util.concurrent.CountDownLatch(1);
         private volatile Thread executionThread;
 
         /**
@@ -237,9 +613,14 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
          * @param transport 独立取消范围
          * @param safety 完整输出基础检查
          */
-        private ActiveInvocation(HarnessAgent harness, GuardedDashScopeTransport transport, com.lawrence.travel.application.safety.SafetyGate safety) {
-            this.harness = harness; this.activeHarness.set(harness);
-            this.transport = transport; this.safety=safety;
+        private ActiveInvocation(
+                HarnessAgent harness,
+                GuardedDashScopeTransport transport,
+                com.lawrence.travel.application.safety.SafetyGate safety) {
+            this.harness = harness;
+            this.activeHarness.set(harness);
+            this.transport = transport;
+            this.safety = safety;
         }
 
         /**
@@ -249,21 +630,57 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
          * @param factory 每轮隔离框架实例
          * @param cleanupUnused 取消发生在建轮前时释放预建资源
          */
-        private void execute(Supplier<List<Msg>> prompt,Supplier<List<Msg>> recovery,Supplier<HarnessAgent> factory,Runnable cleanupUnused) {
-            executionThread=Thread.currentThread();
+        private void execute(
+                Supplier<List<Msg>> prompt,
+                Supplier<List<Msg>> recovery,
+                Supplier<HarnessAgent> factory,
+                Runnable cleanupUnused) {
+            executionThread = Thread.currentThread();
             try (transport) {
-                String answer=ControlledHarnessCall.execute(factory,prompt,recovery,transport::checkContext,safety,cancelled::get,activeHarness::set);
-                if(!cancelled.get()) result.complete(answer);
+                String answer =
+                        ControlledHarnessCall.execute(
+                                factory,
+                                prompt,
+                                recovery,
+                                transport::checkContext,
+                                safety,
+                                cancelled::get,
+                                activeHarness::set);
+                if (!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
                 if (!cancelled.get()) {
                     for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-                        if (cause instanceof CallRejectedException rejected) { result.completeExceptionally(rejected); return; }
-                        if(cause instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) { result.completeExceptionally(rejected); return; }
-                        if (cause instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) { result.completeExceptionally(rejected); return; }
+                        if (cause instanceof CallRejectedException rejected) {
+                            result.completeExceptionally(rejected);
+                            return;
+                        }
+                        if (cause
+                                instanceof
+                                com.lawrence.travel.application.memory.PreferenceChangedException
+                                                rejected) {
+                            result.completeExceptionally(rejected);
+                            return;
+                        }
+                        if (cause
+                                instanceof
+                                com.lawrence.travel.application.safety.SafetyGate.Failure
+                                                rejected) {
+                            result.completeExceptionally(rejected);
+                            return;
+                        }
                     }
                 }
-                result.completeExceptionally(new SanitizedAgentFailure(cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure), failure));
-            } finally { try { cleanupUnused.run(); } finally { exited.countDown(); } }
+                result.completeExceptionally(
+                        new SanitizedAgentFailure(
+                                cancelled.get() ? "MODEL_CANCELLED" : failureCode(failure),
+                                failure));
+            } finally {
+                try {
+                    cleanupUnused.run();
+                } finally {
+                    exited.countDown();
+                }
+            }
         }
 
         /** {@inheritDoc} 只读视图防止调用方绕过 close 取消内部 Future。 */
@@ -280,10 +697,16 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             transport.close();
             activeHarness.get().interrupt();
             transport.awaitIdle();
-            if(Thread.currentThread()!=executionThread) {
-                boolean interrupted=Thread.interrupted();
-                while(exited.getCount()!=0) { try { exited.await(); } catch(InterruptedException signal) { interrupted=true; } }
-                if(interrupted) Thread.currentThread().interrupt();
+            if (Thread.currentThread() != executionThread) {
+                boolean interrupted = Thread.interrupted();
+                while (exited.getCount() != 0) {
+                    try {
+                        exited.await();
+                    } catch (InterruptedException signal) {
+                        interrupted = true;
+                    }
+                }
+                if (interrupted) Thread.currentThread().interrupt();
             }
         }
     }

@@ -16,11 +16,26 @@ import org.springframework.web.bind.annotation.RestController;
 @Profile("local")
 public final class EvidenceController {
     private final EvidenceService service;
-    /** @param service 归属校验用例 */
-    public EvidenceController(EvidenceService service) { this.service = service; }
-    /** @param actor 当前身份 @param taskId 任务 @param response 私有响应 @return 有界证据与未知／冲突原因 */
+
+    /**
+     * @param service 归属校验用例
+     */
+    public EvidenceController(EvidenceService service) {
+        this.service = service;
+    }
+
+    /**
+     * @param actor 当前身份
+     * @param taskId 任务
+     * @param response 私有响应
+     * @return 有界证据与未知／冲突原因
+     */
     @GetMapping("/api/v1/tasks/{taskId}/evidence")
-    public List<Research.View> evidence(@AuthenticationPrincipal UserIdentity actor, @PathVariable UUID taskId, jakarta.servlet.http.HttpServletResponse response) {
-        response.setHeader("Cache-Control", "no-store"); return service.list(actor, taskId);
+    public List<Research.View> evidence(
+            @AuthenticationPrincipal UserIdentity actor,
+            @PathVariable UUID taskId,
+            jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return service.list(actor, taskId);
     }
 }

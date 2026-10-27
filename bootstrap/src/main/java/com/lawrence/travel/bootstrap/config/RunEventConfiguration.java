@@ -28,35 +28,60 @@ public class RunEventConfiguration {
      * @param json JSON
      * @return 唯一持久事件读取
      */
-    @Bean RunEventStore runEventStore(EventMapper mapper, TravelJson json) { return new PostgresRunEventStore(mapper, json); }
+    @Bean
+    RunEventStore runEventStore(EventMapper mapper, TravelJson json) {
+        return new PostgresRunEventStore(mapper, json);
+    }
+
     /**
      * @param store 权威读取
      * @return 认证归属用例
      */
-    @Bean RunEventService runEventService(RunEventStore store) { return new RunEventService(store); }
+    @Bean
+    RunEventService runEventService(RunEventStore store) {
+        return new RunEventService(store);
+    }
+
     /**
      * @param sessions Redis 权威会话
      * @param identity 当前账号
      * @return 不刷新过期时间的持续认证；任何依赖异常均关闭连接
      */
-    @Bean SubscriptionAccess subscriptionAccess(SessionRepository<? extends Session> sessions, IdentityService identity) {
+    @Bean
+    SubscriptionAccess subscriptionAccess(
+            SessionRepository<? extends Session> sessions, IdentityService identity) {
         return (id, user) -> {
             if (id == null || user == null) return false;
             try {
-                var session = sessions.findById(id); if (session == null || session.isExpired()) return false;
-                Object value = session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
-                if (!(value instanceof SecurityContext context) || context.getAuthentication() == null || !context.getAuthentication().isAuthenticated()
-                        || !(context.getAuthentication().getPrincipal() instanceof UserIdentity principal) || !principal.id().equals(user.id())) return false;
+                var session = sessions.findById(id);
+                if (session == null || session.isExpired()) return false;
+                Object value =
+                        session.getAttribute(
+                                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+                if (!(value instanceof SecurityContext context)
+                        || context.getAuthentication() == null
+                        || !context.getAuthentication().isAuthenticated()
+                        || !(context.getAuthentication().getPrincipal()
+                                instanceof UserIdentity principal)
+                        || !principal.id().equals(user.id())) return false;
                 return identity.current(user.id()).id().equals(user.id());
-            } catch (RuntimeException unavailable) { return false; }
+            } catch (RuntimeException unavailable) {
+                return false;
+            }
         };
     }
+
     /**
      * @param service 持久补读
      * @param access 会话撤销检查
      * @param heartbeat 可配置心跳，默认十五秒
      * @return 与业务执行隔离的有界传输
      */
-    @Bean(destroyMethod = "close") EventStreams eventStreams(RunEventService service, SubscriptionAccess access,
-            @Value("${travel.events.heartbeat:PT15S}") Duration heartbeat) { return new EventStreams(service, access, heartbeat); }
+    @Bean(destroyMethod = "close")
+    EventStreams eventStreams(
+            RunEventService service,
+            SubscriptionAccess access,
+            @Value("${travel.events.heartbeat:PT15S}") Duration heartbeat) {
+        return new EventStreams(service, access, heartbeat);
+    }
 }

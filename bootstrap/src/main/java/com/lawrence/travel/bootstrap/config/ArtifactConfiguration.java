@@ -20,10 +20,34 @@ import org.springframework.core.env.Environment;
 @Profile("local")
 @MapperScan(basePackageClasses = ArtifactMapper.class)
 public class ArtifactConfiguration {
-    /** @param mapper SQL @return PostgreSQL索引端口 */
-    @Bean ArtifactStore artifactStore(ArtifactMapper mapper) { return new PostgresArtifactStore(mapper); }
-    /** @param environment 服务端受信配置 @return 独立文件卷适配器 */
-    @Bean ArtifactFiles artifactFiles(Environment environment) { return new VolumeArtifactFiles(Path.of(environment.getProperty("travel.artifacts.root", ".runtime/artifacts"))); }
-    /** @param store 索引 @param files 文件 @param transactions 短事务 @return 不依赖框架的产物用例 */
-    @Bean ArtifactService artifactService(ArtifactStore store, ArtifactFiles files, BusinessTransactions transactions) { return new ArtifactService(store, files, transactions, Clock.systemUTC()); }
+    /**
+     * @param mapper SQL
+     * @return PostgreSQL索引端口
+     */
+    @Bean
+    ArtifactStore artifactStore(ArtifactMapper mapper) {
+        return new PostgresArtifactStore(mapper);
+    }
+
+    /**
+     * @param environment 服务端受信配置
+     * @return 独立文件卷适配器
+     */
+    @Bean
+    ArtifactFiles artifactFiles(Environment environment) {
+        return new VolumeArtifactFiles(
+                Path.of(environment.getProperty("travel.artifacts.root", ".runtime/artifacts")));
+    }
+
+    /**
+     * @param store 索引
+     * @param files 文件
+     * @param transactions 短事务
+     * @return 不依赖框架的产物用例
+     */
+    @Bean
+    ArtifactService artifactService(
+            ArtifactStore store, ArtifactFiles files, BusinessTransactions transactions) {
+        return new ArtifactService(store, files, transactions, Clock.systemUTC());
+    }
 }

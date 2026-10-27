@@ -93,12 +93,14 @@ public interface LifecycleStore {
     List<UUID> sourceJobs(UUID user, UUID chat, UUID document);
 
     /**
-     * @param entry 本人已确认墓碑 @return 仅此删除范围尚有原件待清理，不泄露其他用户的清理队列
+     * @param entry 本人已确认墓碑
+     * @return 仅此删除范围尚有原件待清理，不泄露其他用户的清理队列
      */
     boolean pending(Lifecycle.Entry entry);
 
     /**
-     * @param request 全局唯一请求UUID @return 已被其他归属占用；只能在全局序列锁内校验，避免先写清单后才发现唯一冲突
+     * @param request 全局唯一请求UUID
+     * @return 已被其他归属占用；只能在全局序列锁内校验，避免先写清单后才发现唯一冲突
      */
     boolean requestUsed(UUID request);
 }

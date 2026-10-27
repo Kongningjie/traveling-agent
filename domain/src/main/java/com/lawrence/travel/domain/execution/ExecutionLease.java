@@ -18,10 +18,28 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.STALE_LEASE;
  * @param until 租约排他截止时刻
  * @param state 当前事件状态
  */
-public record ExecutionLease(UUID eventId, TaskScope scope, UUID runId, UUID stepId, String owner, long fencingToken, Instant until, OutboxState state) {
+public record ExecutionLease(
+        UUID eventId,
+        TaskScope scope,
+        UUID runId,
+        UUID stepId,
+        String owner,
+        long fencingToken,
+        Instant until,
+        OutboxState state) {
     /** 保留失效事件的审计租约字段，但非 LEASED 状态不能提交。 */
     public ExecutionLease {
-        DomainViolation.require(eventId != null && scope != null && runId != null && stepId != null && owner != null && !owner.isBlank() && fencingToken > 0 && until != null && state != null, INVALID_INPUT);
+        DomainViolation.require(
+                eventId != null
+                        && scope != null
+                        && runId != null
+                        && stepId != null
+                        && owner != null
+                        && !owner.isBlank()
+                        && fencingToken > 0
+                        && until != null
+                        && state != null,
+                INVALID_INPUT);
     }
 
     /**
@@ -30,9 +48,17 @@ public record ExecutionLease(UUID eventId, TaskScope scope, UUID runId, UUID ste
      * @param databaseNow 同事务数据库时间
      */
     public void requireCurrent(ExecutionLease claim, Instant databaseNow) {
-        DomainViolation.require(claim != null && databaseNow != null && state == OutboxState.LEASED
-                && eventId.equals(claim.eventId) && scope.equals(claim.scope) && runId.equals(claim.runId)
-                && stepId.equals(claim.stepId) && owner.equals(claim.owner) && fencingToken == claim.fencingToken
-                && databaseNow.isBefore(until), STALE_LEASE);
+        DomainViolation.require(
+                claim != null
+                        && databaseNow != null
+                        && state == OutboxState.LEASED
+                        && eventId.equals(claim.eventId)
+                        && scope.equals(claim.scope)
+                        && runId.equals(claim.runId)
+                        && stepId.equals(claim.stepId)
+                        && owner.equals(claim.owner)
+                        && fencingToken == claim.fencingToken
+                        && databaseNow.isBefore(until),
+                STALE_LEASE);
     }
 }

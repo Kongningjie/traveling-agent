@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** 需当前明确授权才运行：单次 Flash 文本流请求，不触发工具、Harness 循环或取消实验。 */
 @EnabledIfEnvironmentVariable(named = "TRAVEL_MODEL_REACHABILITY_TEST", matches = "true")
 @ActiveProfiles("local")
-@SpringBootTest(properties = {"travel.external-calls-enabled=true", "logging.level.io.agentscope=OFF"})
+@SpringBootTest(
+        properties = {"travel.external-calls-enabled=true", "logging.level.io.agentscope=OFF"})
 class ModelReachabilityLiveTest {
     @Autowired private ModelCallAdmission admission;
     @Autowired private BudgetLedger ledger;
@@ -40,26 +41,62 @@ class ModelReachabilityLiveTest {
     void verifiesOneResearchModelRequest() {
         UUID run = UUID.randomUUID();
         ledger.create(run);
-        try (var transport = new GuardedDashScopeTransport(admission, run, "research", new OkHttpClient())) {
-            var model = DashScopeChatModel.builder().apiKey(environment.getRequiredProperty("DASHSCOPE_API_KEY"))
-                    .modelName(properties.models().get("research")).baseUrl("https://dashscope.aliyuncs.com")
-                    .endpointType(EndpointType.MULTIMODAL).stream(true).enableThinking(false).enableSearch(false)
-                    .httpTransport(transport).build();
-            var messages = List.of(Msg.builder().name("user").role(MsgRole.USER)
-                    .content(TextBlock.builder().text("请只回复 OK。").build()).build());
-            var options = GenerateOptions.builder().maxTokens(16)
-                    .executionConfig(ExecutionConfig.builder().maxAttempts(1).timeout(Duration.ofSeconds(60)).build()).build();
-            var responses = model.stream(messages, List.of(), options).collectList().block(Duration.ofSeconds(70));
+        try (var transport =
+                new GuardedDashScopeTransport(admission, run, "research", new OkHttpClient())) {
+            var model =
+                    DashScopeChatModel.builder()
+                            .apiKey(environment.getRequiredProperty("DASHSCOPE_API_KEY"))
+                            .modelName(properties.models().get("research"))
+                            .baseUrl("https://dashscope.aliyuncs.com")
+                            .endpointType(EndpointType.MULTIMODAL)
+                            .stream(true)
+                            .enableThinking(false)
+                            .enableSearch(false)
+                            .httpTransport(transport)
+                            .build();
+            var messages =
+                    List.of(
+                            Msg.builder()
+                                    .name("user")
+                                    .role(MsgRole.USER)
+                                    .content(TextBlock.builder().text("请只回复 OK。").build())
+                                    .build());
+            var options =
+                    GenerateOptions.builder()
+                            .maxTokens(16)
+                            .executionConfig(
+                                    ExecutionConfig.builder()
+                                            .maxAttempts(1)
+                                            .timeout(Duration.ofSeconds(60))
+                                            .build())
+                            .build();
+            var responses =
+                    model.stream(messages, List.of(), options)
+                            .collectList()
+                            .block(Duration.ofSeconds(70));
             assertThat(responses).isNotEmpty();
-            String text = responses.stream().flatMap(response -> response.getContent().stream())
-                    .filter(TextBlock.class::isInstance).map(TextBlock.class::cast).map(TextBlock::getText)
-                    .collect(java.util.stream.Collectors.joining());
+            String text =
+                    responses.stream()
+                            .flatMap(response -> response.getContent().stream())
+                            .filter(TextBlock.class::isInstance)
+                            .map(TextBlock.class::cast)
+                            .map(TextBlock::getText)
+                            .collect(java.util.stream.Collectors.joining());
             assertThat(text).contains("OK");
             assertThat(ledger.read(run).modelCalls()).isEqualTo(1);
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM call_meter WHERE run_id=? AND status <> 'COMPLETED'",
-                    Integer.class, run)).isZero();
-            Long tokens = jdbc.queryForObject("SELECT sum(input_tokens + output_tokens) FROM call_meter WHERE run_id=?", Long.class, run);
-            System.out.println("MINIMAL_MODEL_PASS requests=1 role=research tokens=" + tokens + " run=" + run);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM call_meter WHERE run_id=? AND status <> 'COMPLETED'",
+                                    Integer.class,
+                                    run))
+                    .isZero();
+            Long tokens =
+                    jdbc.queryForObject(
+                            "SELECT sum(input_tokens + output_tokens) FROM call_meter WHERE run_id=?",
+                            Long.class,
+                            run);
+            System.out.println(
+                    "MINIMAL_MODEL_PASS requests=1 role=research tokens=" + tokens + " run=" + run);
         }
     }
 }

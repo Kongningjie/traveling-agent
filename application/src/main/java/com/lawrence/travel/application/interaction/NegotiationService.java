@@ -16,38 +16,108 @@ import java.util.UUID;
 
 /** 人工输入用例；消息、取代或继续事件同事务，HTTP 不持有长模型请求。 */
 public final class NegotiationService {
-    /** @param actor 受信用户 @param taskId 已关联任务，可空 @param input 原聊天输入 @param text 完整原文 @param facts 已核实提取项
-     * @return 唯一关联任务；新建、变更失效及已解释标记同事务，既有有效问题内补充沿用原预算 */
-    public UUID applyInterpreted(UserIdentity actor, UUID taskId, UUID input, String text, List<Negotiation.Fact> facts) {
-        return transactions.required(() -> {
-            UUID task = taskId;
-            if (task == null) {
-                String title = text.substring(0, Math.min(60, text.length()));
-                task = travel.create(actor, input.toString(), title, new TravelStore.RevisionContent(List.of(), List.of(), "用户开始规划", "")).task().scope().taskId();
-            }
-            var scope = new TaskScope(actor.id(), task); var current = store.card(scope);
-            var fields = facts.stream().map(Negotiation.Fact::field).collect(java.util.stream.Collectors.toSet());
-            var allowed = current == null ? java.util.Set.<String>of() : current.specs().values().stream().map(Negotiation.QuestionSpec::field).collect(java.util.stream.Collectors.toSet());
-            if (current != null && !facts.isEmpty() && allowed.containsAll(fields)) {
-                answer(actor, task, input, new Negotiation.Response(current.decision().id(), current.decision().revision(), current.decision().constraintRevision(), "ANSWER", java.util.Map.of(), text, java.util.Set.of()));
-            } else sendInternal(actor, scope, input, text, facts);
-            store.interpreted(scope, input, facts); return task;
-        });
+    /**
+     * @param actor 受信用户
+     * @param taskId 已关联任务，可空
+     * @param input 原聊天输入
+     * @param text 完整原文
+     * @param facts 已核实提取项
+     * @return 唯一关联任务；新建、变更失效及已解释标记同事务，既有有效问题内补充沿用原预算
+     */
+    public UUID applyInterpreted(
+            UserIdentity actor,
+            UUID taskId,
+            UUID input,
+            String text,
+            List<Negotiation.Fact> facts) {
+        return transactions.required(
+                () -> {
+                    UUID task = taskId;
+                    if (task == null) {
+                        String title = text.substring(0, Math.min(60, text.length()));
+                        task =
+                                travel.create(
+                                                actor,
+                                                input.toString(),
+                                                title,
+                                                new TravelStore.RevisionContent(
+                                                        List.of(), List.of(), "用户开始规划", ""))
+                                        .task()
+                                        .scope()
+                                        .taskId();
+                    }
+                    var scope = new TaskScope(actor.id(), task);
+                    var current = store.card(scope);
+                    var fields =
+                            facts.stream()
+                                    .map(Negotiation.Fact::field)
+                                    .collect(java.util.stream.Collectors.toSet());
+                    var allowed =
+                            current == null
+                                    ? java.util.Set.<String>of()
+                                    : current.specs().values().stream()
+                                            .map(Negotiation.QuestionSpec::field)
+                                            .collect(java.util.stream.Collectors.toSet());
+                    if (current != null && !facts.isEmpty() && allowed.containsAll(fields)) {
+                        answer(
+                                actor,
+                                task,
+                                input,
+                                new Negotiation.Response(
+                                        current.decision().id(),
+                                        current.decision().revision(),
+                                        current.decision().constraintRevision(),
+                                        "ANSWER",
+                                        java.util.Map.of(),
+                                        text,
+                                        java.util.Set.of()));
+                    } else sendInternal(actor, scope, input, text, facts);
+                    store.interpreted(scope, input, facts);
+                    return task;
+                });
     }
-    /** @param actor 明确确认的用户 @param taskId 当前旅行，可空 @param input 建议稳定ID @param text 确认后的规范原文 @param facts 已校验字段
-     * @return 原变更流程的唯一任务；不将采纳猜成旧问题答案，也不直接提交行程 */
-    public UUID applyAdvice(UserIdentity actor,UUID taskId,UUID input,String text,List<Negotiation.Fact> facts){
-        return transactions.required(() -> {
-            UUID task=taskId;
-            if(task==null)task=travel.create(actor,input.toString(),"从旅行资料开始规划",new TravelStore.RevisionContent(List.of(),List.of(),"用户明确采纳建议","尚未形成行程")).task().scope().taskId();
-            var scope=new TaskScope(actor.id(),task);sendInternal(actor,scope,input,text,facts);store.interpreted(scope,input,facts);return task;
-        });
+
+    /**
+     * @param actor 明确确认的用户
+     * @param taskId 当前旅行，可空
+     * @param input 建议稳定ID
+     * @param text 确认后的规范原文
+     * @param facts 已校验字段
+     * @return 原变更流程的唯一任务；不将采纳猜成旧问题答案，也不直接提交行程
+     */
+    public UUID applyAdvice(
+            UserIdentity actor,
+            UUID taskId,
+            UUID input,
+            String text,
+            List<Negotiation.Fact> facts) {
+        return transactions.required(
+                () -> {
+                    UUID task = taskId;
+                    if (task == null)
+                        task =
+                                travel.create(
+                                                actor,
+                                                input.toString(),
+                                                "从旅行资料开始规划",
+                                                new TravelStore.RevisionContent(
+                                                        List.of(), List.of(), "用户明确采纳建议", "尚未形成行程"))
+                                        .task()
+                                        .scope()
+                                        .taskId();
+                    var scope = new TaskScope(actor.id(), task);
+                    sendInternal(actor, scope, input, text, facts);
+                    store.interpreted(scope, input, facts);
+                    return task;
+                });
     }
+
     private final NegotiationStore store;
     private final TravelStorageService travel;
     private final RunService runs;
     private final ExecutionEngineStore engine;
     private final BusinessTransactions transactions;
+
     /**
      * @param store 收件箱
      * @param travel 任务用例
@@ -55,7 +125,19 @@ public final class NegotiationService {
      * @param engine 继续执行端口
      * @param transactions 业务事务
      */
-    public NegotiationService(NegotiationStore store, TravelStorageService travel, RunService runs, ExecutionEngineStore engine, BusinessTransactions transactions) { this.store = store; this.travel = travel; this.runs = runs; this.engine = engine; this.transactions = transactions; }
+    public NegotiationService(
+            NegotiationStore store,
+            TravelStorageService travel,
+            RunService runs,
+            ExecutionEngineStore engine,
+            BusinessTransactions transactions) {
+        this.store = store;
+        this.travel = travel;
+        this.runs = runs;
+        this.engine = engine;
+        this.transactions = transactions;
+    }
+
     /**
      * @param actor 认证用户
      * @param request 幂等创建键
@@ -64,19 +146,37 @@ public final class NegotiationService {
      * @param facts 明确输入
      * @return 初次创建结果；同键异文冲突
      */
-    public Created create(UserIdentity actor, UUID request, String title, String text, List<Negotiation.Fact> facts) {
+    public Created create(
+            UserIdentity actor,
+            UUID request,
+            String title,
+            String text,
+            List<Negotiation.Fact> facts) {
         require(actor != null && request != null && title != null && title.length() <= 120);
-        return transactions.required(() -> {
-            var task = travel.create(actor, request.toString(), title, new TravelStore.RevisionContent(List.of(), List.of(), "用户创建", ""));
-            UUID input = UUID.nameUUIDFromBytes((actor.id() + ":" + request + ":initial").getBytes(StandardCharsets.UTF_8));
-            var receipt = sendInternal(actor, task.task().scope(), input, text, facts); return new Created(task.task().scope().taskId(), receipt);
-        });
+        return transactions.required(
+                () -> {
+                    var task =
+                            travel.create(
+                                    actor,
+                                    request.toString(),
+                                    title,
+                                    new TravelStore.RevisionContent(
+                                            List.of(), List.of(), "用户创建", ""));
+                    UUID input =
+                            UUID.nameUUIDFromBytes(
+                                    (actor.id() + ":" + request + ":initial")
+                                            .getBytes(StandardCharsets.UTF_8));
+                    var receipt = sendInternal(actor, task.task().scope(), input, text, facts);
+                    return new Created(task.task().scope().taskId(), receipt);
+                });
     }
+
     /**
      * @param taskId 私有任务
      * @param receipt 收到但尚未采纳的稳定结果
      */
-    public record Created(UUID taskId, Negotiation.Receipt receipt) { }
+    public record Created(UUID taskId, Negotiation.Receipt receipt) {}
+
     /**
      * @param actor 认证
      * @param taskId 任务
@@ -85,10 +185,21 @@ public final class NegotiationService {
      * @param facts 明确字段
      * @return 收讫，后续阶段负责解释
      */
-    public Negotiation.Receipt send(UserIdentity actor, UUID taskId, UUID input, String text, List<Negotiation.Fact> facts) {
-        require(actor != null && text != null && facts != null && (!text.isBlank() || !facts.isEmpty()));
-        return transactions.required(() -> sendInternal(actor, new TaskScope(actor.id(), taskId), input, text, facts));
+    public Negotiation.Receipt send(
+            UserIdentity actor,
+            UUID taskId,
+            UUID input,
+            String text,
+            List<Negotiation.Fact> facts) {
+        require(
+                actor != null
+                        && text != null
+                        && facts != null
+                        && (!text.isBlank() || !facts.isEmpty()));
+        return transactions.required(
+                () -> sendInternal(actor, new TaskScope(actor.id(), taskId), input, text, facts));
     }
+
     /**
      * @param actor 认证
      * @param scope 任务
@@ -97,11 +208,24 @@ public final class NegotiationService {
      * @param facts 结构化字段
      * @return 同一事务的可靠收件与唯一新运行
      */
-    private Negotiation.Receipt sendInternal(UserIdentity actor, TaskScope scope, UUID input, String text, List<Negotiation.Fact> facts) {
+    private Negotiation.Receipt sendInternal(
+            UserIdentity actor,
+            TaskScope scope,
+            UUID input,
+            String text,
+            List<Negotiation.Fact> facts) {
         if (!store.receiveChange(scope, input, text, facts)) return store.receipt(scope, input);
-        var run = runs.start(actor, scope.taskId(), input, NegotiationHandler.stage(input, StageType.UNDERSTAND));
-        var result = new Negotiation.Receipt(input, "RECEIVED", run.id()); store.saveReceipt(scope, result); return result;
+        var run =
+                runs.start(
+                        actor,
+                        scope.taskId(),
+                        input,
+                        NegotiationHandler.stage(input, StageType.UNDERSTAND));
+        var result = new Negotiation.Receipt(input, "RECEIVED", run.id());
+        store.saveReceipt(scope, result);
+        return result;
     }
+
     /**
      * @param actor 认证
      * @param taskId 任务
@@ -109,31 +233,68 @@ public final class NegotiationService {
      * @param response 明确回答
      * @return 仅接收或仅记录；不会把预选推荐当已采纳
      */
-    public Negotiation.Receipt answer(UserIdentity actor, UUID taskId, UUID input, Negotiation.Response response) {
+    public Negotiation.Receipt answer(
+            UserIdentity actor, UUID taskId, UUID input, Negotiation.Response response) {
         require(actor != null && response != null && input != null);
         var scope = new TaskScope(actor.id(), taskId);
-        return transactions.required(() -> {
-            var card = store.receiveAnswer(scope, input, response.decisionId(), response.revision(), response.constraints(), response.action(), response.selected(), response.text(), response.authorization());
-            var replay = store.receipt(scope, input); if (replay != null) return replay;
-            boolean recordOnly = response.action().equals("REJECT") || response.action().equals("UNDECIDED");
-            if (!recordOnly) engine.interpretAnswer(scope, card.decision().runId(), input, NegotiationHandler.stage(input, StageType.UNDERSTAND));
-            var result = new Negotiation.Receipt(input, recordOnly ? "RECORDED" : "RECEIVED", card.decision().runId()); store.saveReceipt(scope, result); return result;
-        });
+        return transactions.required(
+                () -> {
+                    var card =
+                            store.receiveAnswer(
+                                    scope,
+                                    input,
+                                    response.decisionId(),
+                                    response.revision(),
+                                    response.constraints(),
+                                    response.action(),
+                                    response.selected(),
+                                    response.text(),
+                                    response.authorization());
+                    var replay = store.receipt(scope, input);
+                    if (replay != null) return replay;
+                    boolean recordOnly =
+                            response.action().equals("REJECT")
+                                    || response.action().equals("UNDECIDED");
+                    if (!recordOnly)
+                        engine.interpretAnswer(
+                                scope,
+                                card.decision().runId(),
+                                input,
+                                NegotiationHandler.stage(input, StageType.UNDERSTAND));
+                    var result =
+                            new Negotiation.Receipt(
+                                    input,
+                                    recordOnly ? "RECORDED" : "RECEIVED",
+                                    card.decision().runId());
+                    store.saveReceipt(scope, result);
+                    return result;
+                });
     }
+
     /**
      * @param actor 认证
      * @param taskId 任务
      * @return 当前有效问题，可能尚未产生
      */
-    public Negotiation.Card card(UserIdentity actor, UUID taskId) { require(actor != null); return store.card(new TaskScope(actor.id(), taskId)); }
+    public Negotiation.Card card(UserIdentity actor, UUID taskId) {
+        require(actor != null);
+        return store.card(new TaskScope(actor.id(), taskId));
+    }
+
     /**
      * @param actor 认证
      * @param taskId 任务
      * @return 最近输入及处理状态
      */
-    public List<Negotiation.Message> messages(UserIdentity actor, UUID taskId) { require(actor != null); return store.messages(new TaskScope(actor.id(), taskId)); }
+    public List<Negotiation.Message> messages(UserIdentity actor, UUID taskId) {
+        require(actor != null);
+        return store.messages(new TaskScope(actor.id(), taskId));
+    }
+
     /**
      * @param condition 输入完整性，固定错误不包含正文
      */
-    private static void require(boolean condition) { if (!condition) throw new TravelStorageFailure(TravelStorageFailure.Code.INVALID_INPUT); }
+    private static void require(boolean condition) {
+        if (!condition) throw new TravelStorageFailure(TravelStorageFailure.Code.INVALID_INPUT);
+    }
 }

@@ -21,40 +21,83 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.STALE_REVISIO
  * @param continuedByRunId 唯一直接后继，可空
  * @param failureKind FAILED 时必填的失败分类，其他状态为空
  */
-public record ExecutionRun(UUID id, TaskScope scope, long generation, long constraintRevision, State state,
-                           RunBudget budget, UUID continuedFromRunId, UUID continuedByRunId, FailureKind failureKind) {
+public record ExecutionRun(
+        UUID id,
+        TaskScope scope,
+        long generation,
+        long constraintRevision,
+        State state,
+        RunBudget budget,
+        UUID continuedFromRunId,
+        UUID continuedByRunId,
+        FailureKind failureKind) {
     /** 运行状态与业务任务、阶段状态分开。 */
     public enum State {
-        /** 可等待领取。 */ QUEUED,
-        /** 仍有活动阶段或分支。 */ RUNNING,
-        /** 没有可推进工作，等待用户。 */ WAITING_USER,
-        /** 有合格候选，等待单独接受事务。 */ WAITING_ACCEPTANCE,
-        /** 原预算耗尽，显式继续创建新运行。 */ PAUSED_BUDGET,
-        /** 免费条件不满足，不能自行恢复。 */ PAUSED_QUOTA,
-        /** 已完成咨询或已接受行程。 */ SUCCEEDED,
-        /** 当前运行失败，不能复活。 */ FAILED,
-        /** 用户取消终态。 */ CANCELLED,
-        /** 新修改取代终态。 */ SUPERSEDED;
+        /** 可等待领取。 */
+        QUEUED,
+        /** 仍有活动阶段或分支。 */
+        RUNNING,
+        /** 没有可推进工作，等待用户。 */
+        WAITING_USER,
+        /** 有合格候选，等待单独接受事务。 */
+        WAITING_ACCEPTANCE,
+        /** 原预算耗尽，显式继续创建新运行。 */
+        PAUSED_BUDGET,
+        /** 免费条件不满足，不能自行恢复。 */
+        PAUSED_QUOTA,
+        /** 已完成咨询或已接受行程。 */
+        SUCCEEDED,
+        /** 当前运行失败，不能复活。 */
+        FAILED,
+        /** 用户取消终态。 */
+        CANCELLED,
+        /** 新修改取代终态。 */
+        SUPERSEDED;
 
-        /** @return 是否禁止再次运行或提交业务结果 */
-        public boolean terminal() { return this == SUCCEEDED || this == FAILED || this == CANCELLED || this == SUPERSEDED; }
+        /**
+         * @return 是否禁止再次运行或提交业务结果
+         */
+        public boolean terminal() {
+            return this == SUCCEEDED || this == FAILED || this == CANCELLED || this == SUPERSEDED;
+        }
     }
 
     /** 明确失败是否允许创建新运行，不将所有失败一概视为可重试。 */
-    public enum FailureKind { /** 可显式继续。 */ RETRYABLE, /** 需先解决原因，不直接继续。 */ PERMANENT }
+    public enum FailureKind {
+        /** 可显式继续。 */
+        RETRYABLE,
+        /** 需先解决原因，不直接继续。 */
+        PERMANENT
+    }
 
     /** 验证稳定归属、版本、预算及继续关系，禁止自身形成后继。 */
     public ExecutionRun {
-        DomainViolation.require(id != null && scope != null && generation > 0 && constraintRevision > 0 && state != null
-                && budget != null && !id.equals(continuedFromRunId) && !id.equals(continuedByRunId)
-                && ((state == State.FAILED) == (failureKind != null)), INVALID_INPUT);
+        DomainViolation.require(
+                id != null
+                        && scope != null
+                        && generation > 0
+                        && constraintRevision > 0
+                        && state != null
+                        && budget != null
+                        && !id.equals(continuedFromRunId)
+                        && !id.equals(continuedByRunId)
+                        && ((state == State.FAILED) == (failureKind != null)),
+                INVALID_INPUT);
     }
 
-    /** @return 领取后状态；实际租约领取和预算检查仍由应用事务完成 */
-    public ExecutionRun start() { return change(State.QUEUED, State.RUNNING); }
+    /**
+     * @return 领取后状态；实际租约领取和预算检查仍由应用事务完成
+     */
+    public ExecutionRun start() {
+        return change(State.QUEUED, State.RUNNING);
+    }
 
-    /** @return 阶段结束且没有活动分支时排队的状态；调用者负责判断分支汇合 */
-    public ExecutionRun queueAfterStage() { return change(State.RUNNING, State.QUEUED); }
+    /**
+     * @return 阶段结束且没有活动分支时排队的状态；调用者负责判断分支汇合
+     */
+    public ExecutionRun queueAfterStage() {
+        return change(State.RUNNING, State.QUEUED);
+    }
 
     /**
      * 只在全运行无法推进时等待，问题卡片存在本身不阻断独立调查。
@@ -75,7 +118,16 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
     public ExecutionRun resumeAfterAnswer(long nextConstraintRevision) {
         DomainViolation.require(state == State.WAITING_USER, ILLEGAL_TRANSITION);
         DomainViolation.require(nextConstraintRevision >= constraintRevision, STALE_REVISION);
-        return new ExecutionRun(id, scope, generation, nextConstraintRevision, State.QUEUED, budget, continuedFromRunId, continuedByRunId, failureKind);
+        return new ExecutionRun(
+                id,
+                scope,
+                generation,
+                nextConstraintRevision,
+                State.QUEUED,
+                budget,
+                continuedFromRunId,
+                continuedByRunId,
+                failureKind);
     }
 
     /**
@@ -85,9 +137,22 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
      * @return 保留状态、预算及代次的运行
      */
     public ExecutionRun advanceConstraints(long expectedRevision, long nextRevision) {
-        DomainViolation.require(state == State.RUNNING || state == State.WAITING_USER || state == State.QUEUED, ILLEGAL_TRANSITION);
-        DomainViolation.require(expectedRevision == constraintRevision && nextRevision > constraintRevision, STALE_REVISION);
-        return new ExecutionRun(id, scope, generation, nextRevision, state, budget, continuedFromRunId, continuedByRunId, failureKind);
+        DomainViolation.require(
+                state == State.RUNNING || state == State.WAITING_USER || state == State.QUEUED,
+                ILLEGAL_TRANSITION);
+        DomainViolation.require(
+                expectedRevision == constraintRevision && nextRevision > constraintRevision,
+                STALE_REVISION);
+        return new ExecutionRun(
+                id,
+                scope,
+                generation,
+                nextRevision,
+                state,
+                budget,
+                continuedFromRunId,
+                continuedByRunId,
+                failureKind);
     }
 
     /**
@@ -100,11 +165,19 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
         return change(State.RUNNING, State.WAITING_ACCEPTANCE);
     }
 
-    /** @return 原预算内重校验的排队状态；接受意图不能自动沿用 */
-    public ExecutionRun revalidateCandidate() { return change(State.WAITING_ACCEPTANCE, State.QUEUED); }
+    /**
+     * @return 原预算内重校验的排队状态；接受意图不能自动沿用
+     */
+    public ExecutionRun revalidateCandidate() {
+        return change(State.WAITING_ACCEPTANCE, State.QUEUED);
+    }
 
-    /** @return 免费资源不足的暂停状态 */
-    public ExecutionRun pauseQuota() { return change(State.RUNNING, State.PAUSED_QUOTA); }
+    /**
+     * @return 免费资源不足的暂停状态
+     */
+    public ExecutionRun pauseQuota() {
+        return change(State.RUNNING, State.PAUSED_QUOTA);
+    }
 
     /**
      * 额度暂停只可显式恢复，不重置消耗或代次。
@@ -116,14 +189,21 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
         return change(State.PAUSED_QUOTA, State.QUEUED);
     }
 
-    /** @return 主动执行或等待重校验时预算耗尽的暂停状态，不能在原运行清零重启 */
+    /**
+     * @return 主动执行或等待重校验时预算耗尽的暂停状态，不能在原运行清零重启
+     */
     public ExecutionRun pauseBudget() {
-        DomainViolation.require(state == State.RUNNING || state == State.WAITING_ACCEPTANCE, ILLEGAL_TRANSITION);
+        DomainViolation.require(
+                state == State.RUNNING || state == State.WAITING_ACCEPTANCE, ILLEGAL_TRANSITION);
         return copy(State.PAUSED_BUDGET, budget, continuedByRunId);
     }
 
-    /** @return 无新增行程的纯咨询结束状态，不代表已生成或接受行程 */
-    public ExecutionRun completeConsultation() { return change(State.RUNNING, State.SUCCEEDED); }
+    /**
+     * @return 无新增行程的纯咨询结束状态，不代表已生成或接受行程
+     */
+    public ExecutionRun completeConsultation() {
+        return change(State.RUNNING, State.SUCCEEDED);
+    }
 
     /**
      * 行程接受事务成功后完成运行；不能从 RUNNING 直接跳过用户接受。
@@ -143,14 +223,31 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
     public ExecutionRun fail(FailureKind kind) {
         DomainViolation.require(state == State.RUNNING, ILLEGAL_TRANSITION);
         DomainViolation.require(kind != null, INVALID_INPUT);
-        return new ExecutionRun(id, scope, generation, constraintRevision, State.FAILED, budget, continuedFromRunId, continuedByRunId, kind);
+        return new ExecutionRun(
+                id,
+                scope,
+                generation,
+                constraintRevision,
+                State.FAILED,
+                budget,
+                continuedFromRunId,
+                continuedByRunId,
+                kind);
     }
 
-    /** @return 任意非终态的取消结果；重复取消幂等，终态不可复活 */
-    public ExecutionRun cancel() { return stop(State.CANCELLED); }
+    /**
+     * @return 任意非终态的取消结果；重复取消幂等，终态不可复活
+     */
+    public ExecutionRun cancel() {
+        return stop(State.CANCELLED);
+    }
 
-    /** @return 任意非终态被新修改取代的结果；重复取代幂等 */
-    public ExecutionRun supersede() { return stop(State.SUPERSEDED); }
+    /**
+     * @return 任意非终态被新修改取代的结果；重复取代幂等
+     */
+    public ExecutionRun supersede() {
+        return stop(State.SUPERSEDED);
+    }
 
     /**
      * 已确认消耗只能累加，不能在等待或恢复时清零。
@@ -159,8 +256,13 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
      */
     public ExecutionRun account(RunBudget next) {
         DomainViolation.require(!state.terminal(), ILLEGAL_TRANSITION);
-        DomainViolation.require(next != null && next.modelCalls() >= budget.modelCalls() && next.toolCalls() >= budget.toolCalls()
-                && next.repairRounds() >= budget.repairRounds() && next.activeTime().compareTo(budget.activeTime()) >= 0, INVALID_INPUT);
+        DomainViolation.require(
+                next != null
+                        && next.modelCalls() >= budget.modelCalls()
+                        && next.toolCalls() >= budget.toolCalls()
+                        && next.repairRounds() >= budget.repairRounds()
+                        && next.activeTime().compareTo(budget.activeTime()) >= 0,
+                INVALID_INPUT);
         return copy(state, next, continuedByRunId);
     }
 
@@ -171,8 +273,14 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
      */
     public ExecutionRun linkSuccessor(UUID successorId) {
         DomainViolation.require(successorId != null && !id.equals(successorId), INVALID_INPUT);
-        DomainViolation.require(state == State.PAUSED_BUDGET || state == State.CANCELLED || (state == State.FAILED && failureKind == FailureKind.RETRYABLE), ILLEGAL_TRANSITION);
-        DomainViolation.require(continuedByRunId == null || continuedByRunId.equals(successorId), IDEMPOTENCY_CONFLICT);
+        DomainViolation.require(
+                state == State.PAUSED_BUDGET
+                        || state == State.CANCELLED
+                        || (state == State.FAILED && failureKind == FailureKind.RETRYABLE),
+                ILLEGAL_TRANSITION);
+        DomainViolation.require(
+                continuedByRunId == null || continuedByRunId.equals(successorId),
+                IDEMPOTENCY_CONFLICT);
         return copy(state, budget, successorId);
     }
 
@@ -206,6 +314,15 @@ public record ExecutionRun(UUID id, TaskScope scope, long generation, long const
      * @return 新运行
      */
     private ExecutionRun copy(State nextState, RunBudget nextBudget, UUID successor) {
-        return new ExecutionRun(id, scope, generation, constraintRevision, nextState, nextBudget, continuedFromRunId, successor, failureKind);
+        return new ExecutionRun(
+                id,
+                scope,
+                generation,
+                constraintRevision,
+                nextState,
+                nextBudget,
+                continuedFromRunId,
+                successor,
+                failureKind);
     }
 }

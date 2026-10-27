@@ -11,7 +11,6 @@ public final class SystemOverviewService {
 
     /**
      * 保存运行适配器与配置模式，避免应用服务依赖具体框架或环境 API。
-     *
      * @param agentRuntime 可读取接线标识的适配端口，不可为 null
      * @param mode 由装配层提供的运行模式，不可为 null
      */
@@ -22,7 +21,6 @@ public final class SystemOverviewService {
 
     /**
      * 生成只读工程概览；调用不探测数据库，也不创建 Agent 或真实外部请求。
-     *
      * @return 包含固定模块清单、接线标识及存储待验证占位值的概览
      */
     public SystemOverview describe() {
@@ -31,7 +29,14 @@ public final class SystemOverviewService {
         return new SystemOverview(
                 "traveling-agent",
                 mode,
-                List.of("api", "application", "domain", "agent", "infrastructure", "bootstrap", "web"),
+                List.of(
+                        "api",
+                        "application",
+                        "domain",
+                        "agent",
+                        "infrastructure",
+                        "bootstrap",
+                        "web"),
                 agentRuntime.integrationStatus(),
                 "NOT_VERIFIED",
                 false);

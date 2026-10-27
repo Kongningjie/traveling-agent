@@ -17,9 +17,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public final class RequestCorrelationFilter extends OncePerRequestFilter {
     /** {@inheritDoc} 线程归还前恢复旧绑定；异步业务使用持久化ID显式重新绑定。 */
-    @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
+    @Override
+    protected void doFilterInternal(
+            HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
         var ids = new ExecutionCorrelation.Ids(UUID.randomUUID(), UUID.randomUUID());
-        response.setHeader("X-Request-ID", ids.requestId().toString()); response.setHeader("X-Trace-ID", ids.traceId().toString());
-        try (var ignored = ExecutionCorrelation.bind(ids)) { chain.doFilter(request, response); }
+        response.setHeader("X-Request-ID", ids.requestId().toString());
+        response.setHeader("X-Trace-ID", ids.traceId().toString());
+        try (var ignored = ExecutionCorrelation.bind(ids)) {
+            chain.doFilter(request, response);
+        }
     }
 }

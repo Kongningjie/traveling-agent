@@ -19,17 +19,36 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT
  * @param evidenceRefs 实际选用的精确证据集合
  * @param preferenceVersion 实际使用的偏好版本，未用偏好时为空
  */
-public record ItineraryVersion(UUID snapshotId, TaskScope scope, int schemaVersion, String payloadHash,
-                               long constraintRevision, UUID baseVersionId, Set<EvidenceRecord.Reference> evidenceRefs,
-                               PreferenceVersion preferenceVersion) {
+public record ItineraryVersion(
+        UUID snapshotId,
+        TaskScope scope,
+        int schemaVersion,
+        String payloadHash,
+        long constraintRevision,
+        UUID baseVersionId,
+        Set<EvidenceRecord.Reference> evidenceRefs,
+        PreferenceVersion preferenceVersion) {
     /** 校验同用户偏好和单一证据版本；不把校验／审核状态写回快照。 */
     public ItineraryVersion {
-        DomainViolation.require(snapshotId != null && scope != null && schemaVersion > 0 && payloadHash != null
-                && payloadHash.matches("[0-9a-fA-F]{64}") && constraintRevision > 0 && evidenceRefs != null
-                && !snapshotId.equals(baseVersionId) && (preferenceVersion == null || preferenceVersion.userId().equals(scope.userId())), INVALID_INPUT);
-        DomainViolation.require(evidenceRefs.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
+        DomainViolation.require(
+                snapshotId != null
+                        && scope != null
+                        && schemaVersion > 0
+                        && payloadHash != null
+                        && payloadHash.matches("[0-9a-fA-F]{64}")
+                        && constraintRevision > 0
+                        && evidenceRefs != null
+                        && !snapshotId.equals(baseVersionId)
+                        && (preferenceVersion == null
+                                || preferenceVersion.userId().equals(scope.userId())),
+                INVALID_INPUT);
+        DomainViolation.require(
+                evidenceRefs.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
         evidenceRefs = Set.copyOf(evidenceRefs);
-        DomainViolation.require(evidenceRefs.stream().map(EvidenceRecord.Reference::id).distinct().count() == evidenceRefs.size(), INVALID_INPUT);
+        DomainViolation.require(
+                evidenceRefs.stream().map(EvidenceRecord.Reference::id).distinct().count()
+                        == evidenceRefs.size(),
+                INVALID_INPUT);
         payloadHash = payloadHash.toLowerCase(java.util.Locale.ROOT);
     }
 }

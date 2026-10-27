@@ -5,34 +5,49 @@ package com.lawrence.travel.application.travel;
  */
 public final class TravelStorageFailure extends RuntimeException {
     private final Code code;
+
     /**
      * 对外映射分类，资源缺失和越权使用同一结果。
      */
     public enum Code {
         /**
          * 参数结构或大小不符合契约。
-         */ INVALID_INPUT,
+         */
+        INVALID_INPUT,
         /**
          * 私有资源或关联资源不可见。
-         */ NOT_FOUND,
+         */
+        NOT_FOUND,
         /**
          * 并发更新使用了过期行版本。
-         */ STALE_VERSION,
+         */
+        STALE_VERSION,
         /**
          * 同一请求键或快照身份承载不同内容。
-         */ IDEMPOTENCY_CONFLICT,
+         */
+        IDEMPOTENCY_CONFLICT,
         /**
          * 尚未建立对应证据存储，不能接纳悬空引用。
-         */ UNSUPPORTED_REFERENCE,
+         */
+        UNSUPPORTED_REFERENCE,
         /**
          * 数据库故障，不泄露原始异常。
-         */ DEPENDENCY_UNAVAILABLE
+         */
+        DEPENDENCY_UNAVAILABLE
     }
 
     /**
      * @param code 固定失败分类
      */
-    public TravelStorageFailure(Code code) { super(java.util.Objects.requireNonNull(code).name()); this.code = code; }
-    /** @return 可确定处理的固定分类，不读取异常原文判断业务行为 */
-    public Code code() { return code; }
+    public TravelStorageFailure(Code code) {
+        super(java.util.Objects.requireNonNull(code).name());
+        this.code = code;
+    }
+
+    /**
+     * @return 可确定处理的固定分类，不读取异常原文判断业务行为
+     */
+    public Code code() {
+        return code;
+    }
 }

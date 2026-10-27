@@ -22,21 +22,36 @@ public record StageDispatch(Key key, UUID stepId, String payloadHash) {
     public record Key(UUID runId, UUID causationId, String eventType, String branchKey) {
         /** 所有维度均须明确，防止不同回答或补查被错误去重。 */
         public Key {
-            DomainViolation.require(runId != null && causationId != null && eventType != null && !eventType.isBlank()
-                    && branchKey != null && !branchKey.isBlank(), INVALID_INPUT);
+            DomainViolation.require(
+                    runId != null
+                            && causationId != null
+                            && eventType != null
+                            && !eventType.isBlank()
+                            && branchKey != null
+                            && !branchKey.isBlank(),
+                    INVALID_INPUT);
         }
     }
+
     /** 稳定请求不能缺失内容摘要。 */
     public StageDispatch {
-        DomainViolation.require(key != null && stepId != null && payloadHash != null && payloadHash.matches("[0-9a-fA-F]{64}"), INVALID_INPUT);
+        DomainViolation.require(
+                key != null
+                        && stepId != null
+                        && payloadHash != null
+                        && payloadHash.matches("[0-9a-fA-F]{64}"),
+                INVALID_INPUT);
         payloadHash = payloadHash.toLowerCase(java.util.Locale.ROOT);
     }
+
     /**
      * 相同原因重投必须保持相同目标与输入，不静默覆盖冲突。
      * @param replay 同一因果键的另一请求
      */
     public void requireSameReplay(StageDispatch replay) {
         DomainViolation.require(replay != null && key.equals(replay.key), INVALID_INPUT);
-        DomainViolation.require(stepId.equals(replay.stepId) && payloadHash.equals(replay.payloadHash), IDEMPOTENCY_CONFLICT);
+        DomainViolation.require(
+                stepId.equals(replay.stepId) && payloadHash.equals(replay.payloadHash),
+                IDEMPOTENCY_CONFLICT);
     }
 }

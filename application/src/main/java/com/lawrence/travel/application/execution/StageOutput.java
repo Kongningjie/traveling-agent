@@ -12,26 +12,47 @@ import java.util.List;
  * @param outcome 完成方式
  * @param decision 持久问题或空
  */
-public record StageOutput(String text, String checkpoint, List<StagePlan> next, Outcome outcome, DecisionRequest decision) {
+public record StageOutput(
+        String text,
+        String checkpoint,
+        List<StagePlan> next,
+        Outcome outcome,
+        DecisionRequest decision) {
     /**
      * 咨询完成与生成可接受行程严格区分。
      */
-    public enum Outcome { /**
- * 继续动态阶段。
- */ CONTINUE, /**
- * 当前分支已完成，父运行仍由剩余事件决定。
- */ BRANCH_COMPLETE, /**
- * 纯咨询完成。
- */ CONSULTATION_COMPLETE, /**
- * 等待明确回答。
- */ WAIT_USER, /** 经过精确报告门禁的候选等待用户确认，不自动生效。 */ PRESENT_CANDIDATE }
+    public enum Outcome {
+        /**
+         * 继续动态阶段。
+         */
+        CONTINUE,
+        /**
+         * 当前分支已完成，父运行仍由剩余事件决定。
+         */
+        BRANCH_COMPLETE,
+        /**
+         * 纯咨询完成。
+         */
+        CONSULTATION_COMPLETE,
+        /**
+         * 等待明确回答。
+         */
+        WAIT_USER,
+        /** 经过精确报告门禁的候选等待用户确认，不自动生效。 */
+        PRESENT_CANDIDATE
+    }
+
     /**
      * 禁止没有下一步却仍显示运行，也禁止把问题或行程生成当作咨询完成。
      */
     public StageOutput {
-        DomainViolation.require(text != null && checkpoint != null && next != null && outcome != null, DomainViolation.Code.INVALID_INPUT);
+        DomainViolation.require(
+                text != null && checkpoint != null && next != null && outcome != null,
+                DomainViolation.Code.INVALID_INPUT);
         next = List.copyOf(next);
-        DomainViolation.require((outcome == Outcome.CONTINUE) == !next.isEmpty()
-                && (outcome == Outcome.WAIT_USER) == (decision != null), DomainViolation.Code.INVALID_INPUT);
+        DomainViolation.require(
+                (outcome == Outcome.CONTINUE) == !next.isEmpty()
+                        && (outcome == Outcome.WAIT_USER) == (decision != null),
+                DomainViolation.Code.INVALID_INPUT);
     }
 }

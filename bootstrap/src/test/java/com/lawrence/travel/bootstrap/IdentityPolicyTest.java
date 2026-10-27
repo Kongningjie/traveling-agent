@@ -24,8 +24,12 @@ class IdentityPolicyTest {
     void rejectsAmbiguousCredentials() {
         assertThat(CredentialRules.loginName("  Abc_123  ")).isEqualTo("abc_123");
         assertThatThrownBy(() -> CredentialRules.loginName("../abc")).hasMessage("INVALID_INPUT");
-        assertThatThrownBy(() -> CredentialRules.requirePassword("界".repeat(25))).hasMessage("INVALID_INPUT");
-        assertThatThrownBy(() -> CredentialRules.requirePassword("test-" + Character.toString(0xD800) + "placeholder"))
+        assertThatThrownBy(() -> CredentialRules.requirePassword("界".repeat(25)))
+                .hasMessage("INVALID_INPUT");
+        assertThatThrownBy(
+                        () ->
+                                CredentialRules.requirePassword(
+                                        "test-" + Character.toString(0xD800) + "placeholder"))
                 .hasMessage("INVALID_INPUT");
     }
 
@@ -34,7 +38,8 @@ class IdentityPolicyTest {
     void hashesWithIndependentSaltAndRejectsMismatch() {
         var hasher = new BcryptPasswordHasher(10);
         String password = "test-placeholder";
-        String first = hasher.hash(password); String second = hasher.hash(password);
+        String first = hasher.hash(password);
+        String second = hasher.hash(password);
         assertThat(!first.equals(second)).isTrue();
         assertThat(hasher.matches(password, first)).isTrue();
         assertThat(hasher.matches("other-test-placeholder", first)).isFalse();
@@ -45,17 +50,34 @@ class IdentityPolicyTest {
     /** 未知、停用及密码不匹配使用同一拒绝类型；未知账号也执行同算法比较。 */
     @Test
     void accountStatusDoesNotLeakThroughAuthenticationErrors() {
-        var accounts = mock(AccountStore.class); var hasher = mock(PasswordHasher.class); var rates = mock(AuthRateLimiter.class);
+        var accounts = mock(AccountStore.class);
+        var hasher = mock(PasswordHasher.class);
+        var rates = mock(AuthRateLimiter.class);
         when(hasher.hash(anyString())).thenReturn("dummy-test-hash");
         when(hasher.matches(anyString(), anyString())).thenReturn(true);
-        var service = new IdentityService(accounts, hasher, rates, new IdentityService.Limits(30, 10, 10, Duration.ofMinutes(1)));
+        var service =
+                new IdentityService(
+                        accounts,
+                        hasher,
+                        rates,
+                        new IdentityService.Limits(30, 10, 10, Duration.ofMinutes(1)));
         when(accounts.findByLoginName("tester")).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback")).hasMessage("INVALID_CREDENTIALS");
+        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback"))
+                .hasMessage("INVALID_CREDENTIALS");
         verify(hasher).matches("test-placeholder", "dummy-test-hash");
-        when(accounts.findByLoginName("tester")).thenReturn(Optional.of(new AccountStore.Account(
-                UUID.randomUUID(), "tester", "disabled-test-hash", false, 0)));
-        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback")).hasMessage("INVALID_CREDENTIALS");
+        when(accounts.findByLoginName("tester"))
+                .thenReturn(
+                        Optional.of(
+                                new AccountStore.Account(
+                                        UUID.randomUUID(),
+                                        "tester",
+                                        "disabled-test-hash",
+                                        false,
+                                        0)));
+        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback"))
+                .hasMessage("INVALID_CREDENTIALS");
         when(hasher.matches(anyString(), anyString())).thenReturn(false);
-        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback")).hasMessage("INVALID_CREDENTIALS");
+        assertThatThrownBy(() -> service.authenticate("tester", "test-placeholder", "loopback"))
+                .hasMessage("INVALID_CREDENTIALS");
     }
 }

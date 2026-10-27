@@ -7,6 +7,7 @@ public interface InteractionCodec {
      * @return 规范 JSON
      */
     String encode(Object value);
+
     /**
      * @param text 不可信 JSON
      * @param type 明确目标

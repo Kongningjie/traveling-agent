@@ -51,12 +51,8 @@ export function useWorkspace() {
   const acceptable = computed(
     () => !busy.value && canAccept(view.value, candidate.value, ready.value),
   );
-  const answerable = computed(
-    () => !busy.value && canAnswer(view.value, card.value, ready.value),
-  );
-  const current = computed(
-    () => view.value?.itinerary as unknown as Trip | null,
-  );
+  const answerable = computed(() => !busy.value && canAnswer(view.value, card.value, ready.value));
+  const current = computed(() => view.value?.itinerary as unknown as Trip | null);
   /** 释放连接及读取，递增代次使旧账号／旧任务的迟到响应无法写回。 */
   function disconnect(): void {
     epoch++;
@@ -97,27 +93,30 @@ export function useWorkspace() {
     clearTask();
   }
   /** 明确删除已成功后清除旧页面和未知重试，防止迟到响应恢复已删除内容。 */
-  function forgetDeleted(): void {if (user.value) sessionStorage.removeItem(`travel.task.${user.value.id}`); clearTask(); busy.value = false;}
-  /** @param failure 固定异常 @param stamp 请求所属页面代次；过时异常也不能退出新账号 */
+  function forgetDeleted(): void {
+    if (user.value) sessionStorage.removeItem(`travel.task.${user.value.id}`);
+    clearTask();
+    busy.value = false;
+  }
+  /**
+   * @param failure 固定异常
+   * @param stamp 请求所属页面代次；过时异常也不能退出新账号
+   */
   function failed(failure: unknown, stamp: number): void {
     if (stamp !== epoch) return;
-    const explanation =
-      failure instanceof ApiError ? failure.message : "暂时无法完成，请重试。";
+    const explanation = failure instanceof ApiError ? failure.message : "暂时无法完成，请重试。";
     if (failure instanceof ApiError && [401, 403].includes(failure.status)) {
       clearTask();
       tasks.value = [];
       user.value = null;
-    } else if (failure instanceof ApiError && failure.status === 404)
-      clearTask();
+    } else if (failure instanceof ApiError && failure.status === 404) clearTask();
     error.value = explanation;
   }
   /** 读取本人任务；结果只应用于发起读取的身份及代次。 */
   async function listTasks(): Promise<void> {
     const stamp = epoch;
     try {
-      const result = await api.get<Task[]>(
-        `/api/v1/tasks?offset=${taskOffset.value}&limit=20`,
-      );
+      const result = await api.get<Task[]>(`/api/v1/tasks?offset=${taskOffset.value}&limit=20`);
       if (stamp === epoch) tasks.value = result;
     } catch (failure) {
       failed(failure, stamp);
@@ -134,16 +133,15 @@ export function useWorkspace() {
       const saved = sessionStorage.getItem(`travel.task.${me.id}`);
       if (saved && user.value?.id === me.id) await selectTask(saved);
     } catch (failure) {
-      if (!(failure instanceof ApiError && failure.status === 401))
-        failed(failure, stamp);
+      if (!(failure instanceof ApiError && failure.status === 401)) failed(failure, stamp);
     }
   }
-  /** @param username 用户名 @param password 仅本次提交使用 @param register 是否先注册；凭证不写存储、不保留重试闭包 */
-  async function login(
-    username: string,
-    password: string,
-    register: boolean,
-  ): Promise<void> {
+  /**
+   * @param username 用户名
+   * @param password 仅本次提交使用
+   * @param register 是否先注册；凭证不写存储、不保留重试闭包
+   */
+  async function login(username: string, password: string, register: boolean): Promise<void> {
     if (busy.value) return;
     clearTask();
     tasks.value = [];
@@ -151,8 +149,7 @@ export function useWorkspace() {
     error.value = "";
     const stamp = epoch;
     try {
-      if (register)
-        await api.post("/api/v1/auth/register", { username, password });
+      if (register) await api.post("/api/v1/auth/register", { username, password });
       const me = decodeUser(
         await api.post<unknown>("/api/v1/auth/login", {
           username,
@@ -185,14 +182,15 @@ export function useWorkspace() {
       busy.value = false;
     }
   }
-  /** @param task 本人任务ID；切换立刻清空旧内容，不触发后端取消 */
+  /**
+   * @param task 本人任务ID；切换立刻清空旧内容，不触发后端取消
+   */
   async function selectTask(task: string): Promise<void> {
     if (busy.value) return;
     clearTask();
     selected.value = task;
     versionOffset.value = 0;
-    if (user.value)
-      sessionStorage.setItem(`travel.task.${user.value.id}`, task);
+    if (user.value) sessionStorage.setItem(`travel.task.${user.value.id}`, task);
     await refresh();
     const stamp = epoch;
     polling = setInterval(() => {
@@ -218,10 +216,7 @@ export function useWorkspace() {
       const [m, d, c, v, e] = await Promise.all([
         api.get<Message[]>(`/api/v1/tasks/${task}/messages`, signal),
         api.get<Card | null>(`/api/v1/tasks/${task}/decision`, signal),
-        api.get<CandidateView | null>(
-          `/api/v1/tasks/${task}/candidate`,
-          signal,
-        ),
+        api.get<CandidateView | null>(`/api/v1/tasks/${task}/candidate`, signal),
         api.get<VersionSummary[]>(
           `/api/v1/tasks/${task}/versions?offset=${versionOffset.value}&limit=20`,
           signal,
@@ -236,8 +231,7 @@ export function useWorkspace() {
       }
       if (
         view.value &&
-        cursorSequence(task, after.cursor) <
-          cursorSequence(task, view.value.cursor)
+        cursorSequence(task, after.cursor) < cursorSequence(task, view.value.cursor)
       ) {
         rerun = true;
         return;
@@ -267,7 +261,11 @@ export function useWorkspace() {
       }
     }
   }
-  /** @param task 当前任务 @param stamp 页面代次 @param initial 一致快照水位；只推进实际应用的事件，断线后补读 */
+  /**
+   * @param task 当前任务
+   * @param stamp 页面代次
+   * @param initial 一致快照水位；只推进实际应用的事件，断线后补读
+   */
   function connect(task: string, stamp: number, initial: string): void {
     let cursor = initial;
     const channel = new EventSource(
@@ -304,7 +302,9 @@ export function useWorkspace() {
         }, 1000);
     };
   }
-  /** @param command 已冻结幂等命令；未知网络结果仅供用户显式原样重试，不自动重发 */
+  /**
+   * @param command 已冻结幂等命令；未知网络结果仅供用户显式原样重试，不自动重发
+   */
   async function execute(command: () => Promise<unknown>): Promise<void> {
     if (busy.value) return;
     const stamp = epoch;
@@ -335,11 +335,7 @@ export function useWorkspace() {
       )
         created = result.taskId;
     } catch (failure) {
-      if (
-        stamp === epoch &&
-        failure instanceof ApiError &&
-        failure.status === 0
-      ) {
+      if (stamp === epoch && failure instanceof ApiError && failure.status === 0) {
         retry = command;
         retryable.value = true;
       }
@@ -353,18 +349,28 @@ export function useWorkspace() {
   async function retryCommand(): Promise<void> {
     if (retry) await execute(retry);
   }
-  /** @param text 用户完整旅行想法；不默认任何范围、预算或已订状态，缺项由后端协商。 */
+  /**
+   * @param text 用户完整旅行想法；不默认任何范围、预算或已订状态，缺项由后端协商。
+   */
   async function createTask(text: string): Promise<void> {
     const body = { requestId: crypto.randomUUID(), ...conversationInput(text) };
     await execute(() => api.post<{ taskId: string }>("/api/v1/tasks", body));
   }
-  /** @param text 自由修改 @param facts 明确字段编辑；保留用户尚未明确修改的要求 */
+  /**
+   * @param text 自由修改
+   * @param facts 明确字段编辑；保留用户尚未明确修改的要求
+   */
   async function send(text: string, facts: Fact[] = []): Promise<void> {
     const task = selected.value;
     const body = { inputId: crypto.randomUUID(), text, facts };
     await execute(() => api.post(`/api/v1/tasks/${task}/messages`, body));
   }
-  /** @param action 明确动作 @param selectedOptions 本次明确选择 @param text 自由回答 @param authorization 显式勾选的有限范围 */
+  /**
+   * @param action 明确动作
+   * @param selectedOptions 本次明确选择
+   * @param text 自由回答
+   * @param authorization 显式勾选的有限范围
+   */
   async function answer(
     action: string,
     selectedOptions: Record<string, string>,
@@ -401,9 +407,7 @@ export function useWorkspace() {
       generation: view.value.generation,
       snapshotHash: v.payloadHash,
     };
-    await execute(() =>
-      api.post<{ status: string }>(`/api/v1/tasks/${task}/accept`, body),
-    );
+    await execute(() => api.post<{ status: string }>(`/api/v1/tasks/${task}/accept`, body));
   }
   /** 用户只要求重新校验时使用独立入口；即使报告恢复新鲜也不会被解释为接受。 */
   async function recheck(): Promise<void> {
@@ -426,13 +430,13 @@ export function useWorkspace() {
       generation: view.value.generation,
       snapshotHash: value.version.payloadHash,
     };
-    await execute(() =>
-      api.post(`/api/v1/tasks/${task}/candidate/revalidate`, body),
-    );
+    await execute(() => api.post(`/api/v1/tasks/${task}/candidate/revalidate`, body));
   }
   // 独立读取序号防止同任务内快速选择历史时的响应乱序。
   let historyTicket = 0;
-  /** @param id 历史快照ID，读取后比较当前生效版本；不触发恢复 */
+  /**
+   * @param id 历史快照ID，读取后比较当前生效版本；不触发恢复
+   */
   async function inspect(id: string): Promise<void> {
     const stamp = epoch,
       ticket = ++historyTicket,
@@ -441,13 +445,9 @@ export function useWorkspace() {
     history.value = null;
     changes.value = [];
     try {
-      const detail = await api.get<VersionDetail>(
-        `/api/v1/tasks/${task}/versions/${id}`,
-      );
+      const detail = await api.get<VersionDetail>(`/api/v1/tasks/${task}/versions/${id}`);
       const diff = reference
-        ? await api.get<Change[]>(
-            `/api/v1/tasks/${task}/version-diff?from=${reference}&to=${id}`,
-          )
+        ? await api.get<Change[]>(`/api/v1/tasks/${task}/version-diff?from=${reference}&to=${id}`)
         : [];
       if (
         stamp === epoch &&
@@ -461,14 +461,11 @@ export function useWorkspace() {
       failed(failure, stamp);
     }
   }
-  /** @param snapshot 历史目标；CAS预期从已显示一致视图捕获，恢复仍需校验、审核、再次接受 */
+  /**
+   * @param snapshot 历史目标；CAS预期从已显示一致视图捕获，恢复仍需校验、审核、再次接受
+   */
   async function restore(snapshot: string): Promise<void> {
-    if (
-      !ready.value ||
-      !view.value?.currentVersionId ||
-      view.value.pendingInput
-    )
-      return;
+    if (!ready.value || !view.value?.currentVersionId || view.value.pendingInput) return;
     const task = selected.value;
     const body = {
       requestId: crypto.randomUUID(),
@@ -476,11 +473,12 @@ export function useWorkspace() {
       revision: view.value.constraintRevision,
       generation: view.value.generation,
     };
-    await execute(() =>
-      api.post(`/api/v1/tasks/${task}/versions/${snapshot}/restore`, body),
-    );
+    await execute(() => api.post(`/api/v1/tasks/${task}/versions/${snapshot}/restore`, body));
   }
-  /** @param id 业务对象 @param locked 明确要保留或解除；提交完整锁定集合，不由推荐自动更改 */
+  /**
+   * @param id 业务对象
+   * @param locked 明确要保留或解除；提交完整锁定集合，不由推荐自动更改
+   */
   async function lock(id: string, locked: boolean): Promise<void> {
     const reqs = (view.value?.requirements.requirements ?? []) as {
       field: string;
@@ -490,25 +488,25 @@ export function useWorkspace() {
     const ids = new Set(raw && raw !== "NONE" ? raw.split(",") : []);
     if (locked) ids.add(id);
     else ids.delete(id);
-    await send("", [
-      { field: "lockedIds", value: [...ids].join(",") || "NONE", quote: null },
-    ]);
+    await send("", [{ field: "lockedIds", value: [...ids].join(",") || "NONE", quote: null }]);
   }
   /** 显式取消当前运行；关闭页面或断线均不执行这里。 */
   async function cancel(): Promise<void> {
     if (!view.value?.runId) return;
     const task = selected.value,
       run = view.value.runId;
-    await execute(() =>
-      api.post(`/api/v1/tasks/${task}/runs/${run}/cancel`, {}),
-    );
+    await execute(() => api.post(`/api/v1/tasks/${task}/runs/${run}/cancel`, {}));
   }
-  /** @param direction 上一页或下一页，不依赖本地数据猜测总页数 */
+  /**
+   * @param direction 上一页或下一页，不依赖本地数据猜测总页数
+   */
   async function pageTasks(direction: number): Promise<void> {
     taskOffset.value = Math.max(0, taskOffset.value + direction * 20);
     await listTasks();
   }
-  /** @param direction 历史分页，切换后重新读取一致视图 */
+  /**
+   * @param direction 历史分页，切换后重新读取一致视图
+   */
   async function pageVersions(direction: number): Promise<void> {
     versionOffset.value = Math.max(0, versionOffset.value + direction * 20);
     await refresh();

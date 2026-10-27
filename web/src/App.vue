@@ -12,11 +12,7 @@ import SupportPanel from "./components/SupportPanel.vue";
 import AdvicePanel from "./components/AdvicePanel.vue";
 import DecisionCard from "./components/DecisionCard.vue";
 import ItineraryPanel from "./components/ItineraryPanel.vue";
-import {
-  sourceLink,
-  currentNeedsValidation,
-  replyMode,
-} from "./workspace/guards";
+import { sourceLink, currentNeedsValidation, replyMode } from "./workspace/guards";
 import { useWorkspace } from "./workspace/useWorkspace";
 import { useDialogue } from "./workspace/useDialogue";
 import type { DocumentView } from "./workspace/documents";
@@ -65,7 +61,9 @@ const {
   pageTasks,
   pageVersions,
 } = useWorkspace();
-const dialogue = useDialogue(user, async (id) => { if (selected.value !== id) await selectTask(id); });
+const dialogue = useDialogue(user, async (id) => {
+  if (selected.value !== id) await selectTask(id);
+});
 const chatSelected = dialogue.selected;
 const chatView = dialogue.current;
 const chats = dialogue.chats;
@@ -74,11 +72,15 @@ const chatError = dialogue.error;
 const chatRetryable = dialogue.retryable;
 const chatOffset = dialogue.offset;
 const hasConversation = computed(() => Boolean(selected.value || chatSelected.value));
-const acceptable = computed(() => workspaceAcceptable.value && !chatBusy.value && !chatView.value?.blocked);
+const acceptable = computed(
+  () => workspaceAcceptable.value && !chatBusy.value && !chatView.value?.blocked,
+);
 /** 打开独立聊天前释放旧任务读取，聊天切换不停止后台业务。 */
 async function openChat(id: string): Promise<void> {
   if (busy.value || retryable.value || chatBusy.value || chatRetryable.value) return;
-  newConversation(); sidebarOpen.value = false; await dialogue.open(id);
+  newConversation();
+  sidebarOpen.value = false;
+  await dialogue.open(id);
 }
 const username = ref(""),
   password = ref(""),
@@ -98,9 +100,16 @@ const composer = ref<InstanceType<typeof ChatComposer>>(),
   feedbackDialog = ref<HTMLDialogElement>(),
   documentPanel = ref<InstanceType<typeof DocumentPanel>>();
 const feedbackOpen = ref(false);
-const chatDocuments = ref<DocumentView[]>([]), selectedDocuments = ref<string[]>([]);
-watch(chatSelected, () => { chatDocuments.value = []; selectedDocuments.value = []; });
-/** @param id 上传所在聊天 @param document 新文件；只选择本轮资料，不自动调用模型。 */
+const chatDocuments = ref<DocumentView[]>([]),
+  selectedDocuments = ref<string[]>([]);
+watch(chatSelected, () => {
+  chatDocuments.value = [];
+  selectedDocuments.value = [];
+});
+/**
+ * @param id 上传所在聊天
+ * @param document 新文件；只选择本轮资料，不自动调用模型。
+ */
 async function uploadedDocument(id: string, document: string): Promise<void> {
   if (chatSelected.value !== id) await dialogue.open(id);
   if (chatSelected.value !== id) return;
@@ -108,7 +117,10 @@ async function uploadedDocument(id: string, document: string): Promise<void> {
   void dialogue.list();
   void composer.value?.focus();
 }
-/** @param text 可编辑的自然语言草稿 @param document 选中的资料身份；快捷操作也须用户点击发送。 */
+/**
+ * @param text 可编辑的自然语言草稿
+ * @param document 选中的资料身份；快捷操作也须用户点击发送。
+ */
 function analyzeDocument(text: string, document: string): void {
   selectedDocuments.value = [document];
   message.value = text;
@@ -144,9 +156,7 @@ const starters = [
   },
 ];
 const taskTitle = computed(
-  () =>
-    tasks.value.find((t) => t.task.scope.taskId === selected.value)?.title ??
-    "这趟旅行",
+  () => tasks.value.find((t) => t.task.scope.taskId === selected.value)?.title ?? "这趟旅行",
 );
 const mode = computed(() =>
   target.value
@@ -157,13 +167,13 @@ const mode = computed(() =>
 );
 const inputDisabled = computed(
   () =>
-    busy.value || chatBusy.value ||
-    retryable.value || chatRetryable.value ||
+    busy.value ||
+    chatBusy.value ||
+    retryable.value ||
+    chatRetryable.value ||
     Boolean(selected.value && mode.value === "SYNCING"),
 );
-const active = computed(() =>
-  ["QUEUED", "RUNNING"].includes(view.value?.state ?? ""),
-);
+const active = computed(() => ["QUEUED", "RUNNING"].includes(view.value?.state ?? ""));
 const paused = computed(() =>
   ["PAUSED_QUOTA", "PAUSED_BUDGET", "FAILED"].includes(view.value?.state ?? ""),
 );
@@ -183,20 +193,34 @@ const stoppable = computed(() =>
 /** 优先停止正在理解的消息，其次停止旅行执行；暂停待澄清的消息仍可在同一入口取消处理。 */
 const stopMessage = computed(() => {
   const pending = [...(chatView.value?.messages ?? [])].reverse();
-  return pending.find(item => ['QUEUED', 'RUNNING'].includes(item.state))
-    ?? (stoppable.value ? undefined : pending.find(item => ['PAUSED', 'CLARIFY'].includes(item.state)));
+  return (
+    pending.find((item) => ["QUEUED", "RUNNING"].includes(item.state)) ??
+    (stoppable.value
+      ? undefined
+      : pending.find((item) => ["PAUSED", "CLARIFY"].includes(item.state)))
+  );
 });
 /** 计算中始终提供停止；已暂停或等待用户时，输入草稿即可恢复发送，避免挡住澄清和决策回答。 */
-const composerStopping = computed(() => Boolean(
-  ['QUEUED', 'RUNNING'].includes(stopMessage.value?.state ?? '') || active.value
-  || (!message.value.trim() && (stopMessage.value || stoppable.value)),
-));
-const stopDisabled = computed(() => busy.value || chatBusy.value || retryable.value || chatRetryable.value || (!stopMessage.value && !ready.value));
+const composerStopping = computed(() =>
+  Boolean(
+    ["QUEUED", "RUNNING"].includes(stopMessage.value?.state ?? "") ||
+      active.value ||
+      (!message.value.trim() && (stopMessage.value || stoppable.value)),
+  ),
+);
+const stopDisabled = computed(
+  () =>
+    busy.value ||
+    chatBusy.value ||
+    retryable.value ||
+    chatRetryable.value ||
+    (!stopMessage.value && !ready.value),
+);
 /** 只提交当前可见对象的原停止命令，不删除消息、不重试模型，未知写入结果须先同步。 */
 async function stopCurrent(): Promise<void> {
   if (stopDisabled.value) return;
   const messageId = stopMessage.value?.id;
-  if (messageId) await dialogue.act(messageId, 'WITHDRAW');
+  if (messageId) await dialogue.act(messageId, "WITHDRAW");
   else if (stoppable.value) await cancel();
 }
 /** 业务字段的可读名称，显示名称不改变后端规范值。 */
@@ -217,7 +241,10 @@ const fieldLabels: Record<string, string> = {
   lockedIds: "锁定安排",
   changeTargets: "本次修改对象",
 };
-/** @param value 服务端状态 @returns 用户可理解的审核结果，不把未知当作通过。 */
+/**
+ * @param value 服务端状态
+ * @returns 用户可理解的审核结果，不把未知当作通过。
+ */
 function reportLabel(value: string | undefined): string {
   return value === "PASS"
     ? "已通过"
@@ -227,9 +254,7 @@ function reportLabel(value: string | undefined): string {
         ? "待核实"
         : "待执行";
 }
-const requirements = computed(
-  () => (view.value?.requirements.requirements ?? []) as Requirement[],
-);
+const requirements = computed(() => (view.value?.requirements.requirements ?? []) as Requirement[]);
 const lockedIds = computed(() => {
   const value = requirements.value.find((r) => r.field === "lockedIds")?.value;
   return value && value !== "NONE" ? value.split(",") : [];
@@ -267,29 +292,29 @@ async function submitMessage(): Promise<void> {
     submittedText = text;
   }
   try {
-    if (selectedDocuments.value.length || ((chatSelected.value || !task) && !target.value && !Object.keys(chosenOptions.value).length)) {
+    if (
+      selectedDocuments.value.length ||
+      ((chatSelected.value || !task) && !target.value && !Object.keys(chosenOptions.value).length)
+    ) {
       const documents = [...selectedDocuments.value];
-      if (documents.some(id => !chatDocuments.value.some(d => d.id === id && d.state === "READY"))) return;
+      if (
+        documents.some((id) => !chatDocuments.value.some((d) => d.id === id && d.state === "READY"))
+      )
+        return;
       const saved = await dialogue.send(text, documents);
-      if (saved) selectedDocuments.value = selectedDocuments.value.filter(id => !documents.includes(id));
+      if (saved)
+        selectedDocuments.value = selectedDocuments.value.filter((id) => !documents.includes(id));
       if (saved && message.value === text) message.value = "";
       return;
     }
     if (!task) await createTask(text);
-    else if (mode.value === "ANSWER")
-      await answer("ANSWER", { ...chosenOptions.value }, text, []);
+    else if (mode.value === "ANSWER") await answer("ANSWER", { ...chosenOptions.value }, text, []);
     else
       await send(
         text,
-        target.value
-          ? [{ field: "changeTargets", value: target.value, quote: null }]
-          : [],
+        target.value ? [{ field: "changeTargets", value: target.value, quote: null }] : [],
       );
-    if (
-      !error.value &&
-      message.value === text &&
-      (selected.value === task || creating)
-    )
+    if (!error.value && message.value === text && (selected.value === task || creating))
       message.value = "";
     if (!error.value) {
       chosenOptions.value = {};
@@ -300,7 +325,12 @@ async function submitMessage(): Promise<void> {
     submittedText = "";
   }
 }
-/** @param action 明确动作 @param choices 用户选项 @param text 卡片附带原文 @param authorization 显式有限授权；失败保留选择，成功后清除本轮选择草稿。 */
+/**
+ * @param action 明确动作
+ * @param choices 用户选项
+ * @param text 卡片附带原文
+ * @param authorization 显式有限授权；失败保留选择，成功后清除本轮选择草稿。
+ */
 async function submitDecision(
   action: string,
   choices: Record<string, string>,
@@ -316,7 +346,9 @@ async function submitDecision(
   )
     decisionEditor.value?.reset();
 }
-/** @param text 示例草稿；点击只编辑和聚焦，不发请求。 */
+/**
+ * @param text 示例草稿；点击只编辑和聚焦，不发请求。
+ */
 function useStarter(text: string): void {
   message.value = text;
   void composer.value?.focus();
@@ -330,14 +362,32 @@ function startConversation(): void {
   message.value = "";
   void nextTick(() => composer.value?.focus());
 }
-/** 删除当前对象时清除私有缓存和恢复指针；删除其他列表项只刷新列表，不改变当前对话。
- * @param kind 所点列表项类型 @param target 已删除对象 @param linkedTask 聊天关联旅行。 */
-async function deletedConversation(kind: "CHAT" | "TASK", target: string, linkedTask?: string | null): Promise<void> {
-  const affectsCurrent = kind === "CHAT" ? chatSelected.value === target || Boolean(linkedTask && selected.value === linkedTask) : selected.value === target || chatView.value?.chat.taskId === target;
-  if (affectsCurrent) { dialogue.forget(); forgetDeleted(); detailsOpen.value = false; }
-  await dialogue.list(); await pageTasks(0);
+/**
+ * 删除当前对象时清除私有缓存和恢复指针；删除其他列表项只刷新列表，不改变当前对话。
+ * @param kind 所点列表项类型
+ * @param target 已删除对象
+ * @param linkedTask 聊天关联旅行。
+ */
+async function deletedConversation(
+  kind: "CHAT" | "TASK",
+  target: string,
+  linkedTask?: string | null,
+): Promise<void> {
+  const affectsCurrent =
+    kind === "CHAT"
+      ? chatSelected.value === target || Boolean(linkedTask && selected.value === linkedTask)
+      : selected.value === target || chatView.value?.chat.taskId === target;
+  if (affectsCurrent) {
+    dialogue.forget();
+    forgetDeleted();
+    detailsOpen.value = false;
+  }
+  await dialogue.list();
+  await pageTasks(0);
 }
-/** @param id 本人任务；切换只读取，不重新执行规划。 */
+/**
+ * @param id 本人任务；切换只读取，不重新执行规划。
+ */
 async function openTask(id: string): Promise<void> {
   if (chatBusy.value || chatRetryable.value) return;
   dialogue.start();
@@ -345,8 +395,12 @@ async function openTask(id: string): Promise<void> {
   await selectTask(id);
 }
 // 恢复旧任务或点击旧任务时也接入聊天收件；后台选中关联任务时chatSelected已存在，不重复关联。
-watch(selected, async (id) => { if (id && !chatSelected.value && user.value) await dialogue.attach(id); });
-/** @param tab 用户主动展开的详情；候选到达时不抢占聊天。 */
+watch(selected, async (id) => {
+  if (id && !chatSelected.value && user.value) await dialogue.attach(id);
+});
+/**
+ * @param tab 用户主动展开的详情；候选到达时不抢占聊天。
+ */
 function openDetails(tab: string): void {
   detailsTab.value = tab;
   detailsOpen.value = true;
@@ -371,17 +425,21 @@ function closeOverlays(): void {
   preferenceDialog.value?.close();
   feedbackDialog.value?.close();
 }
-/** @param item 服务端消息 @returns 原文或明确字段摘要，不虚构助手回复。 */
+/**
+ * @param item 服务端消息
+ * @returns 原文或明确字段摘要，不虚构助手回复。
+ */
 function messageText(item: Message): string {
   return (
     item.text ||
-    item.facts
-      .map((f) => `${fieldLabels[f.field] ?? f.field}：${f.value}`)
-      .join("；") ||
+    item.facts.map((f) => `${fieldLabels[f.field] ?? f.field}：${f.value}`).join("；") ||
     "已提交选择或回答"
   );
 }
-/** @param requirement 权威字段 @returns 可读状态；未知依旧保留。 */
+/**
+ * @param requirement 权威字段
+ * @returns 可读状态；未知依旧保留。
+ */
 function requirementText(requirement: Requirement): string {
   if (requirement.field === "budgetRule")
     return (
@@ -410,8 +468,7 @@ watch(
   () => [user.value?.id, selected.value],
   (now, before) => {
     // 创建回执选择任务时，仅保留同账号在等待期间新写的草稿；跨账号必须全部清除。
-    if (now[0] !== before[0] || !creating || message.value === submittedText)
-      message.value = "";
+    if (now[0] !== before[0] || !creating || message.value === submittedText) message.value = "";
     target.value = "";
     password.value = "";
     chosenOptions.value = {};
@@ -427,11 +484,7 @@ watch(
 );
 // 逐个监听业务标识；不能监听每次新建的数组，否则同版本轮询也会清空仍有效的选择草稿。
 watch(
-  [
-    () => selected.value,
-    () => card.value?.decision.id,
-    () => card.value?.decision.revision,
-  ],
+  [() => selected.value, () => card.value?.decision.id, () => card.value?.decision.revision],
   () => {
     chosenOptions.value = {};
   },
@@ -448,19 +501,14 @@ watch(
     const element = scrollArea.value;
     if (!element) return;
     const follow =
-      element.scrollHeight - element.scrollTop - element.clientHeight < 180 ||
-      busy.value;
+      element.scrollHeight - element.scrollTop - element.clientHeight < 180 || busy.value;
     await nextTick();
     if (follow) element.scrollTop = element.scrollHeight;
   },
 );
 // 当前任务、历史选择或服务端水位变化后重新确认，不能把旧确认意图用于新状态。
 watch(
-  [
-    () => selected.value,
-    () => history.value?.summary.version.snapshotId,
-    () => view.value?.cursor,
-  ],
+  [() => selected.value, () => history.value?.summary.version.snapshotId, () => view.value?.cursor],
   () => {
     showRestore.value = false;
   },
@@ -468,11 +516,7 @@ watch(
 onMounted(initialize);
 </script>
 <template>
-  <div
-    class="app-shell"
-    :class="{ authenticated: user }"
-    @keydown.esc="closeOverlays"
-  >
+  <div class="app-shell" :class="{ authenticated: user }" @keydown.esc="closeOverlays">
     <header v-if="!user" class="topbar">
       <a class="brand" href="/">行旅<span>旅行助手</span></a
       ><span class="muted">让想法，自由出发</span>
@@ -481,23 +525,14 @@ onMounted(initialize);
       <section>
         <p class="eyebrow">想去哪里，都可以从这里开始</p>
         <h1>把想法，慢慢变成旅程。</h1>
-        <p>
-          一个人、与家人，或和朋友同行。说说你的期待，一起比较、调整，再决定出发。
-        </p>
-        <p class="muted">
-          首版支持1～3个城市、1～10天。所有候选均由你确认后生效。
-        </p>
+        <p>一个人、与家人，或和朋友同行。说说你的期待，一起比较、调整，再决定出发。</p>
+        <p class="muted">首版支持1～3个城市、1～10天。所有候选均由你确认后生效。</p>
       </section>
       <form class="panel auth" @submit.prevent="authenticate">
         <h2>{{ register ? "创建账号" : "欢迎回来" }}</h2>
         <label>
           用户名
-          <input
-            v-model="username"
-            required
-            autocomplete="username"
-            maxlength="64"
-          />
+          <input v-model="username" required autocomplete="username" maxlength="64" />
         </label>
         <label>
           密码
@@ -543,10 +578,7 @@ onMounted(initialize);
           :disabled="busy || retryable || chatBusy || chatRetryable"
           @click="startConversation"
         >
-          <span aria-hidden="true">＋</span>开启新对话<span
-            class="new-chat-hint"
-            >↗</span
-          >
+          <span aria-hidden="true">＋</span>开启新对话<span class="new-chat-hint">↗</span>
         </button>
         <div class="sidebar-label">
           <span>我的对话</span
@@ -554,27 +586,60 @@ onMounted(initialize);
             class="icon-button"
             :disabled="busy"
             aria-label="刷新旅行列表"
-            @click="pageTasks(0); dialogue.page(0)"
+            @click="
+              pageTasks(0);
+              dialogue.page(0);
+            "
           >
             ↻
           </button>
         </div>
         <nav class="task-list" aria-label="旅行任务">
-          <div v-for="chat in chats" :key="chat.id" class="task-row" :class="{ active: chatSelected === chat.id }">
-            <button class="task-button"
-              :class="{ active: chatSelected === chat.id }" :disabled="busy || retryable || chatBusy || chatRetryable"
-              @click="openChat(chat.id)">
-              <span class="task-icon" aria-hidden="true">◷</span><span><strong>{{ chat.title }}</strong>
-              <small>{{ chat.taskId ? '旅行规划' : '交流咨询' }}</small></span>
+          <div
+            v-for="chat in chats"
+            :key="chat.id"
+            class="task-row"
+            :class="{ active: chatSelected === chat.id }"
+          >
+            <button
+              class="task-button"
+              :class="{ active: chatSelected === chat.id }"
+              :disabled="busy || retryable || chatBusy || chatRetryable"
+              @click="openChat(chat.id)"
+            >
+              <span class="task-icon" aria-hidden="true">◷</span
+              ><span
+                ><strong>{{ chat.title }}</strong>
+                <small>{{ chat.taskId ? "旅行规划" : "交流咨询" }}</small></span
+              >
             </button>
-            <ConversationActions kind="CHAT" :target="chat.id" :title="chat.title" :disabled="busy || retryable || chatBusy || chatRetryable" @deleted="deletedConversation('CHAT', chat.id, chat.taskId)" />
+            <ConversationActions
+              kind="CHAT"
+              :target="chat.id"
+              :title="chat.title"
+              :disabled="busy || retryable || chatBusy || chatRetryable"
+              @deleted="deletedConversation('CHAT', chat.id, chat.taskId)"
+            />
           </div>
           <div v-if="chatOffset || chats.length >= 20" class="sidebar-pagination">
-            <button :disabled="chatBusy || chatRetryable || !chatOffset" @click="dialogue.page(-1)">上一页对话</button>
-            <button :disabled="chatBusy || chatRetryable || chats.length < 20" @click="dialogue.page(1)">下一页对话</button>
+            <button :disabled="chatBusy || chatRetryable || !chatOffset" @click="dialogue.page(-1)">
+              上一页对话
+            </button>
+            <button
+              :disabled="chatBusy || chatRetryable || chats.length < 20"
+              @click="dialogue.page(1)"
+            >
+              下一页对话
+            </button>
           </div>
-          <div v-for="task in tasks.filter((t) => !chats.some((c) => c.taskId === t.task.scope.taskId))"
-            :key="task.task.scope.taskId" class="task-row" :class="{ active: selected === task.task.scope.taskId }">
+          <div
+            v-for="task in tasks.filter(
+              (t) => !chats.some((c) => c.taskId === t.task.scope.taskId),
+            )"
+            :key="task.task.scope.taskId"
+            class="task-row"
+            :class="{ active: selected === task.task.scope.taskId }"
+          >
             <button
               class="task-button"
               :class="{ active: selected === task.task.scope.taskId }"
@@ -589,18 +654,20 @@ onMounted(initialize);
                 }}</small></span
               >
             </button>
-            <ConversationActions kind="TASK" :target="task.task.scope.taskId" :title="task.title" :disabled="busy || retryable || chatBusy || chatRetryable" @deleted="deletedConversation('TASK', task.task.scope.taskId)" />
+            <ConversationActions
+              kind="TASK"
+              :target="task.task.scope.taskId"
+              :title="task.title"
+              :disabled="busy || retryable || chatBusy || chatRetryable"
+              @deleted="deletedConversation('TASK', task.task.scope.taskId)"
+            />
           </div>
           <p v-if="!tasks.length && !chats.length" class="sidebar-empty">
             每段旅程，都从一句话开始。<br />聊聊你想去的地方吧。
           </p>
         </nav>
         <div v-if="taskOffset || tasks.length >= 20" class="sidebar-pagination">
-          <button
-            class="quiet"
-            :disabled="busy || retryable || !taskOffset"
-            @click="pageTasks(-1)"
-          >
+          <button class="quiet" :disabled="busy || retryable || !taskOffset" @click="pageTasks(-1)">
             上一页</button
           ><button
             class="quiet"
@@ -610,7 +677,13 @@ onMounted(initialize);
             下一页
           </button>
         </div>
-        <AccountMenu :name="user.loginName" :busy="busy" @preferences="openPreferences" @feedback="openFeedback" @logout="logout" />
+        <AccountMenu
+          :name="user.loginName"
+          :busy="busy"
+          @preferences="openPreferences"
+          @feedback="openFeedback"
+          @logout="logout"
+        />
       </aside>
       <section class="chat-main" aria-label="旅行对话">
         <header class="chat-header">
@@ -637,11 +710,7 @@ onMounted(initialize);
             行程与资料 <span aria-hidden="true">◫</span>
           </button>
         </header>
-        <div
-          ref="scrollArea"
-          class="chat-scroll"
-          :class="{ 'is-home': !hasConversation }"
-        >
+        <div ref="scrollArea" class="chat-scroll" :class="{ 'is-home': !hasConversation }">
           <section v-if="!hasConversation" class="conversation-home">
             <div class="home-mark" aria-hidden="true">
               <svg viewBox="0 0 48 48">
@@ -652,9 +721,7 @@ onMounted(initialize);
             </div>
             <p class="home-eyebrow">每一种旅行想法，都值得聊聊</p>
             <h2>下一程，想去哪里？</h2>
-            <p class="home-description">
-              还没想好也没关系。说说你的期待，我们一起慢慢完善。
-            </p>
+            <p class="home-description">还没想好也没关系。说说你的期待，我们一起慢慢完善。</p>
             <ChatComposer
               ref="composer"
               v-model="message"
@@ -676,30 +743,66 @@ onMounted(initialize);
                 :disabled="busy || retryable || chatBusy || chatRetryable"
                 @click="useStarter(starter.text)"
               >
-                <span class="starter-icon" aria-hidden="true">{{
-                  starter.icon
-                }}</span
+                <span class="starter-icon" aria-hidden="true">{{ starter.icon }}</span
                 ><strong>{{ starter.title }}</strong
                 ><small>{{ starter.note }}</small>
               </button>
             </div>
-            <p class="home-scope">
-              支持 1–3 个城市 · 1–10 天 <span>先聊想法，再确定安排</span>
-            </p>
+            <p class="home-scope">支持 1–3 个城市 · 1–10 天 <span>先聊想法，再确定安排</span></p>
           </section>
           <div v-else class="chat-thread">
             <template v-if="chatSelected">
               <template v-for="item in chatView?.messages ?? []" :key="item.id">
-                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p><div v-if="item.documents?.length" class="message-files"><span v-for="doc in item.documents" :key="doc.id">▤ {{ doc.name }}{{ doc.available ? '' : '（暂不可读）' }}</span></div></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已停止处理，原文保留' : '已保存' }}</small></article>
-                <AssistantReply v-if="item.reply || ['PAUSED','CLARIFY'].includes(item.state)" :key="chatSelected + item.id" :text="item.reply" :chat="chatSelected" :target="item.id" :can-retry="['PAUSED','CLARIFY'].includes(item.state)" :retry-disabled="chatBusy || chatRetryable" @retry="dialogue.act(item.id, 'RETRY')" />
-                <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
-                <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
-                  <h3>请确认这次操作</h3><p>{{ item.operation.description }}</p>
-                  <button :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'CONFIRM')">确认执行</button>
-                  <button class="quiet" :disabled="chatBusy || chatRetryable" @click="dialogue.act(item.id, 'WITHDRAW')">取消</button>
+                <article class="chat-message user-message">
+                  <div class="message-bubble">
+                    <p>{{ item.text }}</p>
+                    <div v-if="item.documents?.length" class="message-files">
+                      <span v-for="doc in item.documents" :key="doc.id"
+                        >▤ {{ doc.name }}{{ doc.available ? "" : "（暂不可读）" }}</span
+                      >
+                    </div>
+                  </div>
+                  <small v-if="item.state !== 'DONE'">{{
+                    item.state === "WITHDRAWN" ? "已停止处理，原文保留" : "已保存"
+                  }}</small>
+                </article>
+                <AssistantReply
+                  v-if="item.reply || ['PAUSED', 'CLARIFY'].includes(item.state)"
+                  :key="chatSelected + item.id"
+                  :text="item.reply"
+                  :chat="chatSelected"
+                  :target="item.id"
+                  :can-retry="['PAUSED', 'CLARIFY'].includes(item.state)"
+                  :retry-disabled="chatBusy || chatRetryable"
+                  @retry="dialogue.act(item.id, 'RETRY')"
+                />
+                <p v-if="['QUEUED', 'RUNNING'].includes(item.state)" class="muted" role="status">
+                  {{ item.state === "QUEUED" ? "已保存，等待理解你的想法…" : "正在理解你的想法…" }}
+                </p>
+                <section
+                  v-if="item.state === 'CONFIRM' && item.operation"
+                  class="panel operation-confirmation"
+                >
+                  <h3>请确认这次操作</h3>
+                  <p>{{ item.operation.description }}</p>
+                  <button
+                    :disabled="chatBusy || chatRetryable"
+                    @click="dialogue.act(item.id, 'CONFIRM')"
+                  >
+                    确认执行
+                  </button>
+                  <button
+                    class="quiet"
+                    :disabled="chatBusy || chatRetryable"
+                    @click="dialogue.act(item.id, 'WITHDRAW')"
+                  >
+                    取消
+                  </button>
                 </section>
               </template>
-              <p v-if="chatView?.blocked" class="run-note">有输入待理解或澄清，规划可以继续计算；候选展示与接受暂缓。</p>
+              <p v-if="chatView?.blocked" class="run-note">
+                有输入待理解或澄清，规划可以继续计算；候选展示与接受暂缓。
+              </p>
             </template>
             <article
               v-for="item in messages.filter((m) => !chatView?.messages.some((x) => x.id === m.id))"
@@ -709,19 +812,13 @@ onMounted(initialize);
               <div class="message-bubble">
                 <p>{{ messageText(item) }}</p>
               </div>
-              <small>{{
-                item.state === "APPLIED" ? "已记录" : "已保存"
-              }}</small>
+              <small>{{ item.state === "APPLIED" ? "已记录" : "已保存" }}</small>
             </article>
             <p v-if="!chatSelected && !messages.length" class="muted">正在同步这段旅行对话…</p>
             <div v-if="requirements.length" class="understood-note">
               <span class="assistant-mark" aria-hidden="true">行</span
-              ><span
-                >已记录
-                {{ requirements.length }} 项旅行需求，你可以随时补充。</span
-              ><button class="text-button" @click="openDetails('需求')">
-                查看摘要 ↗
-              </button>
+              ><span>已记录 {{ requirements.length }} 项旅行需求，你可以随时补充。</span
+              ><button class="text-button" @click="openDetails('需求')">查看摘要 ↗</button>
             </div>
             <DecisionCard
               v-if="card && view?.state === 'WAITING_USER'"
@@ -746,9 +843,7 @@ onMounted(initialize);
               </div>
             </div>
             <div
-              v-else-if="
-                ['CANCELLED', 'SUPERSEDED'].includes(view?.state ?? '')
-              "
+              v-else-if="['CANCELLED', 'SUPERSEDED'].includes(view?.state ?? '')"
               class="run-note"
               role="status"
             >
@@ -757,9 +852,7 @@ onMounted(initialize);
             <article v-if="candidate && !chatView?.blocked && !chatBusy" class="candidate-teaser">
               <div>
                 <span class="eyebrow">{{
-                  candidate.candidate.state === "ACCEPTED"
-                    ? "已确认行程"
-                    : "旅行草案"
+                  candidate.candidate.state === "ACCEPTED" ? "已确认行程" : "旅行草案"
                 }}</span>
                 <h3>
                   {{
@@ -770,49 +863,63 @@ onMounted(initialize);
                 </h3>
                 <p>查看每天的安排、费用及待核实事项。新候选由你确认后生效。</p>
               </div>
-              <button class="secondary" @click="openDetails('行程')">
-                查看行程 ↗
-              </button>
+              <button class="secondary" @click="openDetails('行程')">查看行程 ↗</button>
             </article>
-          <AdvicePanel v-if="chatSelected" :key="chatSelected" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @applied="() => { void dialogue.refresh(); }" />
+            <AdvicePanel
+              v-if="chatSelected"
+              :key="chatSelected"
+              :chat="chatSelected"
+              :disabled="chatBusy || chatRetryable"
+              @applied="
+                () => {
+                  void dialogue.refresh();
+                }
+              "
+            />
           </div>
         </div>
         <div class="chat-bottom">
-          <ReportProblem v-if="view?.runId && selected" kind="RUN" :key="view.runId" :scope="selected" :target="view.runId"/>
-          <DocumentPanel ref="documentPanel" :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="analyzeDocument" @uploaded="uploadedDocument" @changed="items => { chatDocuments = items; }" />
-          <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
-            <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
+          <ReportProblem
+            v-if="view?.runId && selected"
+            kind="RUN"
+            :key="view.runId"
+            :scope="selected"
+            :target="view.runId"
+          />
+          <DocumentPanel
+            ref="documentPanel"
+            :key="user.id"
+            :chat="chatSelected"
+            :disabled="chatBusy || chatRetryable"
+            @analyze="analyzeDocument"
+            @uploaded="uploadedDocument"
+            @changed="
+              (items) => {
+                chatDocuments = items;
+              }
+            "
+          />
+          <div v-if="chatError" class="error banner" role="alert">
+            {{ chatError }}
+            <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">
+              重试原操作
+            </button>
             <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>
           </div>
           <div v-if="error" class="error banner" role="alert">
             {{ error
-            }}<button v-if="retryable" :disabled="busy" @click="retryCommand">
-              重试原操作
-            </button>
-            <button
-              v-else-if="selected"
-              class="quiet"
-              :disabled="loading || busy"
-              @click="refresh"
-            >
+            }}<button v-if="retryable" :disabled="busy" @click="retryCommand">重试原操作</button>
+            <button v-else-if="selected" class="quiet" :disabled="loading || busy" @click="refresh">
               同步最新状态
             </button>
           </div>
           <p v-if="notice" class="receipt" role="status">{{ notice }}</p>
           <div v-if="selected" class="composer-context">
-            <span :title="connection"
-              ><span class="status-dot" />{{ status }}</span
-            >
+            <span :title="connection"><span class="status-dot" />{{ status }}</span>
           </div>
           <div v-if="selected && target" class="reply-target">
-            仅调整：{{
-              current?.items.find((item) => item.id === target)?.title ??
-              "所选安排"
-            }}<button
-              class="icon-button"
-              aria-label="取消指定调整对象"
-              @click="target = ''"
-            >
+            仅调整：{{ current?.items.find((item) => item.id === target)?.title ?? "所选安排"
+            }}<button class="icon-button" aria-label="取消指定调整对象" @click="target = ''">
               ×
             </button>
           </div>
@@ -846,11 +953,7 @@ onMounted(initialize);
       >
         <div class="details-heading">
           <strong>这趟旅行</strong
-          ><button
-            class="icon-button"
-            aria-label="收起行程与资料"
-            @click="detailsOpen = false"
-          >
+          ><button class="icon-button" aria-label="收起行程与资料" @click="detailsOpen = false">
             ×
           </button>
         </div>
@@ -868,9 +971,7 @@ onMounted(initialize);
         <div v-show="detailsTab === '需求'" class="details-content">
           <section class="panel">
             <h2>已经了解的想法</h2>
-            <p class="muted">
-              这里是已记录的信息，想调整时直接在对话中说明即可。
-            </p>
+            <p class="muted">这里是已记录的信息，想调整时直接在对话中说明即可。</p>
             <p v-if="!requirements.length" class="muted">还在了解你的期待。</p>
             <dl class="requirements">
               <div v-for="requirement in requirements" :key="requirement.id">
@@ -920,11 +1021,7 @@ onMounted(initialize);
               <label
                 >选择要聊的安排<select v-model="target">
                   <option value="">结合完整需求判断</option>
-                  <option
-                    v-for="item in current.items"
-                    :key="item.id"
-                    :value="item.id"
-                  >
+                  <option v-for="item in current.items" :key="item.id" :value="item.id">
                     {{ item.title }}
                   </option>
                 </select></label
@@ -945,9 +1042,7 @@ onMounted(initialize);
             <template v-if="candidate && !chatView?.blocked && !chatBusy">
               <p>
                 依据需求版本
-                {{
-                  candidate.candidate.version.constraintRevision
-                }}，规则校验覆盖候选完整行程。
+                {{ candidate.candidate.version.constraintRevision }}，规则校验覆盖候选完整行程。
               </p>
               <p class="tag">
                 {{ candidate.candidate.state }} ·
@@ -958,17 +1053,11 @@ onMounted(initialize);
                 }}
               </p>
               <p>
-                规则校验：{{
-                  reportLabel(candidate.candidate.validation?.conclusion)
-                }}
-                · 独立审核：{{
-                  reportLabel(candidate.candidate.review?.conclusion)
-                }}
+                规则校验：{{ reportLabel(candidate.candidate.validation?.conclusion) }} ·
+                独立审核：{{ reportLabel(candidate.candidate.review?.conclusion) }}
               </p>
               <p v-if="candidate.costs">
-                全组费用：{{ candidate.costs.lowerCny }}～{{
-                  candidate.costs.upperCny ?? "未知"
-                }}元
+                全组费用：{{ candidate.costs.lowerCny }}～{{ candidate.costs.upperCny ?? "未知" }}元
               </p>
               <ul class="issues">
                 <li
@@ -982,9 +1071,7 @@ onMounted(initialize);
                   {{ issue.unknown ? "（待核实）" : "" }}
                 </li>
               </ul>
-              <button :disabled="!acceptable || retryable" @click="accept">
-                接受这个候选
-              </button>
+              <button :disabled="!acceptable || retryable" @click="accept">接受这个候选</button>
               <button
                 class="secondary"
                 :disabled="
@@ -1001,15 +1088,8 @@ onMounted(initialize);
               <p class="muted">
                 仅校验、独立审核及版本条件均有效时可接受；过期后重新检查并再次确认。
               </p>
-              <ItineraryPanel
-                :trip="candidate.candidate.snapshot"
-                title="候选行程"
-              />
-              <button
-                v-if="view?.currentVersionId"
-                class="quiet"
-                @click="inspectCandidate"
-              >
+              <ItineraryPanel :trip="candidate.candidate.snapshot" title="候选行程" />
+              <button v-if="view?.currentVersionId" class="quiet" @click="inspectCandidate">
                 与生效版本比较
               </button>
             </template>
@@ -1041,11 +1121,7 @@ onMounted(initialize);
               </li>
             </ul>
             <div class="actions">
-              <button
-                class="quiet"
-                :disabled="!versionOffset || loading"
-                @click="pageVersions(-1)"
-              >
+              <button class="quiet" :disabled="!versionOffset || loading" @click="pageVersions(-1)">
                 上一页
               </button>
               <button
@@ -1057,9 +1133,7 @@ onMounted(initialize);
               </button>
             </div>
             <template v-if="history">
-              <h3>
-                所选版本 {{ history.summary.version.snapshotId.slice(0, 8) }}
-              </h3>
+              <h3>所选版本 {{ history.summary.version.snapshotId.slice(0, 8) }}</h3>
               <p class="muted">相对当前生效版本的对象差异。</p>
               <p v-if="!changes.length">没有对象差异，或尚无生效版本可比较。</p>
               <article
@@ -1076,9 +1150,7 @@ onMounted(initialize);
                     ])"
                     :key="field"
                   >
-                    <template
-                      v-if="change.before[field] !== change.after[field]"
-                    >
+                    <template v-if="change.before[field] !== change.after[field]">
                       <dt>{{ field }}</dt>
                       <dd>
                         <del>{{ change.before[field] ?? "无" }}</del>
@@ -1106,36 +1178,24 @@ onMounted(initialize);
                   {{
                     entry.text ||
                     entry.facts
-                      .map(
-                        (f) => `${fieldLabels[f.field] ?? f.field}：${f.value}`,
-                      )
+                      .map((f) => `${fieldLabels[f.field] ?? f.field}：${f.value}`)
                       .join("；") ||
                     "用户已提交明确回答"
                   }}
                 </article>
                 <p
-                  v-if="
-                    !history.sourceMessages?.length &&
-                    history.sourceCode !== 'HISTORY_RESTORE'
-                  "
+                  v-if="!history.sourceMessages?.length && history.sourceCode !== 'HISTORY_RESTORE'"
                   class="muted"
                 >
                   本版本没有可展示的原文记录，不推断调整原因。
                 </p>
               </details>
-              <ItineraryPanel
-                :trip="history.snapshot"
-                title="历史行程（只读）"
-              />
+              <ItineraryPanel :trip="history.snapshot" title="历史行程（只读）" />
               <button
                 v-if="history.summary.accepted"
                 class="secondary"
                 :disabled="
-                  !ready ||
-                  busy ||
-                  !view?.currentVersionId ||
-                  view?.pendingInput ||
-                  retryable
+                  !ready || busy || !view?.currentVersionId || view?.pendingInput || retryable
                 "
                 @click="showRestore = true"
               >
@@ -1145,9 +1205,7 @@ onMounted(initialize);
                 <p>
                   恢复保留最新需求和锁定条件。系统会生成新候选，重新校验与审核，仍需要你再次接受。
                 </p>
-                <button :disabled="busy" @click="confirmRestore">
-                  确认生成恢复候选
-                </button>
+                <button :disabled="busy" @click="confirmRestore">确认生成恢复候选</button>
                 <button class="quiet" @click="showRestore = false">返回</button>
               </div>
             </template>
@@ -1156,20 +1214,14 @@ onMounted(initialize);
         <div v-show="detailsTab === '资料'" class="details-content">
           <section class="panel">
             <h2>资料与证据</h2>
-            <p v-if="!evidence.length" class="muted">
-              尚未收集到资料；未知信息不会当作已核实。
-            </p>
-            <details
-              v-for="entry in evidence"
-              :key="entry.evidence.reference.id"
-            >
-              <summary>
-                {{ entry.evidence.fieldPath }} · {{ entry.effectiveStatus }}
-              </summary>
+            <p v-if="!evidence.length" class="muted">尚未收集到资料；未知信息不会当作已核实。</p>
+            <details v-for="entry in evidence" :key="entry.evidence.reference.id">
+              <summary>{{ entry.evidence.fieldPath }} · {{ entry.effectiveStatus }}</summary>
               <p>{{ entry.evidence.targetId }}：{{ entry.evidence.value }}</p>
               <p class="muted">
-                {{ entry.reason }} · 获取：{{ entry.evidence.retrievedAt }} ·
-                有效至：{{ entry.evidence.expiresAt }}
+                {{ entry.reason }} · 获取：{{ entry.evidence.retrievedAt }} · 有效至：{{
+                  entry.evidence.expiresAt
+                }}
               </p>
               <a
                 v-if="sourceLink(entry.evidence.sourceUrl)"
@@ -1184,8 +1236,24 @@ onMounted(initialize);
         </div>
       </aside>
     </main>
-    <dialog v-if="feedbackOpen && user" ref="feedbackDialog" class="preferences-dialog feedback-dialog" aria-labelledby="feedback-heading" @close="feedbackOpen = false">
-      <div class="details-heading"><h2 id="feedback-heading">反馈与问题记录</h2><button class="icon-button" autofocus aria-label="关闭反馈记录" @click="feedbackDialog?.close()">×</button></div>
+    <dialog
+      v-if="feedbackOpen && user"
+      ref="feedbackDialog"
+      class="preferences-dialog feedback-dialog"
+      aria-labelledby="feedback-heading"
+      @close="feedbackOpen = false"
+    >
+      <div class="details-heading">
+        <h2 id="feedback-heading">反馈与问题记录</h2>
+        <button
+          class="icon-button"
+          autofocus
+          aria-label="关闭反馈记录"
+          @click="feedbackDialog?.close()"
+        >
+          ×
+        </button>
+      </div>
       <SupportPanel :key="user.id" />
     </dialog>
     <dialog
@@ -1206,16 +1274,24 @@ onMounted(initialize);
           ×
         </button>
       </div>
-      <PreferencePanel
-        :key="user.id"
-        open
-        :requirements="requirements"
-        @changed="refresh"
-      />
+      <PreferencePanel :key="user.id" open :requirements="requirements" @changed="refresh" />
     </dialog>
   </div>
 </template>
 
 <style scoped>
-.message-files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.message-files span{border:1px solid #dfe7e4;border-radius:10px;padding:8px 12px;background:#fff;font-size:13px;overflow-wrap:anywhere}
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.message-files span {
+  border: 1px solid #dfe7e4;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #fff;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 </style>

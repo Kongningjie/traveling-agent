@@ -14,28 +14,47 @@ import static com.lawrence.travel.domain.rule.DomainViolation.Code.INVALID_INPUT
  * @param requirements 有来源及适用对象的通用约束／偏好
  * @param fixedArrangements 用户明确的固定安排
  */
-public record ConstraintRevision(TaskScope scope, long revision, List<Requirement> requirements,
-                                 List<FixedArrangement> fixedArrangements) {
+public record ConstraintRevision(
+        TaskScope scope,
+        long revision,
+        List<Requirement> requirements,
+        List<FixedArrangement> fixedArrangements) {
     /** 校验稳定 ID 唯一并复制内容；不得原地覆盖历史版本。 */
     public ConstraintRevision {
-        DomainViolation.require(scope != null && revision > 0 && requirements != null && fixedArrangements != null, INVALID_INPUT);
-        DomainViolation.require(requirements.stream().allMatch(java.util.Objects::nonNull)
-                && fixedArrangements.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
+        DomainViolation.require(
+                scope != null && revision > 0 && requirements != null && fixedArrangements != null,
+                INVALID_INPUT);
+        DomainViolation.require(
+                requirements.stream().allMatch(java.util.Objects::nonNull)
+                        && fixedArrangements.stream().allMatch(java.util.Objects::nonNull),
+                INVALID_INPUT);
         requirements = List.copyOf(requirements);
         fixedArrangements = List.copyOf(fixedArrangements);
-        DomainViolation.require(requirements.stream().map(Requirement::id).distinct().count() == requirements.size()
-                && fixedArrangements.stream().map(FixedArrangement::id).distinct().count() == fixedArrangements.size(), INVALID_INPUT);
+        DomainViolation.require(
+                requirements.stream().map(Requirement::id).distinct().count() == requirements.size()
+                        && fixedArrangements.stream().map(FixedArrangement::id).distinct().count()
+                                == fixedArrangements.size(),
+                INVALID_INPUT);
     }
 
     /** 要求的强弱程度；系统不能自动将硬约束降为软偏好。 */
-    public enum Kind { /** 必须满足。 */ HARD, /** 可用于方案排序。 */ SOFT }
+    public enum Kind {
+        /** 必须满足。 */
+        HARD,
+        /** 可用于方案排序。 */
+        SOFT
+    }
 
     /** 区分用户确认事实与显式假设，推荐本身不能写成已确认要求。 */
     public enum Source {
-        /** 用户直接提出。 */ USER,
-        /** 用户明确采纳系统建议。 */ ACCEPTED_SUGGESTION,
-        /** 用户已授权范围内由系统决定。 */ AUTHORIZED_SYSTEM,
-        /** 明示待核实假设，只能作为软项。 */ ASSUMPTION
+        /** 用户直接提出。 */
+        USER,
+        /** 用户明确采纳系统建议。 */
+        ACCEPTED_SUGGESTION,
+        /** 用户已授权范围内由系统决定。 */
+        AUTHORIZED_SYSTEM,
+        /** 明示待核实假设，只能作为软项。 */
+        ASSUMPTION
     }
 
     /**
@@ -47,12 +66,23 @@ public record ConstraintRevision(TaskScope scope, long revision, List<Requiremen
      * @param source 来源
      * @param targetIds 适用对象，空表示全旅行
      */
-    public record Requirement(UUID id, String field, String value, Kind kind, Source source, Set<UUID> targetIds) {
+    public record Requirement(
+            UUID id, String field, String value, Kind kind, Source source, Set<UUID> targetIds) {
         /** 禁止把假设自动提升为硬约束。 */
         public Requirement {
-            DomainViolation.require(id != null && field != null && !field.isBlank() && value != null && !value.isBlank()
-                    && kind != null && source != null && targetIds != null && !(kind == Kind.HARD && source == Source.ASSUMPTION), INVALID_INPUT);
-            DomainViolation.require(targetIds.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
+            DomainViolation.require(
+                    id != null
+                            && field != null
+                            && !field.isBlank()
+                            && value != null
+                            && !value.isBlank()
+                            && kind != null
+                            && source != null
+                            && targetIds != null
+                            && !(kind == Kind.HARD && source == Source.ASSUMPTION),
+                    INVALID_INPUT);
+            DomainViolation.require(
+                    targetIds.stream().allMatch(java.util.Objects::nonNull), INVALID_INPUT);
             targetIds = Set.copyOf(targetIds);
         }
     }
@@ -65,11 +95,23 @@ public record ConstraintRevision(TaskScope scope, long revision, List<Requiremen
      * @param endsAt 完整结束时间，可跨午夜
      * @param sourceMessageId 用户确认来源
      */
-    public record FixedArrangement(UUID id, String type, ZonedDateTime startsAt, ZonedDateTime endsAt, UUID sourceMessageId) {
+    public record FixedArrangement(
+            UUID id,
+            String type,
+            ZonedDateTime startsAt,
+            ZonedDateTime endsAt,
+            UUID sourceMessageId) {
         /** 按实际时间线判断先后，不用 HH:mm 或城市标签代替明确时间。 */
         public FixedArrangement {
-            DomainViolation.require(id != null && type != null && !type.isBlank() && startsAt != null && endsAt != null
-                    && endsAt.toInstant().isAfter(startsAt.toInstant()) && sourceMessageId != null, INVALID_INPUT);
+            DomainViolation.require(
+                    id != null
+                            && type != null
+                            && !type.isBlank()
+                            && startsAt != null
+                            && endsAt != null
+                            && endsAt.toInstant().isAfter(startsAt.toInstant())
+                            && sourceMessageId != null,
+                    INVALID_INPUT);
         }
     }
 }

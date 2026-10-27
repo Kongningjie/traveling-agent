@@ -23,8 +23,11 @@ public final class TravelHttpTools implements TravelToolPort {
     private final Supplier<String> tavilyKey;
     private final Set<String> evidenceHosts;
     private final JsonMapper json = JsonMapper.builder().build();
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NEVER).build();
+    private final HttpClient client =
+            HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .followRedirects(HttpClient.Redirect.NEVER)
+                    .build();
     private long lastStarted;
 
     /**
@@ -33,7 +36,8 @@ public final class TravelHttpTools implements TravelToolPort {
      * @param tavilyKey Tavily 凭证
      * @param evidenceHosts 已筛选官方原文域名精确白名单，不自动接受搜索结果的新域名
      */
-    public TravelHttpTools(Supplier<String> amapKey, Supplier<String> tavilyKey, Set<String> evidenceHosts) {
+    public TravelHttpTools(
+            Supplier<String> amapKey, Supplier<String> tavilyKey, Set<String> evidenceHosts) {
         this.amapKey = amapKey;
         this.tavilyKey = tavilyKey;
         this.evidenceHosts = Set.copyOf(evidenceHosts);
@@ -42,20 +46,54 @@ public final class TravelHttpTools implements TravelToolPort {
     /** {@inheritDoc} 单实例串行限速，所有失败只暴露固定分类。 */
     @Override
     public synchronized Evidence query(Operation operation, Map<String, String> arguments) {
-        String secret = (operation == Operation.SEARCH || operation == Operation.EXTRACT ? tavilyKey : amapKey).get();
-        if (secret == null || secret.isBlank()) throw new IllegalStateException("TOOL_CREDENTIAL_MISSING");
+        String secret =
+                (operation == Operation.SEARCH || operation == Operation.EXTRACT
+                                ? tavilyKey
+                                : amapKey)
+                        .get();
+        if (secret == null || secret.isBlank())
+            throw new IllegalStateException("TOOL_CREDENTIAL_MISSING");
         String source;
         HttpRequest request;
         if (operation == Operation.SEARCH || operation == Operation.EXTRACT) {
-            source = "https://api.tavily.com/" + (operation == Operation.SEARCH ? "search" : "extract");
-            Map<String, Object> body = operation == Operation.SEARCH
-                    ? Map.of("query", text(arguments, "query"), "search_depth", "basic", "max_results", 3,
-                            "auto_parameters", false, "include_answer", false, "include_raw_content", false, "include_usage", true)
-                    : Map.of("urls", List.of(requireEvidenceUrl(text(arguments, "url")).toString()),
-                            "extract_depth", "basic", "include_images", false, "include_usage", true);
-            request = HttpRequest.newBuilder(URI.create(source)).header("Authorization", "Bearer " + secret)
-                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
-                    .timeout(Duration.ofSeconds(25)).build();
+            source =
+                    "https://api.tavily.com/"
+                            + (operation == Operation.SEARCH ? "search" : "extract");
+            Map<String, Object> body =
+                    operation == Operation.SEARCH
+                            ? Map.of(
+                                    "query",
+                                    text(arguments, "query"),
+                                    "search_depth",
+                                    "basic",
+                                    "max_results",
+                                    3,
+                                    "auto_parameters",
+                                    false,
+                                    "include_answer",
+                                    false,
+                                    "include_raw_content",
+                                    false,
+                                    "include_usage",
+                                    true)
+                            : Map.of(
+                                    "urls",
+                                    List.of(requireEvidenceUrl(text(arguments, "url")).toString()),
+                                    "extract_depth",
+                                    "basic",
+                                    "include_images",
+                                    false,
+                                    "include_usage",
+                                    true);
+            request =
+                    HttpRequest.newBuilder(URI.create(source))
+                            .header("Authorization", "Bearer " + secret)
+                            .header("Content-Type", "application/json")
+                            .POST(
+                                    HttpRequest.BodyPublishers.ofString(
+                                            json.writeValueAsString(body)))
+                            .timeout(Duration.ofSeconds(25))
+                            .build();
         } else {
             Map<String, String> query = new LinkedHashMap<>();
             query.put("key", secret);
@@ -78,12 +116,15 @@ public final class TravelHttpTools implements TravelToolPort {
                 }
                 case ROUTE -> {
                     String mode = text(arguments, "mode");
-                    path = switch (mode) {
-                        case "walking" -> "/v5/direction/walking";
-                        case "driving" -> "/v5/direction/driving";
-                        case "transit" -> "/v5/direction/transit/integrated";
-                        default -> throw new IllegalArgumentException("TOOL_ROUTE_MODE_INVALID");
-                    };
+                    path =
+                            switch (mode) {
+                                case "walking" -> "/v5/direction/walking";
+                                case "driving" -> "/v5/direction/driving";
+                                case "transit" -> "/v5/direction/transit/integrated";
+                                default ->
+                                        throw new IllegalArgumentException(
+                                                "TOOL_ROUTE_MODE_INVALID");
+                            };
                     query.put("origin", coordinate(arguments, "origin"));
                     query.put("destination", coordinate(arguments, "destination"));
                     query.put("show_fields", "cost");
@@ -96,19 +137,28 @@ public final class TravelHttpTools implements TravelToolPort {
                 default -> throw new IllegalArgumentException("TOOL_OPERATION_INVALID");
             }
             source = "https://restapi.amap.com" + path;
-            String encoded = query.entrySet().stream().map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
-                    .collect(java.util.stream.Collectors.joining("&"));
-            request = HttpRequest.newBuilder(URI.create(source + "?" + encoded)).GET().timeout(Duration.ofSeconds(25)).build();
+            String encoded =
+                    query.entrySet().stream()
+                            .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
+                            .collect(java.util.stream.Collectors.joining("&"));
+            request =
+                    HttpRequest.newBuilder(URI.create(source + "?" + encoded))
+                            .GET()
+                            .timeout(Duration.ofSeconds(25))
+                            .build();
         }
         Map<String, Object> data = send(request, secret);
-        if (operation != Operation.SEARCH && operation != Operation.EXTRACT && !"1".equals(data.get("status"))) {
+        if (operation != Operation.SEARCH
+                && operation != Operation.EXTRACT
+                && !"1".equals(data.get("status"))) {
             throw new IllegalStateException("TOOL_AMAP_REJECTED");
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("operation", operation.name());
         payload.put("data", data);
         payload.put("status", "AVAILABLE");
-        if (operation == Operation.PLACE && !hasItems(data.get("pois"))) payload.put("status", "UNKNOWN_NO_RESULTS");
+        if (operation == Operation.PLACE && !hasItems(data.get("pois")))
+            payload.put("status", "UNKNOWN_NO_RESULTS");
         if (operation == Operation.WEATHER) {
             String date = arguments.get("date");
             payload.put("targetDate", date);
@@ -151,7 +201,9 @@ public final class TravelHttpTools implements TravelToolPort {
      * @param value 候选集合
      * @return 是否至少一条
      */
-    private static boolean hasItems(Object value) { return value instanceof List<?> list && !list.isEmpty(); }
+    private static boolean hasItems(Object value) {
+        return value instanceof List<?> list && !list.isEmpty();
+    }
 
     /**
      * 限制原文地址为已筛选 HTTPS 官方主机，不允许凭证、IP、端口、查询或片段。
@@ -161,13 +213,19 @@ public final class TravelHttpTools implements TravelToolPort {
     public URI requireEvidenceUrl(String value) {
         try {
             URI uri = URI.create(value);
-            if (!"https".equals(uri.getScheme()) || uri.getHost() == null
+            if (!"https".equals(uri.getScheme())
+                    || uri.getHost() == null
                     || !evidenceHosts.contains(uri.getHost().toLowerCase(java.util.Locale.ROOT))
-                    || uri.getUserInfo() != null || uri.getPort() != -1 || uri.getQuery() != null || uri.getFragment() != null) {
+                    || uri.getUserInfo() != null
+                    || uri.getPort() != -1
+                    || uri.getQuery() != null
+                    || uri.getFragment() != null) {
                 throw new IllegalArgumentException("TOOL_EVIDENCE_URL_REJECTED");
             }
             return uri;
-        } catch (RuntimeException failure) { throw new IllegalArgumentException("TOOL_EVIDENCE_URL_REJECTED"); }
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException("TOOL_EVIDENCE_URL_REJECTED");
+        }
     }
 
     /**
@@ -182,17 +240,25 @@ public final class TravelHttpTools implements TravelToolPort {
             long remaining = 400_000_000L - (System.nanoTime() - lastStarted);
             if (remaining > 0) java.util.concurrent.TimeUnit.NANOSECONDS.sleep(remaining);
             lastStarted = System.nanoTime();
-            var response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() != 200) throw new IllegalStateException("TOOL_HTTP_" + response.statusCode());
-            if (response.body().length() > 1_000_000) throw new IllegalStateException("TOOL_RESPONSE_TOO_LARGE");
+            var response =
+                    client.send(
+                            request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200)
+                throw new IllegalStateException("TOOL_HTTP_" + response.statusCode());
+            if (response.body().length() > 1_000_000)
+                throw new IllegalStateException("TOOL_RESPONSE_TOO_LARGE");
             return json.readValue(response.body().replace(secret, "[REDACTED]"), Map.class);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("TOOL_INTERRUPTED");
         } catch (IllegalStateException classified) {
-            if (classified.getMessage() != null && classified.getMessage().matches("TOOL_(HTTP_[0-9]{3}|RESPONSE_TOO_LARGE)")) throw classified;
+            if (classified.getMessage() != null
+                    && classified.getMessage().matches("TOOL_(HTTP_[0-9]{3}|RESPONSE_TOO_LARGE)"))
+                throw classified;
             throw new IllegalStateException("TOOL_RESPONSE_INVALID");
-        } catch (Exception failure) { throw new IllegalStateException("TOOL_REQUEST_FAILED"); }
+        } catch (Exception failure) {
+            throw new IllegalStateException("TOOL_REQUEST_FAILED");
+        }
     }
 
     /**
@@ -204,8 +270,11 @@ public final class TravelHttpTools implements TravelToolPort {
     public static Object forecastFor(Map<String, Object> data, String date) {
         if (data.get("forecasts") instanceof List<?> forecasts) {
             for (Object item : forecasts) {
-                if (item instanceof Map<?, ?> forecast && forecast.get("casts") instanceof List<?> casts) {
-                    for (Object cast : casts) if (cast instanceof Map<?, ?> fields && date.equals(fields.get("date"))) return cast;
+                if (item instanceof Map<?, ?> forecast
+                        && forecast.get("casts") instanceof List<?> casts) {
+                    for (Object cast : casts)
+                        if (cast instanceof Map<?, ?> fields && date.equals(fields.get("date")))
+                            return cast;
                 }
             }
         }
@@ -220,7 +289,8 @@ public final class TravelHttpTools implements TravelToolPort {
      */
     private static String text(Map<String, String> values, String name) {
         String value = values.get(name);
-        if (value == null || value.isBlank() || value.length() > 1000) throw new IllegalArgumentException("TOOL_ARGUMENT_INVALID");
+        if (value == null || value.isBlank() || value.length() > 1000)
+            throw new IllegalArgumentException("TOOL_ARGUMENT_INVALID");
         return value;
     }
 
@@ -241,8 +311,11 @@ public final class TravelHttpTools implements TravelToolPort {
      * @param values 工具参数
      */
     private static void date(Map<String, String> values) {
-        try { LocalDate.parse(text(values, "date")); }
-        catch (RuntimeException invalid) { throw new IllegalArgumentException("TOOL_DATE_INVALID"); }
+        try {
+            LocalDate.parse(text(values, "date"));
+        } catch (RuntimeException invalid) {
+            throw new IllegalArgumentException("TOOL_DATE_INVALID");
+        }
     }
 
     /**
@@ -253,9 +326,12 @@ public final class TravelHttpTools implements TravelToolPort {
      */
     private static String coordinate(Map<String, String> values, String name) {
         String value = text(values, name);
-        if (!value.matches("-?[0-9]{1,3}(\\.[0-9]{1,8})?,-?[0-9]{1,2}(\\.[0-9]{1,8})?")) throw new IllegalArgumentException("TOOL_COORDINATE_INVALID");
+        if (!value.matches("-?[0-9]{1,3}(\\.[0-9]{1,8})?,-?[0-9]{1,2}(\\.[0-9]{1,8})?"))
+            throw new IllegalArgumentException("TOOL_COORDINATE_INVALID");
         String[] parts = value.split(",");
-        if (Math.abs(Double.parseDouble(parts[0])) > 180 || Math.abs(Double.parseDouble(parts[1])) > 90) throw new IllegalArgumentException("TOOL_COORDINATE_INVALID");
+        if (Math.abs(Double.parseDouble(parts[0])) > 180
+                || Math.abs(Double.parseDouble(parts[1])) > 90)
+            throw new IllegalArgumentException("TOOL_COORDINATE_INVALID");
         return value;
     }
 
@@ -264,5 +340,7 @@ public final class TravelHttpTools implements TravelToolPort {
      * @param value 参数值
      * @return UTF-8 编码值
      */
-    private static String encode(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
 }

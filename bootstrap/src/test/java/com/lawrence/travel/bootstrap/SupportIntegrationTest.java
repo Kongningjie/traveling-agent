@@ -114,9 +114,9 @@ class SupportIntegrationTest {
                         var budgets =
                                 jdbc.queryForList(
                                         "SELECT budget_id FROM operation_context WHERE user_id=?"
-                                            + " UNION SELECT budget_id FROM dialogue_chat WHERE"
-                                            + " user_id=? UNION SELECT id FROM execution_run WHERE"
-                                            + " user_id=?",
+                                                + " UNION SELECT budget_id FROM dialogue_chat WHERE"
+                                                + " user_id=? UNION SELECT id FROM execution_run WHERE"
+                                                + " user_id=?",
                                         UUID.class,
                                         user.id(),
                                         user.id(),
@@ -193,7 +193,8 @@ class SupportIntegrationTest {
     /**
      * @param repository 本地Redis会话
      * @param user 合成身份
-     * @param <S> 会话类型 @return 仅本地HTTP使用的Cookie，不进入日志或断言
+     * @param <S> 会话类型
+     * @return 仅本地HTTP使用的Cookie，不进入日志或断言
      */
     private <S extends org.springframework.session.Session> String login(
             org.springframework.session.SessionRepository<S> repository, UserIdentity user) {
@@ -357,8 +358,8 @@ class SupportIntegrationTest {
         var isolated = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO"
-                    + " problem_group(id,component,code,bucket,severity,first_at,last_at,representative)"
-                    + " VALUES(?,'SUPPORT_TEST',?,clock_timestamp(),'ERROR',clock_timestamp(),clock_timestamp(),?)",
+                        + " problem_group(id,component,code,bucket,severity,first_at,last_at,representative)"
+                        + " VALUES(?,'SUPPORT_TEST',?,clock_timestamp(),'ERROR',clock_timestamp(),clock_timestamp(),?)",
                 isolated,
                 isolated.toString().replace("-", "").toUpperCase(),
                 r.problem());
@@ -500,7 +501,8 @@ class SupportIntegrationTest {
      * @param g 当前组
      * @param state 目标
      * @param version 修复版本
-     * @param regression 用例 @param passed 是否实际通过
+     * @param regression 用例
+     * @param passed 是否实际通过
      * @return 已提交组
      */
     private Support.Group change(
@@ -603,8 +605,8 @@ class SupportIntegrationTest {
         var zero = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO"
-                    + " problem_group(id,component,code,bucket,severity,occurrences,first_at,last_at,representative)"
-                    + " VALUES(?,'SUPPORT_TEST',?,clock_timestamp(),'ERROR',0,clock_timestamp(),clock_timestamp(),?)",
+                        + " problem_group(id,component,code,bucket,severity,occurrences,first_at,last_at,representative)"
+                        + " VALUES(?,'SUPPORT_TEST',?,clock_timestamp(),'ERROR',0,clock_timestamp(),clock_timestamp(),?)",
                 zero,
                 zero.toString().replace("-", "").toUpperCase(),
                 zero);
