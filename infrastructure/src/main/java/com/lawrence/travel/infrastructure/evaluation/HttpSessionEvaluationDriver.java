@@ -101,7 +101,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                         if (taskState.startsWith("PAUSED_") || List.of("FAILED", "SUPERSEDED").contains(taskState)) return paused(user, chat, completed, "PAUSED_TASK_INCOMPLETE", start, deletedMetrics);
                     }
                     case "UPLOAD" -> { document = UUID.randomUUID(); browser.upload(chat, document, files.get(turn.fixture())); }
-                    case "WAIT_DOCUMENT" -> browser.waitDocument(chat, document);
+                    case "WAIT_DOCUMENT" -> browser.waitDocument(chat, document, List.of("P07", "P19").contains(input.id()));
                     case "READ_AS_OTHER" -> { try (var other = new Browser()) { other.login(); other.get("/chats/" + chat + "/documents/" + document + "/download", 404); } }
                     case "DELETE_DOCUMENT" -> browser.delete("DOCUMENT", document);
                     case "DELETE_CHAT" -> {
@@ -131,11 +131,33 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             deletedMetrics.forEach((key, value) -> metrics.merge(key, value, Long::sum));
             metrics.put("wallMillis", (System.nanoTime() - start) / 1000000);
             var state = new java.util.HashMap<>(observed.state()); state.putAll(isolation);
+            if (auditIsolation && List.of("P07", "P19").contains(input.id()) && document != null && lastInput != null)
+                state.putAll(auditDocument(browser, chat, document, lastInput));
             return new SessionEvaluationExecutor.Capture(user, chat, observed.outcome(), completed, state, metrics, List.copyOf(trace));
         } catch (java.io.IOException failure) { if (user != null) return paused(user, chat, completed, "PAUSED_HTTP_FAILED", start, deletedMetrics); throw new IllegalStateException("SESSION_HTTP_FAILED"); }
         catch (RuntimeException failure) { if (user != null) return paused(user, chat, completed, "PAUSED_EXECUTION_FAILED", start, deletedMetrics); throw failure; }
         catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException("SESSION_INTERRUPTED"); }
         finally { browser.close(); }
+    }
+    /** @param owner 实际登录身份 @param chat 当前聊天 @param document 实际上传版本 @param input 成功回复
+     * @return HTTP引用预览与跨用户拒读证据；无引用保持false，不用目录冒充读过原文
+     * @throws java.io.IOException 本机HTTP失败 @throws InterruptedException 审计取消 */
+    private Map<String,Object> auditDocument(Browser owner, UUID chat, UUID document, UUID input) throws java.io.IOException, InterruptedException {
+        var request = HttpRequest.newBuilder(endpoint.resolve("/api/v1/chats/" + chat + "/messages/" + input + "/references"))
+                .timeout(Duration.ofSeconds(20)).GET().build();
+        var response = owner.client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) throw new IllegalStateException("SESSION_REFERENCE_LIST_FAILED");
+        var references = json.decode(response.body(), UUID[].class); boolean preview = references.length > 0 && references.length <= 10;
+        try (var other = new Browser()) {
+            other.login(); other.get("/chats/" + chat + "/documents/" + document + "/download", 404);
+            for (UUID reference : references) {
+                var fragment = owner.get("/chats/" + chat + "/references/" + reference, 200);
+                preview &= fragment.get("locator") instanceof Map<?,?> locator && document.toString().equals(locator.get("document"))
+                        && fragment.get("text") instanceof String text && !text.isBlank();
+                other.get("/chats/" + chat + "/references/" + reference, 404);
+            }
+        }
+        return Map.of("httpDocumentPreview", preview, "httpForeignDocumentDenied", true, "httpForeignReferenceDenied", references.length > 0);
     }
     /** @param owner 原登录身份 @param chat 私有聊天 @return 仅实际HTTP正/负检查的布尔值，删除场景不伪造隔离证据
      * @throws java.io.IOException 回环请求失败 @throws InterruptedException 审计取消 */
@@ -238,13 +260,18 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             body.write(file.bytes()); body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
             send(HttpRequest.newBuilder(endpoint.resolve("/api/v1/chats/" + chat + "/documents")).header(header, token).header("Content-Type", "multipart/form-data; boundary=" + boundary).POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray())).build(), 202);
         }
-        /** @param chat 本次会话 @param id 原文件 @throws java.io.IOException 网络失败 @throws InterruptedException 取消 */
-        private void waitDocument(UUID chat, UUID id) throws java.io.IOException, InterruptedException {
+        /** @param chat 本次会话 @param id 原文件 @param readyRequired 解释型场景必须READY；扫描拒绝场景可继续解释不可读原因
+         * @throws java.io.IOException 网络失败 @throws InterruptedException 取消 */
+        private void waitDocument(UUID chat, UUID id, boolean readyRequired) throws java.io.IOException, InterruptedException {
             long until = System.nanoTime() + timeout.toNanos();
             do {
                 var response = client.send(HttpRequest.newBuilder(endpoint.resolve("/api/v1/chats/" + chat + "/documents")).timeout(Duration.ofSeconds(20)).GET().build(), HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() != 200) throw new IllegalStateException("SESSION_DOCUMENT_STATUS_FAILED");
-                for (var item : json.decode(response.body(), Map[].class)) if (id.toString().equals(item.get("id"))) { String state = (String) item.get("state"); if (List.of("READY", "REJECTED", "PAUSED").contains(state)) return; }
+                for (var item : json.decode(response.body(), Map[].class)) if (id.toString().equals(item.get("id"))) {
+                    String state = (String) item.get("state"); if (state.equals("READY")) return;
+                    if (state.equals("REJECTED") && !readyRequired) return;
+                    if (List.of("REJECTED", "PAUSED").contains(state)) throw new IllegalStateException("SESSION_DOCUMENT_NOT_READY");
+                }
                 Thread.sleep(100);
             } while (System.nanoTime() < until);
             throw new IllegalStateException("SESSION_DOCUMENT_TIMEOUT");

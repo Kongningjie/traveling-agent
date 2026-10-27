@@ -65,6 +65,9 @@ class Dev35HttpAcceptanceTest {
     private final List<SessionEvaluationExecutor.Capture> captures = new ArrayList<>();
     private final TravelJson json = new TravelJson();
     private String suiteHash = "UNLOADED";
+    private com.sun.net.httpserver.HttpServer parserServer;
+    private static final String PARSER_SECRET = java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID();
+    @Autowired private com.lawrence.travel.application.document.SourceReadService sourceReads;
 
     /** 在后台Worker创建前验证独立库名及隔离存储根，禁止借错误配置对开发库开启真实Worker。 */
     @DynamicPropertySource static void isolatedProperties(DynamicPropertyRegistry registry) {
@@ -78,6 +81,8 @@ class Dev35HttpAcceptanceTest {
         registry.add("travel.deletions.root", () -> Path.of(root, "lifecycle").toString());
         registry.add("travel.artifacts.root", () -> Path.of(root, "artifacts").toString());
         registry.add("travel.documents.root", () -> Path.of(root, "documents").toString());
+        registry.add("DOCUMENT_PARSER_SECRET", () -> PARSER_SECRET);
+        registry.add("travel.documents.runner", () -> "http://127.0.0.1:8766");
     }
 
     /** @return 只有脚本明确设置的真实模式才打开当前测试进程的模型开关 */
@@ -86,9 +91,35 @@ class Dev35HttpAcceptanceTest {
     /** @return 显式选择补充回归才返回true；非法批次在首个HTTP或模型请求前拒绝 */
     private static boolean requirementsBatch() {
         String batch = System.getenv("TRAVEL_DEV35_HTTP_BATCH");
-        if (batch == null || "Conversation".equals(batch)) return false;
+        if (batch == null || "Conversation".equals(batch) || "Documents".equals(batch)) return false;
         if ("Requirements".equals(batch)) return true;
         throw new IllegalArgumentException("HTTP_ACCEPTANCE_BATCH_INVALID");
+    }
+
+    /** @return 只有明确选择Documents才运行上传与真实隔离解析，不因其他场景顺带启动runner */
+    private static boolean documentsBatch() { return "Documents".equals(System.getenv("TRAVEL_DEV35_HTTP_BATCH")); }
+
+    /** 文档批次独占8766并使用本批原件根；端口冲突直接失败，不停止或接管用户runner。
+     * @throws java.io.IOException 本机runner不可启动 */
+    @org.junit.jupiter.api.BeforeEach void startsDocumentRunner() throws java.io.IOException {
+        if (documentsBatch()) {
+            fixture("trip1.txt");
+            parserServer = new com.lawrence.travel.infrastructure.document.ParserRunner(
+                    Path.of(environment.getRequiredProperty("TRAVEL_DEV35_HTTP_STORAGE"), "documents"),
+                    environment.getRequiredProperty("DOCUMENT_PARSER_IMAGE"), PARSER_SECRET).start("127.0.0.1", 8766);
+        }
+    }
+
+    /** @param name 封存逻辑名 @return 原件副本及名称；首个模型调用前校验固定哈希，禁止读取任意本机文件 */
+    private HttpSessionEvaluationDriver.File fixture(String name) {
+        if (!documentsBatch() || !"trip1.txt".equals(name)) throw new IllegalArgumentException("HTTP_ACCEPTANCE_FIXTURE_NOT_SUPPORTED");
+        try (var stream = getClass().getResourceAsStream("/evaluation/documents/trip1.txt")) {
+            if (stream == null) throw new IllegalStateException("DOCUMENT_FIXTURE_MISSING");
+            byte[] bytes = stream.readAllBytes();
+            if (!com.lawrence.travel.application.artifact.ArtifactService.hash(bytes).equals(com.lawrence.travel.infrastructure.evaluation.JdbcDocumentAcceptanceJudge.FIXTURE_HASH))
+                throw new IllegalStateException("DOCUMENT_FIXTURE_CHANGED");
+            return new HttpSessionEvaluationDriver.File(name, bytes);
+        } catch (java.io.IOException unavailable) { throw new IllegalStateException("DOCUMENT_FIXTURE_UNAVAILABLE"); }
     }
 
     /** @return 封存会话或独立补充回归；输入哈希写入报告，补充用例不修改原24例锁
@@ -121,24 +152,42 @@ class Dev35HttpAcceptanceTest {
         }).when(ledger).reserve(any(), any(), any(), any(), anyLong(), any());
         var suite = selectedSuite(); suiteHash = suite.fingerprint();
         var evidence = new JdbcSessionEvaluationEvidence(jdbc, transactions, Set.of(properties.models().get("coordinator")));
-        var judge = new JdbcConversationAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), real());
+        var conversationJudge = new JdbcConversationAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), real());
+        SessionEvaluationExecutor.Judge judge = documentsBatch()
+                ? new com.lawrence.travel.infrastructure.evaluation.JdbcDocumentAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), real()) : conversationJudge;
         var driver = new HttpSessionEvaluationDriver(URI.create("http://127.0.0.1:" + port), evidence,
-                name -> { throw new IllegalArgumentException("HTTP_ACCEPTANCE_FIXTURE_NOT_SUPPORTED"); }, () -> false, Duration.ofMinutes(3), true);
+                this::fixture, () -> false, Duration.ofMinutes(3), true);
         var mode = real() ? Evaluation.Mode.REAL_MODEL : Evaluation.Mode.LOCAL_CONTRACT;
         var executor = new SessionEvaluationExecutor(mode, input -> { var c = driver.execute(input); captures.add(c); return c; }, judge, real());
-        var ids = requirementsBatch() ? List.of("R01") : List.of("P01", "P02");
+        var ids = requirementsBatch() ? List.of("R01") : documentsBatch() ? List.of("P07", "P19") : List.of("P01", "P02");
         for (String id : ids) {
             var input = suite.cases().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
             var selected = new Evaluation.Suite(suite.version(), suite.fingerprint(), List.of(input), Map.of(id, suite.oracles().get(id)));
             var report = real() ? EvaluationRunner.modelsOnly().runModels(selected, executor, true, Map.of())
                     : new EvaluationRunner(executor).run(selected, false, Map.of());
             var row = report.rows().stream().filter(r -> r.mode() == mode).findFirst().orElseThrow(); rows.add(row);
-            if (!real() && id.equals("P01") && row.status().equals("PASS")) verifyJudgeRejectsMissingProof(judge, captures.getLast());
-            if (!real() && id.equals("R01") && row.status().equals("PASS")) verifyRegressionRejectsLostPreference(judge, captures.getLast());
+            if (!real() && id.equals("P01") && row.status().equals("PASS")) verifyJudgeRejectsMissingProof(conversationJudge, captures.getLast());
+            if (!real() && id.equals("R01") && row.status().equals("PASS")) verifyRegressionRejectsLostPreference(conversationJudge, captures.getLast());
+            if (!real() && documentsBatch() && row.status().equals("PASS")) verifyDocumentJudgeRejectsMissingProof(id, judge, captures.getLast());
             System.out.println("DEV35_HTTP case=" + id + " mode=" + mode + " status=" + row.status());
             if (!row.status().equals("PASS")) break;
         }
         assertThat(rows).hasSize(ids.size()).allMatch(r -> r.status().equals("PASS"));
+    }
+
+    /** @param id 文档场景 @param judge 实际PG裁判 @param c 已完成合成闭环；缺少HTTP证据必须失败，不能由PG计数补真 */
+    private void verifyDocumentJudgeRejectsMissingProof(String id, SessionEvaluationExecutor.Judge judge, SessionEvaluationExecutor.Capture c) {
+        var missing = new SessionEvaluationExecutor.Capture(c.userId(), c.chatId(), c.outcome(), c.turns(), Map.of(), c.metrics(), c.trace());
+        assertThat(judge.check(id, missing)).containsEntry("OWNER_ISOLATED", false);
+        var incomplete = new SessionEvaluationExecutor.Capture(c.userId(), c.chatId(), c.outcome(), 0, c.state(), c.metrics(), List.of());
+        assertThat(judge.check(id, incomplete)).containsEntry("SCRIPT_COMPLETED", false);
+        String sql = "SELECT d.id,d.hash,d.report::text,j.state FROM uploaded_document d JOIN background_job j ON j.id=d.job_id WHERE d.user_id=? AND d.chat_id=? AND NOT d.deleted";
+        var wrongVersion = new java.util.HashMap<>(jdbc.queryForList(sql, c.userId(), c.chatId()).getFirst());
+        wrongVersion.put("hash", "0".repeat(64));
+        var reader = org.mockito.Mockito.spy(jdbc);
+        org.mockito.Mockito.doReturn(List.of(wrongVersion)).when(reader).queryForList(sql, c.userId(), c.chatId());
+        var rejecting = new com.lawrence.travel.infrastructure.evaluation.JdbcDocumentAcceptanceJudge(reader, transactions, safety, properties.models().get("coordinator"), false);
+        assertThat(rejecting.check(id, c)).containsEntry("SOURCE_VERSION_VERIFIED", false).containsEntry("DELETION_WATERMARK_CHECKED", false);
     }
 
     /** 对只读观察器注入第三轮偏好丢失负例，不更新不可变业务快照，不能只因最终正确掩盖中途丢失。
@@ -183,6 +232,12 @@ class Dev35HttpAcceptanceTest {
     /** 本地固定解释仅验证生产HTTP、Worker和裁判接线；不得当真实模型成绩。
      * @param c 实际领取的合成消息 @return 有真实原文引用的固定业务协议 */
     private DialogueIntent.Result localReply(com.lawrence.travel.application.interaction.Dialogue.Claim c) {
+        if (documentsBatch()) {
+            var document = sourceReads.list(c.budgetId(), c.token()).getFirst();
+            var fragment = sourceReads.section(c.budgetId(), c.token(), document.id(), 1, 0, 4000);
+            return new DialogueIntent.Result(List.of(new DialogueIntent.Intent(DialogueIntent.Kind.CONVERSATION, DialogueIntent.Action.EXPLAIN_PLAN, c.text())),
+                    List.of(), "本地替身只解释实际读取的用户材料，不创建旅行：" + fragment.text(), "", null, "", "", "");
+        }
         if (c.text().startsWith("开始规划北京旅行")) {
             var facts = new ArrayList<>(List.of(new DialogueIntent.Fact("cities", "北京", "北京"),
                     new DialogueIntent.Fact("startDate", "2026-11-01", "2026年11月1日至3日"),
@@ -213,13 +268,14 @@ class Dev35HttpAcceptanceTest {
     /** 即使断言中止也保存真实账本总量和部分结果；原始认证值不进入报告，语义仍待人工。
      * @throws Exception 最小结构化报告无法持久化 */
     @AfterEach void recordsPartialEvidence() throws Exception {
+        if (parserServer != null) { parserServer.stop(0); parserServer = null; }
         var reviews = new ArrayList<Object>();
         for (var c : captures) reviews.add(Map.of("user", c.userId(), "chat", c.chatId(), "state", c.state(),
                 "metrics", c.metrics(), "outcome", c.outcome(), "turns", c.turns(),
                 "messages", jdbc.queryForList("SELECT text,reply,state FROM dialogue_input WHERE user_id=? AND chat_id=? ORDER BY sequence", c.userId(), c.chatId())));
         var meters = jdbc.queryForMap("SELECT count(*) FILTER(WHERE kind='MODEL') AS requests,coalesce(sum(input_tokens),0) AS input,coalesce(sum(output_tokens),0) AS output,count(*) FILTER(WHERE kind='MODEL' AND status<>'COMPLETED') AS unknown FROM call_meter");
         String body = json.encode(Map.of("version", "dev35-http-v1", "mode", real() ? "REAL_MODEL" : "LOCAL_CONTRACT",
-                "coverage", requirementsBatch() ? "HTTP_WORKER_PG_R01_SUPPLEMENT_NOT_FROZEN_SUITE" : "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE", "requestLimit", 16,
+                "coverage", requirementsBatch() ? "HTTP_WORKER_PG_R01_SUPPLEMENT_NOT_FROZEN_SUITE" : documentsBatch() ? "HTTP_WORKER_PG_P07_P19_DOCUMENTS_NOT_FULL_SUITE" : "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE", "requestLimit", 16,
                 "suiteHash", suiteHash, "rows", rows, "meterTotals", meters, "manualReview", "PENDING", "reviews", reviews,
                 "modelId", real() ? properties.models().get("coordinator") : "LOCAL_INTERPRETER_STUB"));
         safety.require("EVALUATION_REPORT", body);
