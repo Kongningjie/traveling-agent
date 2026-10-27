@@ -36,19 +36,10 @@ function positionAttachments(): void {
   attachmentMenu.value.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - 328))}px`;
   attachmentMenu.value.style.bottom = `${Math.max(8, window.innerHeight - bounds.top + 8)}px`;
 }
-/** 关闭菜单后打开原有文件选择与确认流程，不自动上传或发送消息。 */
+/** 关闭菜单后打开文件选择器；选择文件后由上传组件处理，不自动发送聊天。 */
 function attachFile(): void {
   attachmentMenu.value?.hidePopover();
   emit("attach");
-}
-/**
- * 从已有会话资料选择本轮引用，不删除原件或自动发起模型请求。
- *
- * @param document 用户明确选择的会话文件，状态限制由原引用入口再次检查。
- */
-function attachExisting(document: DocumentView): void {
-  attachmentMenu.value?.hidePopover();
-  chooseDocument(document);
 }
 /**
  * 关闭加号菜单后打开指定文件操作，不修改本轮选择。
@@ -297,42 +288,6 @@ defineExpose({ focus });
             <span><strong>添加文件</strong><small>从电脑上传旅行计划或资料</small></span>
           </button>
           <p>PDF、DOCX、TXT、Markdown · 最大 10 MiB</p>
-          <template v-if="documents?.length">
-            <h3>引用会话文件</h3>
-            <div v-for="doc in documents" :key="doc.id" class="attachment-row">
-              <button
-                type="button"
-                class="attachment-existing"
-                :disabled="
-                  disabled ||
-                  doc.state !== 'READY' ||
-                  selected.includes(doc.id) ||
-                  selected.length >= 10
-                "
-                @click="attachExisting(doc)"
-              >
-                <span class="file-type" aria-hidden="true">{{ doc.kind.toUpperCase() }}</span>
-                <span
-                  ><strong>{{ doc.name }}</strong
-                  ><small>{{
-                    selected.includes(doc.id) ? "已添加到本轮" : documentLabel(doc)
-                  }}</small></span
-                >
-              </button>
-              <button
-                type="button"
-                class="file-more"
-                :aria-label="`${doc.name}的文件操作`"
-                @click="manageFile(doc.id)"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="5" cy="12" r="2" />
-                  <circle cx="12" cy="12" r="2" />
-                  <circle cx="19" cy="12" r="2" />
-                </svg>
-              </button>
-            </div>
-          </template>
         </div>
         <span>{{
           answering
@@ -431,20 +386,6 @@ defineExpose({ focus });
   color: inherit;
   text-align: left;
 }
-.attachment-row {
-  display: flex;
-  align-items: center;
-}
-.attachment-row .attachment-existing {
-  flex: 1;
-  min-width: 0;
-}
-.attachment-row .file-more {
-  width: 32px;
-  flex-shrink: 0;
-  padding: 10px 5px;
-  justify-content: center;
-}
 .attachment-menu button:hover {
   background: #f3f4f3;
 }
@@ -485,14 +426,6 @@ defineExpose({ focus });
   font-size: 11px;
   line-height: 1.6;
 }
-.attachment-menu h3 {
-  border-top: 1px solid #eceeec;
-  margin: 7px 0 2px;
-  padding: 12px 10px 4px;
-  color: #808780;
-  font-size: 12px;
-  font-weight: 500;
-}
 .file-chip strong {
   display: block;
   max-width: 220px;
@@ -520,18 +453,15 @@ defineExpose({ focus });
   color: #33483d;
   border-radius: 8px;
 }
-.file-chip button:hover,
-.attachment-row .file-more:hover {
+.file-chip button:hover {
   background: #e8eeea;
   color: #172e22;
 }
-.file-chip button:focus-visible,
-.file-more:focus-visible {
+.file-chip button:focus-visible {
   outline: 2px solid #2f6654;
   outline-offset: 2px;
 }
-.file-chip button svg,
-.file-more svg {
+.file-chip button svg {
   width: 18px;
   height: 18px;
   fill: currentColor;
