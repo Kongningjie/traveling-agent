@@ -57,19 +57,37 @@ public final class PostgresDialogueStore implements DialogueStore {
     @Override public Dialogue.View read(UUID user, UUID chat) {
         return safe(() -> {
         var c = mapper.chat(user, chat); require(c != null, true);
-        return new Dialogue.View(c, mapper.messages(user, chat).stream().map(this::message).toList(), c.taskId() != null && blocked(user, c.taskId()));
+        var rows = mapper.messages(user, chat);
+        var attachments = new java.util.HashMap<UUID, List<Dialogue.DocumentReference>>();
+        if (!rows.isEmpty()) for (var reference : mapper.attachedDocuments(user, chat, rows.stream().map(DialogueMapper.Row::id).toList())) {
+            attachments.computeIfAbsent(reference.inputId(), ignored -> new java.util.ArrayList<>())
+                    .add(new Dialogue.DocumentReference(reference.id(), reference.name(), reference.available()));
+        }
+        return new Dialogue.View(c, rows.stream().map(row -> message(row, attachments.getOrDefault(row.id(), List.of()))).toList(), c.taskId() != null && blocked(user, c.taskId()));
         });
     }
     /** {@inheritDoc} 用户锁串行收件与接受；普通输入不递增旅行代次。 */
     @Override public Dialogue.View receive(UUID user, UUID chat, UUID id, String text) {
-        transaction(); lock(user, chat); require(id != null && text != null && !text.isBlank() && text.length() <= com.lawrence.travel.domain.interaction.DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0) < 0, false);
+        return receive(user, chat, id, text, List.of());
+    }
+    /** {@inheritDoc} 锁归属后原子保存消息、原件版本及作业；幂等比较附件集合，不依赖顺序。 */
+    @Override public Dialogue.View receive(UUID user, UUID chat, UUID id, String text, List<UUID> documents) {
+        transaction(); lock(user, chat);
+        require(documents != null && documents.size() <= 10 && documents.stream().noneMatch(Objects::isNull) && new java.util.HashSet<>(documents).size() == documents.size(), false);
+        require(id != null && text != null && !text.isBlank() && text.length() <= com.lawrence.travel.domain.interaction.DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0) < 0, false);
         var replay = mapper.message(user, chat, id);
-        if (replay != null) { require(replay.text().equals(text), false); return read(user, chat); }
+        if (replay != null) {
+            require(replay.text().equals(text) && new java.util.HashSet<>(mapper.documents(user, chat, id).stream().map(Dialogue.DocumentReference::id).toList()).equals(new java.util.HashSet<>(documents)), false);
+            return read(user, chat);
+        }
         require(mapper.messages(user, chat).stream().filter(m -> List.of("QUEUED", "RUNNING", "PAUSED", "CLARIFY", "CONFIRM").contains(m.state())).count() < 20, false);
         mapper.insert(user, chat, id, text);
+        for (UUID document : documents) require(mapper.bindDocument(user, chat, id, document) == 1, true);
         ensureJob(user, chat, id, false);
         return read(user, chat);
     }
+    /** {@inheritDoc} 读取当前索引和原绑定版本；删除后只返回墓碑名称。 */
+    @Override public List<Dialogue.DocumentReference> documents(UUID user, UUID chat, UUID input) { return safe(() -> mapper.documents(user, chat, input)); }
     /** {@inheritDoc} 同聊天串行，领取使用用户锁与输入租约，恢复不创建新的预算身份。 */
     @Override public Optional<Dialogue.Claim> claim() {
         return claimExcluding(java.util.Set.of());
@@ -102,6 +120,9 @@ public final class PostgresDialogueStore implements DialogueStore {
                 var candidateId = mapper.candidate(hint.userId(), chat.taskId()); if (candidateId != null) context.put("candidateId", candidateId.toString());
                 if (basis.currentVersion() != null) context.put("itinerary", json.decode(tasks.snapshot(scope, basis.currentVersion()).payload(), Object.class));
             }
+            context.put("selectedDocuments", mapper.documents(hint.userId(), chat.id(), row.id()));
+            context.put("previousDocumentSelections", mapper.previousDocumentInputs(hint.userId(), chat.id(), row.id()).stream()
+                    .map(id -> java.util.Map.of("messageId", id, "documents", mapper.documents(hint.userId(), chat.id(), UUID.fromString(id)))).toList());
             String data = json.encode(context);
             return Optional.of(new Dialogue.Claim(hint.userId(), chat.id(), row.id(), token, work.get().job().budgetId(), row.text(), row.receivedAt(), basis, data));
         }
@@ -127,7 +148,7 @@ public final class PostgresDialogueStore implements DialogueStore {
         require(mapper.finish(claim, state, reply, operation == null ? null : json.encode(operation), error) == 1, false);
     }
     /** {@inheritDoc} 用户和任务锁保护操作确认与候选接受的原子性。 */
-    @Override public Dialogue.Message lockMessage(UUID user, UUID chat, UUID message, String action) { transaction(); lock(user, chat); var row = mapper.message(user, chat, message); require(row != null, true); return message(row); }
+    @Override public Dialogue.Message lockMessage(UUID user, UUID chat, UUID message, String action) { transaction(); lock(user, chat); var row = mapper.message(user, chat, message); require(row != null, true); return message(row, user, chat); }
     /** {@inheritDoc} 重试只改队列尝试，不重置execution_budget或未知用量。 */
     @Override public void changeState(UUID user, UUID chat, UUID message, String state) {
         transaction(); lock(user, chat); require(List.of("DONE", "WITHDRAWN", "QUEUED").contains(state), false);
@@ -181,8 +202,12 @@ public final class PostgresDialogueStore implements DialogueStore {
         if (result.taskId() != null) require(tasks.lockTask(new TaskScope(user, result.taskId())) != null, true);
         return result;
     }
-    /** @param row 数据行 @return 不暴露租约内部信息的界面消息 */
-    private Dialogue.Message message(DialogueMapper.Row row) { return new Dialogue.Message(row.id(), row.text(), row.state(), row.reply(), row.operation() == null ? null : json.decode(row.operation(), Dialogue.Operation.class), row.error()); }
+    /** @param row 数据行 @param user 已认证归属 @param chat 私有聊天 @return 不暴露租约内部信息的界面消息 */
+    private Dialogue.Message message(DialogueMapper.Row row, UUID user, UUID chat) { return message(row, mapper.documents(user, chat, row.id())); }
+    /** @param row 原消息 @param documents 当前窗口批量读取的引用 @return 不改变原文、不额外查询附件的界面消息 */
+    private Dialogue.Message message(DialogueMapper.Row row, List<Dialogue.DocumentReference> documents) {
+        return new Dialogue.Message(row.id(), row.text(), row.state(), row.reply(), row.operation() == null ? null : json.decode(row.operation(), Dialogue.Operation.class), row.error(), List.copyOf(documents));
+    }
     /** 必须参加应用短事务，禁止隐式自动提交产生部分结果。 */
     private static void transaction() { if (!TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("TRANSACTION_REQUIRED"); }
     /** @param condition 检查 @param missing 是否归属不存在，错误不能包含私有正文 */

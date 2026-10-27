@@ -59,6 +59,13 @@ public final class DialogueService implements BackgroundWorkSource {
     }
     /** @param actor 认证 @param chat 可重试的创建ID @param input 消息幂等键 @param text 自由文本 @return 可靠保存的聊天，无旅行占位任务 */
     public Dialogue.View send(UserIdentity actor, UUID chat, UUID input, String text) {
+        return send(actor, chat, input, text, List.of());
+    }
+    /** @param actor 身份 @param chat 聊天 @param input 幂等消息 @param text 原文 @param documents 本轮选中文件；缺省为空，不从文本猜文件ID
+     * @return 收件视图；同ID异文本或异附件拒绝，附件归属与版本由存储端口同事务检查 */
+    public Dialogue.View send(UserIdentity actor, UUID chat, UUID input, String text, List<UUID> documents) {
+        var selected = documents == null ? List.<UUID>of() : new java.util.ArrayList<>(documents);
+        require(selected.size() <= 10 && selected.stream().noneMatch(Objects::isNull) && new java.util.HashSet<>(selected).size() == selected.size());
         require(actor != null && chat != null && input != null && text != null && !text.isBlank() && text.length() <= DialogueIntent.MAX_TEXT_LENGTH && text.indexOf(0)<0);
         return transactions.required(() -> {
             // 创建和首条消息同事务；后续消息不能用新标题覆盖旧标题。
@@ -66,6 +73,7 @@ public final class DialogueService implements BackgroundWorkSource {
             if (!exists) { try { store.read(actor.id(), chat); exists = true; } catch (TravelStorageFailure missing) { if (missing.code() != TravelStorageFailure.Code.NOT_FOUND) throw missing; } }
             if (!exists) store.create(actor.id(), chat, text.substring(0, Math.min(60, text.length())));
             if(java.util.Set.of("停止","停止规划","停止当前规划","停止当前执行").contains(text.trim().replaceAll("[。！!]$",""))) {
+                require(selected.isEmpty());
                 if(store.containsInput(actor.id(),chat,input,text)) return store.receive(actor.id(),chat,input,text);
                 store.stopPending(actor.id(),chat); var current=store.read(actor.id(),chat).chat();
                 if(current.taskId()!=null) {
@@ -74,7 +82,7 @@ public final class DialogueService implements BackgroundWorkSource {
                 }
                 store.receive(actor.id(),chat,input,text); store.completeCommand(actor.id(),chat,input,"已处理停止请求，已有行程和对话保留。"); return store.read(actor.id(),chat);
             }
-            return store.receive(actor.id(), chat, input, text);
+            return store.receive(actor.id(), chat, input, text, selected);
         });
     }
     /** @param actor 认证 @param offset 分页 @return 仅本人聊天 */
@@ -120,6 +128,12 @@ public final class DialogueService implements BackgroundWorkSource {
         try {
             safety.require("INPUT",c.text());
             phase.set(FailurePhase.CONTEXT);
+            var selectedDocuments = json.decode(c.context(), java.util.Map.class).get("selectedDocuments");
+            // 已绑定版本失效时不调用模型，也不悄悄替换成另一份同名资料。用户须重新选择。
+            if (selectedDocuments instanceof List<?> selected && selected.stream().anyMatch(item -> item instanceof java.util.Map<?, ?> ref && !Boolean.TRUE.equals(ref.get("available")))) {
+                transactions.required(() -> { if (store.guard(c)) store.finish(c, "CLARIFY", "选中的资料已删除或暂不可读取，请重新选择文件后发送。", null, "DOCUMENT_REFERENCE_UNAVAILABLE"); return null; });
+                return;
+            }
             var pref = preferences.read(actor(c.userId()));
             var augmented = new java.util.LinkedHashMap<String, Object>(); augmented.put("travel", json.decode(c.context(), Object.class)); augmented.put("preferences", pref.entries().stream().limit(20).toList());
             if (c.basis().taskId() != null) { var card = negotiation.card(actor(c.userId()), c.basis().taskId()); if (card != null) augmented.put("questions", DialogueQuestionContext.from(card)); }
@@ -135,7 +149,16 @@ public final class DialogueService implements BackgroundWorkSource {
             require(sources.keySet().containsAll(result.resolvedInputs()));
             result.validateSources(c.text(), result.resolvedInputs().stream().map(sources::get).toList());
             phase.set(FailurePhase.COMMIT);
-            transactions.required(() -> { if (!store.guard(c) || preferences.read(actor(c.userId())).version().revision()!=pref.version().revision()) { store.finish(c, "CLARIFY", "旅行状态已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED"); return null; } route(c, result, phase::set); return null; });
+            transactions.required(() -> {
+                // 先取得原执行的归属锁和围栏，再重查选中文件；模型期间的删除/版本变化不能被旧回复覆盖。
+                if (!store.guard(c) || preferences.read(actor(c.userId())).version().revision() != pref.version().revision()
+                        || store.documents(c.userId(), c.chatId(), c.messageId()).stream().anyMatch(d -> !d.available())) {
+                    store.finish(c, "CLARIFY", "旅行状态或引用资料已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED");
+                    return null;
+                }
+                route(c, result, phase::set);
+                return null;
+            });
         } catch (RuntimeException failure) {
             Thread.interrupted();
             boolean disabled = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected && rejected.reason() == com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.EXTERNAL_DISABLED;

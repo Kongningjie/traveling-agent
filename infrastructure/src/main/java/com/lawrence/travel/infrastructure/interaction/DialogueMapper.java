@@ -120,4 +120,21 @@ public interface DialogueMapper {
     /** @param user 用户 @param task 任务 @return 当前运行身份 */
     @Select("SELECT current_run_id::text FROM travel_task WHERE user_id=#{user} AND id=#{task}")
     String run(@Param("user") UUID user, @Param("task") UUID task);
+    /** @param user 归属 @param chat 聊天 @param input 消息 @return 当前名称及已绑定版本可读性；墓碑不返回旧名称 */
+    @Select("SELECT r.document_id AS id,CASE WHEN d.deleted THEN '已删除附件' ELSE d.name END AS name,COALESCE(NOT d.deleted AND d.hash=r.content_hash AND j.state='COMPLETED' AND d.report->>'code'='OK',false) AS available FROM dialogue_input_document r JOIN uploaded_document d ON d.id=r.document_id JOIN background_job j ON j.id=d.job_id WHERE r.user_id=#{user} AND r.chat_id=#{chat} AND r.input_id=#{input} ORDER BY r.document_id")
+    List<Dialogue.DocumentReference> documents(@Param("user") UUID user, @Param("chat") UUID chat, @Param("input") UUID input);
+    /** @param user 归属 @param chat 聊天 @param input 消息 @param document 文件 @return 写入数；只有本聊天READY资料可绑定，用户锁串行删除及解析提交 */
+    @Insert("INSERT INTO dialogue_input_document(user_id,chat_id,input_id,document_id,content_hash) SELECT d.user_id,d.chat_id,#{input},d.id,d.hash FROM uploaded_document d JOIN background_job j ON j.id=d.job_id WHERE d.user_id=#{user} AND d.chat_id=#{chat} AND d.id=#{document} AND NOT d.deleted AND j.state='COMPLETED' AND d.report->>'code'='OK'")
+    int bindDocument(@Param("user") UUID user, @Param("chat") UUID chat, @Param("input") UUID input, @Param("document") UUID document);
+
+    /** @param user 归属 @param chat 聊天 @param input 当前消息 @return 最近5条已处理的附件选择，仅作历史指代依据，不形成新授权 */
+    @Select("SELECT i.id::text FROM dialogue_input i WHERE i.user_id=#{user} AND i.chat_id=#{chat} AND i.sequence<(SELECT sequence FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{input}) AND i.state IN('DONE','CLARIFY','CONFIRM') AND EXISTS(SELECT 1 FROM dialogue_input_document r WHERE r.user_id=i.user_id AND r.chat_id=i.chat_id AND r.input_id=i.id) ORDER BY i.sequence DESC LIMIT 5")
+    List<String> previousDocumentInputs(@Param("user") UUID user, @Param("chat") UUID chat, @Param("input") UUID input);
+
+    /** @param inputId 消息 @param id 原件 @param name 当前安全文件名 @param available 绑定版本是否可读；仅用于批量视图映射 */
+    record AttachedDocument(UUID inputId, UUID id, String name, boolean available) { }
+    /** @param user 归属 @param chat 聊天 @param inputs 已选中的最多120条消息ID @return 一次查询当前窗口的附件，避免轮询时每条消息单独查询 */
+    @Select("<script>SELECT r.input_id,r.document_id AS id,CASE WHEN d.deleted THEN '已删除附件' ELSE d.name END AS name,COALESCE(NOT d.deleted AND d.hash=r.content_hash AND j.state='COMPLETED' AND d.report-&gt;&gt;'code'='OK',false) AS available FROM dialogue_input_document r JOIN uploaded_document d ON d.id=r.document_id JOIN background_job j ON j.id=d.job_id WHERE r.user_id=#{user} AND r.chat_id=#{chat} AND r.input_id IN <foreach collection='inputs' item='input' open='(' separator=',' close=')'>#{input,jdbcType=OTHER,typeHandler=org.apache.ibatis.type.ObjectTypeHandler}</foreach> ORDER BY r.input_id,r.document_id</script>")
+    List<AttachedDocument> attachedDocuments(@Param("user") UUID user, @Param("chat") UUID chat, @Param("inputs") List<UUID> inputs);
+
 }

@@ -11,8 +11,15 @@ public final class Dialogue {
     private Dialogue() { }
     /** @param id 聊天 @param title 标题 @param taskId 开始规划后关联的任务，可空 */
     public record Chat(UUID id, String title, UUID taskId) { }
-    /** @param id 幂等消息 @param text 用户原文 @param state 持久状态 @param reply 助手结果 @param operation 仅待确认动作 @param error 固定失败码 */
-    public record Message(UUID id, String text, String state, String reply, Operation operation, String error) { }
+    /** @param id 幂等消息 @param text 用户原文 @param state 持久状态 @param reply 助手结果 @param operation 仅待确认动作 @param error 固定失败码 @param documents 本条消息明确选中的资料 */
+    public record Message(UUID id, String text, String state, String reply, Operation operation, String error, List<DocumentReference> documents) {
+        /** @param id 消息 @param text 原文 @param state 状态 @param reply 回复 @param operation 操作 @param error 错误；兼容无附件调用 */
+        public Message(UUID id, String text, String state, String reply, Operation operation, String error) {
+            this(id, text, state, reply, operation, error, List.of());
+        }
+    }
+    /** @param id 后台定位身份 @param name 当前文件名；删除后不返回旧名称 @param available 原版本当前是否可读 */
+    public record DocumentReference(UUID id, String name, boolean available) { }
     /** @param chat 聊天归属 @param messages 最近消息，按接收顺序 @param blocked 未解释消息屏障 */
     public record View(Chat chat, List<Message> messages, boolean blocked) { }
     /** @param action 动作 @param targetId 已定位对象，可空 @param description 展示的具体影响 @param basis 精确任务版本 @param preferenceRevision 偏好版本

@@ -53,13 +53,122 @@ class DocumentIntegrationTest {
     @BeforeEach void setup() {when(parser.parse(any())).thenReturn(new Documents.Report("pdfbox-3.0.8_poi-5.5.1_v1","OK",List.of(new Documents.Section(1,"旅行文本")),"未做OCR，表格需核对"));}
     /** 只清理随机用户和测试原件，保留其他会话／计量。 */
     @AfterEach void clean() {awaitHttpExit();for(var id:sessionIds)sessions.deleteById(id);for(var u:users) {for(var e:jdbc.queryForList("SELECT file_key FROM uploaded_document WHERE user_id=?",String.class,u.id())) {try{java.nio.file.Files.deleteIfExists(ROOT.resolve(e));}catch(java.io.IOException ignored){throw new IllegalStateException("TEST_CLEAN_FAILED");}}
-        tx.required(()->{var budgets=jdbc.queryForList("SELECT id FROM operation_context WHERE user_id=? UNION SELECT budget_id FROM dialogue_chat WHERE user_id=?",UUID.class,u.id(),u.id());jdbc.update("DELETE FROM uploaded_document WHERE user_id=?",u.id());JobTestCleanup.remove(jdbc,u.id());jdbc.update("DELETE FROM dialogue_chat WHERE user_id=?",u.id());for(var b:budgets)jdbc.update("DELETE FROM execution_budget WHERE run_id=?",b);jdbc.update("DELETE FROM app_user WHERE id=?",u.id());return null;});}}
+        tx.required(()->{var budgets=jdbc.queryForList("SELECT id FROM operation_context WHERE user_id=? UNION SELECT budget_id FROM dialogue_chat WHERE user_id=?",UUID.class,u.id(),u.id());jdbc.update("DELETE FROM dialogue_input WHERE user_id=?",u.id());jdbc.update("DELETE FROM uploaded_document WHERE user_id=?",u.id());JobTestCleanup.remove(jdbc,u.id());jdbc.update("DELETE FROM dialogue_chat WHERE user_id=?",u.id());for(var b:budgets)jdbc.update("DELETE FROM execution_budget WHERE run_id=?",b);jdbc.update("DELETE FROM app_user WHERE id=?",u.id());return null;});}}
     /** @return 本例不可登录测试身份 */
     private UserIdentity actor() {var id=UUID.randomUUID();var name="doc_"+id.toString().replace("-","").substring(0,20);accounts.insert(id,name,"__NON_LOGIN_TEST_HASH__");var u=new UserIdentity(id,name);users.add(u);return u;}
     /** @param user 身份 @param chat 聊天 @return 文本附件 */
     private Documents.View upload(UserIdentity user,UUID chat) {return service.upload(user,chat,UUID.randomUUID(),"计划.txt","旅行原件".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
     /** @param user 身份 @param chat 聊天 @param id 文档 @return 本次实际领取 */
     private Jobs.Claim claim(UserIdentity user,UUID chat,UUID id) {var e=store.get(new Jobs.Scope(user.id(),chat),id);return jobs.claim(new Jobs.Scope(user.id(),chat),e.jobId()).orElseThrow();}
+    @Autowired com.lawrence.travel.application.interaction.DialogueService dialogue;
+    @Autowired com.lawrence.travel.application.port.DialogueStore dialogueStore;
+    @MockitoBean com.lawrence.travel.application.port.DialogueInterpreter interpreter;
+    /** @param user 身份 @param chat 聊天 @return 已完成解析的合成附件，不调用真实解析器或模型 */
+    private Documents.View readyDocument(UserIdentity user, UUID chat) {
+        var document = upload(user, chat); var work = claim(user, chat, document.id());
+        service.commit(work, service.execute(work), () -> {});
+        return service.list(user, chat).stream().filter(d -> d.id().equals(document.id())).findFirst().orElseThrow();
+    }
+    /** 同名附件由结构化身份绑定；同消息重放不得换附件，消息/引用/作业共同回滚。 */
+    @Test void messageAttachmentsPersistAndReplayCannotChangeSelection() {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID();
+        var first = readyDocument(user, chat); var second = readyDocument(user, chat);
+        var view = dialogue.send(user, chat, input, "帮我比较这两份计划", List.of(first.id(), second.id()));
+        assertThat(view.messages().getFirst().text()).isEqualTo("帮我比较这两份计划");
+        assertThat(view.messages().getFirst().documents()).hasSize(2).allMatch(d -> d.available() && d.name().equals("计划.txt"));
+        dialogue.send(user, chat, input, "帮我比较这两份计划", List.of(second.id(), first.id()));
+        assertThatThrownBy(() -> dialogue.send(user, chat, input, "帮我比较这两份计划", List.of(first.id()))).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThatThrownBy(() -> dialogue.send(user, chat, input, "帮我比较这两份计划")).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM dialogue_input WHERE user_id=?", Integer.class, user.id())).isEqualTo(1);
+        when(interpreter.interpret(any())).thenAnswer(invocation -> {
+            var selected = invocation.getArgument(0, com.lawrence.travel.application.interaction.Dialogue.Claim.class);
+            assertThat(selected.context()).contains("selectedDocuments", first.id().toString(), second.id().toString());
+            return new com.lawrence.travel.domain.interaction.DialogueIntent.Result(List.of(new com.lawrence.travel.domain.interaction.DialogueIntent.Intent(com.lawrence.travel.domain.interaction.DialogueIntent.Kind.CONVERSATION, com.lawrence.travel.domain.interaction.DialogueIntent.Action.COMPARE_OPTIONS, "帮我比较这两份计划")), List.of(), "需要核对资料内容", "", null, "", "", "");
+        });
+        dialogue.claimWork().orElseThrow().run();
+        assertThat(dialogue.read(user, chat).messages().getFirst().documents()).hasSize(2);
+        dialogue.send(user, chat, UUID.randomUUID(), "刚才那两份资料呢");
+        var followup = tx.required(dialogueStore::claim).orElseThrow();
+        assertThat(followup.context()).contains("previousDocumentSelections", input.toString(), first.id().toString(), second.id().toString());
+    }
+    /** 他人/其他会话/未解析/不存在附件不能绑定；无效请求不留下消息或聊天作业。 */
+    @Test void messageAttachmentOwnershipReadinessAndLimitsAreAtomic() {
+        var user = actor(); UUID chat = UUID.randomUUID(); var document = readyDocument(user, chat);
+        var other = actor(); UUID otherChat = UUID.randomUUID(); var foreign = readyDocument(other, otherChat);
+        UUID ownOtherChat = UUID.randomUUID(); var misplaced = readyDocument(user, ownOtherChat);
+        var pending = upload(user, chat);
+        for (var id : List.of(foreign.id(), misplaced.id(), pending.id(), UUID.randomUUID())) {
+            assertThatThrownBy(() -> dialogue.send(user, chat, UUID.randomUUID(), "解释这份计划", List.of(document.id(), id))).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        }
+        assertThatThrownBy(() -> dialogue.send(user, chat, UUID.randomUUID(), "解释", List.of(document.id(), document.id()))).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThatThrownBy(() -> dialogue.send(user, chat, UUID.randomUUID(), "解释", java.util.Arrays.asList((UUID)null))).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThatThrownBy(() -> dialogue.send(user, chat, UUID.randomUUID(), "解释", java.util.stream.IntStream.range(0,11).mapToObj(n -> UUID.randomUUID()).toList())).isInstanceOf(com.lawrence.travel.application.travel.TravelStorageFailure.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM dialogue_input WHERE user_id=?", Integer.class, user.id())).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM dialogue_input_document WHERE user_id=?", Integer.class, user.id())).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM background_job WHERE user_id=? AND kind='CHAT_INPUT'", Integer.class, user.id())).isZero();
+        // 旧客户端省略documentIds仍可普通聊天，不能因新增字段而抛空指针。
+        assertThat(dialogue.send(user, chat, UUID.randomUUID(), "你好", null).messages()).hasSize(1);
+    }
+    /** 排队后资料版本改变时本地澄清，不把旧选择替换为同名原件，也不调用模型。 */
+    @Test void staleMessageAttachmentPausesBeforeModelAndDeletionHidesName() {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID(); var document = readyDocument(user, chat);
+        dialogue.send(user, chat, input, "解释这份计划", List.of(document.id()));
+        service.action(user, chat, document.id(), "DELETE");
+        dialogue.claimWork().orElseThrow().run();
+        var message = dialogue.read(user, chat).messages().getFirst();
+        assertThat(message.state()).isEqualTo("CLARIFY"); assertThat(message.error()).isEqualTo("DOCUMENT_REFERENCE_UNAVAILABLE");
+        org.mockito.Mockito.verifyNoInteractions(interpreter);
+        assertThat(dialogue.read(user, chat).messages().getFirst().documents().getFirst().name()).isEqualTo("已删除附件");
+        assertThat(dialogue.read(user, chat).messages().getFirst().documents().getFirst().available()).isFalse();
+    }
+    /** 模型执行中引用版本失效，晚到回复不能成为成功解释或产生业务修改。 */
+    @Test void changedAttachmentBeforeCommitRejectsLateReply() {
+        var user = actor(); UUID chat = UUID.randomUUID(); var document = readyDocument(user, chat);
+        dialogue.send(user, chat, UUID.randomUUID(), "解释这份计划", List.of(document.id()));
+        when(interpreter.interpret(any())).thenAnswer(invocation -> {
+            jdbc.update("UPDATE uploaded_document SET hash=repeat('0',64) WHERE id=?", document.id());
+            return new com.lawrence.travel.domain.interaction.DialogueIntent.Result(List.of(new com.lawrence.travel.domain.interaction.DialogueIntent.Intent(com.lawrence.travel.domain.interaction.DialogueIntent.Kind.CONVERSATION, com.lawrence.travel.domain.interaction.DialogueIntent.Action.EXPLAIN_PLAN, "解释这份计划")), List.of(), "不应展示的迟到解释", "", null, "", "", "");
+        });
+        dialogue.claimWork().orElseThrow().run();
+        var message = dialogue.read(user, chat).messages().getFirst();
+        assertThat(message.state()).isEqualTo("CLARIFY"); assertThat(message.error()).isEqualTo("DIALOGUE_CONTEXT_CHANGED");
+        assertThat(message.reply()).doesNotContain("不应展示的迟到解释");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM travel_task WHERE user_id=?", Integer.class, user.id())).isZero();
+    }
+    /** 同ID并发选择不同资料只有一个收件成功，不能混成并集或生成两条作业。
+     * @throws Exception 本机并发调度失败 */
+    @Test void concurrentMessageAttachmentConflictHasOneWinner() throws Exception {
+        var user = actor(); UUID chat = UUID.randomUUID(), input = UUID.randomUUID();
+        var first = readyDocument(user, chat); var second = readyDocument(user, chat);
+        var start = new java.util.concurrent.CountDownLatch(1); var success = new java.util.concurrent.atomic.AtomicInteger();
+        try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = new ArrayList<java.util.concurrent.Future<?>>();
+            for (UUID id : List.of(first.id(), second.id())) futures.add(pool.submit(() -> {
+                try { start.await(); dialogue.send(user, chat, input, "解释这份计划", List.of(id)); success.incrementAndGet(); }
+                catch (com.lawrence.travel.application.travel.TravelStorageFailure expected) { assertThat(expected.code()).isEqualTo(com.lawrence.travel.application.travel.TravelStorageFailure.Code.STALE_VERSION); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new AssertionError("TEST_INTERRUPTED"); }
+            }));
+            start.countDown(); for (var future : futures) future.get();
+        }
+        assertThat(success).hasValue(1);
+        assertThat(dialogue.read(user, chat).messages().getFirst().documents()).hasSize(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM background_job WHERE user_id=? AND kind='CHAT_INPUT'", Integer.class, user.id())).isEqualTo(1);
+    }
+    /** 认证HTTP提交自然语言与附件字段，读取返回文件名卡片；不启动真实模型。
+     * @throws Exception 本机HTTP连接失败 */
+    @Test void httpMessageCarriesDocumentReferencesOutsideUserText() throws Exception {
+        var user = actor(); UUID chat = UUID.randomUUID(); var document = readyDocument(user, chat);
+        var client = java.net.http.HttpClient.newHttpClient(); String cookie = login(sessions, user), base = "http://127.0.0.1:" + port;
+        var csrfResponse = client.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/api/v1/auth/csrf")).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        var json = new com.lawrence.travel.infrastructure.travel.TravelJson(); var csrf = json.decode(csrfResponse.body(), java.util.Map.class);
+        var payload = java.util.Map.of("inputId", UUID.randomUUID(), "text", "帮我优化这份计划", "documentIds", List.of(document.id()));
+        var response = client.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/api/v1/chats/" + chat + "/messages")).header("Cookie", cookie).header(csrf.get("headerName").toString(), csrf.get("token").toString()).header("Content-Type", "application/json").POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.encode(payload))).build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+        var body = json.decode(response.body(), com.lawrence.travel.application.interaction.Dialogue.View.class);
+        assertThat(body.messages().getFirst().text()).isEqualTo("帮我优化这份计划");
+        assertThat(body.messages().getFirst().documents().getFirst().id()).isEqualTo(document.id());
+        assertThat(body.messages().getFirst().documents().getFirst().name()).isEqualTo("计划.txt");
+    }
     /** 上传和完成分开，全文／状态同事务，不创建旅行；同ID同内容幂等，异内容冲突。 */
     @Test void uploadParseAndIdempotencyPersistTogether() {
         var u=actor();var chat=UUID.randomUUID();var id=UUID.randomUUID();byte[] bytes="原始资料".getBytes(java.nio.charset.StandardCharsets.UTF_8);

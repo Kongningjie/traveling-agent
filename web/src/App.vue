@@ -19,6 +19,7 @@ import {
 } from "./workspace/guards";
 import { useWorkspace } from "./workspace/useWorkspace";
 import { useDialogue } from "./workspace/useDialogue";
+import type { DocumentView } from "./workspace/documents";
 import type { Message, Requirement } from "./workspace/types";
 const {
   user,
@@ -97,6 +98,22 @@ const composer = ref<InstanceType<typeof ChatComposer>>(),
   feedbackDialog = ref<HTMLDialogElement>(),
   documentPanel = ref<InstanceType<typeof DocumentPanel>>();
 const feedbackOpen = ref(false);
+const chatDocuments = ref<DocumentView[]>([]), selectedDocuments = ref<string[]>([]);
+watch(chatSelected, () => { chatDocuments.value = []; selectedDocuments.value = []; });
+/** @param id 上传所在聊天 @param document 新文件；只选择本轮资料，不自动调用模型。 */
+async function uploadedDocument(id: string, document: string): Promise<void> {
+  if (chatSelected.value !== id) await dialogue.open(id);
+  if (chatSelected.value !== id) return;
+  selectedDocuments.value = [...new Set([...selectedDocuments.value, document])];
+  void dialogue.list();
+  void composer.value?.focus();
+}
+/** @param text 可编辑的自然语言草稿 @param document 选中的资料身份；快捷操作也须用户点击发送。 */
+function analyzeDocument(text: string, document: string): void {
+  selectedDocuments.value = [document];
+  message.value = text;
+  void composer.value?.focus();
+}
 /** 用户主动打开反馈窗口才读取私有记录，关闭即卸载。 */
 async function openFeedback(): Promise<void> {
   feedbackOpen.value = true;
@@ -250,8 +267,11 @@ async function submitMessage(): Promise<void> {
     submittedText = text;
   }
   try {
-    if ((chatSelected.value || !task) && !target.value && !Object.keys(chosenOptions.value).length) {
-      const saved = await dialogue.send(text);
+    if (selectedDocuments.value.length || ((chatSelected.value || !task) && !target.value && !Object.keys(chosenOptions.value).length)) {
+      const documents = [...selectedDocuments.value];
+      if (documents.some(id => !chatDocuments.value.some(d => d.id === id && d.state === "READY"))) return;
+      const saved = await dialogue.send(text, documents);
+      if (saved) selectedDocuments.value = selectedDocuments.value.filter(id => !documents.includes(id));
       if (saved && message.value === text) message.value = "";
       return;
     }
@@ -638,6 +658,8 @@ onMounted(initialize);
             <ChatComposer
               ref="composer"
               v-model="message"
+              v-model:selected-documents="selectedDocuments"
+              :documents="chatDocuments"
               :disabled="inputDisabled"
               :attachment-disabled="chatBusy || chatRetryable"
               :stopping="composerStopping"
@@ -668,7 +690,7 @@ onMounted(initialize);
           <div v-else class="chat-thread">
             <template v-if="chatSelected">
               <template v-for="item in chatView?.messages ?? []" :key="item.id">
-                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已停止处理，原文保留' : '已保存' }}</small></article>
+                <article class="chat-message user-message"><div class="message-bubble"><p>{{ item.text }}</p><div v-if="item.documents?.length" class="message-files"><span v-for="doc in item.documents" :key="doc.id">▤ {{ doc.name }}{{ doc.available ? '' : '（暂不可读）' }}</span></div></div><small v-if="item.state !== 'DONE'">{{ item.state === 'WITHDRAWN' ? '已停止处理，原文保留' : '已保存' }}</small></article>
                 <AssistantReply v-if="item.reply || ['PAUSED','CLARIFY'].includes(item.state)" :key="chatSelected + item.id" :text="item.reply" :chat="chatSelected" :target="item.id" :can-retry="['PAUSED','CLARIFY'].includes(item.state)" :retry-disabled="chatBusy || chatRetryable" @retry="dialogue.act(item.id, 'RETRY')" />
                 <p v-if="['QUEUED','RUNNING'].includes(item.state)" class="muted" role="status">{{ item.state === 'QUEUED' ? '已保存，等待理解你的想法…' : '正在理解你的想法…' }}</p>
                 <section v-if="item.state === 'CONFIRM' && item.operation" class="panel operation-confirmation">
@@ -757,7 +779,7 @@ onMounted(initialize);
         </div>
         <div class="chat-bottom">
           <ReportProblem v-if="view?.runId && selected" kind="RUN" :key="view.runId" :scope="selected" :target="view.runId"/>
-          <DocumentPanel ref="documentPanel" :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="text => { void dialogue.send(text); }" @uploaded="id => { void dialogue.open(id); void dialogue.list(); }" />
+          <DocumentPanel ref="documentPanel" :key="user.id" :chat="chatSelected" :disabled="chatBusy || chatRetryable" @analyze="analyzeDocument" @uploaded="uploadedDocument" @changed="items => { chatDocuments = items; }" />
           <div v-if="chatError" class="error banner" role="alert">{{ chatError }}
             <button v-if="chatRetryable" :disabled="chatBusy" @click="dialogue.retryCommand">重试原操作</button>
             <button v-else :disabled="chatBusy" @click="dialogue.refresh">同步对话</button>
@@ -798,6 +820,8 @@ onMounted(initialize);
             v-if="hasConversation"
             ref="composer"
             v-model="message"
+            v-model:selected-documents="selectedDocuments"
+            :documents="chatDocuments"
             :disabled="inputDisabled"
             :answering="mode === 'ANSWER'"
             :placeholder="
@@ -1191,3 +1215,7 @@ onMounted(initialize);
     </dialog>
   </div>
 </template>
+
+<style scoped>
+.message-files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.message-files span{border:1px solid #dfe7e4;border-radius:10px;padding:8px 12px;background:#fff;font-size:13px;overflow-wrap:anywhere}
+</style>

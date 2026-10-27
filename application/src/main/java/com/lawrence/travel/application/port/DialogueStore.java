@@ -29,6 +29,14 @@ public interface DialogueStore {
     Dialogue.View read(UUID user, UUID chat);
     /** @param user 身份 @param chat 聊天 @param id 幂等输入 @param text 原文 @return 收件后视图；重复请求不可变更正文 */
     Dialogue.View receive(UUID user, UUID chat, UUID id, String text);
+    /** @param user 归属 @param chat 聊天 @param id 幂等消息 @param text 原文 @param documents 本轮明确选择的文件，最多10个且不得重复
+     * @return 消息和文件版本绑定同事务保存；重放不得改变附件 */
+    default Dialogue.View receive(UUID user, UUID chat, UUID id, String text, List<UUID> documents) {
+        if (!documents.isEmpty()) throw new IllegalStateException("DOCUMENT_BINDING_UNSUPPORTED");
+        return receive(user, chat, id, text);
+    }
+    /** @param user 归属 @param chat 聊天 @param input 消息 @return 该输入持久化的文件选择和当前可读性，不泄露其他用户信息 */
+    default List<Dialogue.DocumentReference> documents(UUID user, UUID chat, UUID input) { return List.of(); }
     /** @return 同一聊天有序领取；超时重试保留原预算，超过尝试上限暂停并保留屏障 */
     Optional<Dialogue.Claim> claim();
 

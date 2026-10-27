@@ -2,8 +2,10 @@
 export interface Chat { id: string; title: string; taskId: string | null }
 /** 服务端构造的精确确认，不由浏览器重组操作参数。 */
 export interface ChatOperation { action: string; description: string }
+/** 本条消息选中的原件；名称来自当前权威索引，删除后不展示旧文件名。 */
+export interface ChatDocument { id: string; name: string; available: boolean }
 /** 输入与助手结果，状态来自持久化记录。 */
-export interface ChatMessage { id: string; text: string; state: string; reply: string; operation: ChatOperation | null; error: string }
+export interface ChatMessage { id: string; text: string; state: string; reply: string; operation: ChatOperation | null; error: string; documents?: ChatDocument[] }
 /** 同一读取中的对话与屏障。 */
 export interface ChatView { chat: Chat; messages: ChatMessage[]; blocked: boolean }
 /** @param value 未知JSON @returns 对象形状，不接受null或数组。 */
@@ -33,7 +35,20 @@ export function decodeChatView(value: unknown): ChatView {
       operation = { action: op.action, description: op.description };
     }
     if (m.state === "CONFIRM" && !operation) throw new Error("聊天响应格式无效，请同步后重试。");
-    return { id: m.id, text: m.text, state: m.state as string, reply: m.reply, error: m.error, operation };
+    const documents = m.documents === undefined ? undefined : decodeChatDocuments(m.documents);
+    return { ...(documents === undefined ? {} : { documents }), id: m.id, text: m.text, state: m.state as string, reply: m.reply, error: m.error, operation };
   });
   return { chat, messages, blocked: v.blocked };
+}
+
+/** @param value 服务端附件引用 @returns 不含路径或正文、最多10个唯一定位引用。 */
+export function decodeChatDocuments(value: unknown): ChatDocument[] {
+  if (!Array.isArray(value) || value.length > 10) throw new Error("附件响应格式无效");
+  const seen = new Set<string>();
+  return value.map(raw => {
+    const d = object(raw);
+    if (!uuid(d.id) || seen.has(d.id) || typeof d.name !== "string" || d.name.length > 160 || typeof d.available !== "boolean") throw new Error("附件响应格式无效");
+    seen.add(d.id);
+    return { id: d.id, name: d.name, available: d.available };
+  });
 }

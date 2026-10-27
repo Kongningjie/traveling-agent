@@ -72,10 +72,10 @@ export function useDialogue(user: Ref<User | null>, selectTask: (id: string) => 
       return false;
     } finally { if (stamp === ticket) busy.value = false; }
   }
-  /** @param text 自由输入，不提前创建旅行；失败时由调用者保留草稿。 */
-  async function send(text: string): Promise<boolean> {
+  /** @param text 自由输入 @param documentIds 本轮明确选择的文件；重试闭包保留同一副本，不随草稿变化。失败时保留草稿。 */
+  async function send(text: string, documentIds: string[] = []): Promise<boolean> {
     if (retryable.value || !text.trim() || text.length > 4000) return false;
-    const id = selected.value || crypto.randomUUID(); const body = { inputId: crypto.randomUUID(), text };
+    const id = selected.value || crypto.randomUUID(); const body = { inputId: crypto.randomUUID(), text, documentIds: [...documentIds] };
     return write(() => api.post<ChatView>(`/api/v1/chats/${id}/messages`, body));
   }
   /** @param task 已存在私有旅行，将旧入口关联至同一个聊天，后续自由输入统一理解。 */

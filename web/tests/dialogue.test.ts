@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeChat, decodeChatView } from "../src/workspace/dialogue.ts";
+import { decodeChat, decodeChatView, decodeChatDocuments } from "../src/workspace/dialogue.ts";
 
 const id = "00000000-0000-4000-8000-000000000001";
 /** 构造显式本地合成响应，不包含真实用户数据。 */
@@ -20,4 +20,13 @@ test("错误身份字段、缺失状态及未知形状不能进入聊天界面",
   const view = fixture(); view.messages[0]!.state = "GUESSED";
   assert.throws(() => decodeChatView(view));
   assert.throws(() => decodeChatView({ ...fixture(), blocked: "false" }));
+});
+
+test("消息附件独立于原文，允许同名文件但不允许重复身份或伪造状态", () => {
+  const docs = [{id, name:"旅行计划.txt", available:true}, {id:"00000000-0000-4000-8000-000000000002", name:"旅行计划.txt", available:false}];
+  const view = fixture();
+  const result = decodeChatView({...view,messages:[{...view.messages[0],documents:docs}]});
+  assert.equal(result.messages[0]?.text,"你好");
+  assert.deepEqual(result.messages[0]?.documents, docs);
+  for (const input of [null, [...docs,docs[0]], [{...docs[0],available:"true"}], [{...docs[0],id:"path/to/file"}], Array(11).fill(docs[0])]) assert.throws(() => decodeChatDocuments(input));
 });
