@@ -115,24 +115,31 @@ public final class DialogueService implements BackgroundWorkSource {
     }); }
     /** @param c 原领取；任何模型或协议失败保存固定原因，屏障必须等待重试或撤回 */
     private void process(Dialogue.Claim c) {
+        // 标记仅属于本次领取；不新增调度状态。事务回滚后仍可按实际失败位置保存固定分类。
+        var phase = new java.util.concurrent.atomic.AtomicReference<>(FailurePhase.INPUT);
         try {
             safety.require("INPUT",c.text());
+            phase.set(FailurePhase.CONTEXT);
             var pref = preferences.read(actor(c.userId()));
             var augmented = new java.util.LinkedHashMap<String, Object>(); augmented.put("travel", json.decode(c.context(), Object.class)); augmented.put("preferences", pref.entries().stream().limit(20).toList());
             if (c.basis().taskId() != null) { var card = negotiation.card(actor(c.userId()), c.basis().taskId()); if (card != null) augmented.put("questions", DialogueQuestionContext.from(card)); }
             var modelContext = new Dialogue.Claim(c.userId(), c.chatId(), c.messageId(), c.token(), c.budgetId(), c.text(), c.receivedAt(), c.basis(), json.encode(augmented));
+            phase.set(FailurePhase.MODEL);
             var result = interpreter.interpret(modelContext);
+            phase.set(FailurePhase.OUTPUT);
             safety.require("OUTPUT",json.encode(result));
+            phase.set(FailurePhase.SOURCE);
             var unresolved = json.decode(c.context(), java.util.Map.class).get("unresolved");
             var sources = new java.util.LinkedHashMap<UUID, String>();
             if (unresolved instanceof List<?> entries) for (Object entry : entries) if (entry instanceof java.util.Map<?, ?> item) sources.put(UUID.fromString((String) item.get("id")), (String) item.get("text"));
             require(sources.keySet().containsAll(result.resolvedInputs()));
             result.validateSources(c.text(), result.resolvedInputs().stream().map(sources::get).toList());
-            transactions.required(() -> { if (!store.guard(c) || preferences.read(actor(c.userId())).version().revision()!=pref.version().revision()) { store.finish(c, "CLARIFY", "旅行状态已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED"); return null; } route(c, result); return null; });
+            phase.set(FailurePhase.COMMIT);
+            transactions.required(() -> { if (!store.guard(c) || preferences.read(actor(c.userId())).version().revision()!=pref.version().revision()) { store.finish(c, "CLARIFY", "旅行状态已经变化，请核对后重新补充，或撤回这条输入。", null, "DIALOGUE_CONTEXT_CHANGED"); return null; } route(c, result, phase::set); return null; });
         } catch (RuntimeException failure) {
             Thread.interrupted();
             boolean disabled = failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected && rejected.reason() == com.lawrence.travel.domain.execution.control.CallRejectedException.Reason.EXTERNAL_DISABLED;
-            String reason = failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException ? "PREFERENCE_CHANGED" : failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected ? "SAFETY_"+rejected.result().status().name() : failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected ? rejected.reason().name() : "DIALOGUE_PROCESSING_FAILED";
+            String reason = failureReason(phase.get(), failure);
             String explanation = disabled ? "真实外部调用尚未开启，输入已保存，暂未进行模型理解。此提示不表示免费额度用完；可以保留或撤回这条输入。" : "输入已保存，理解尚未完成。可重试或撤回；不会自动修改行程。";
             String safeReply=failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected ? "本次检查未通过或暂不可用，输入已保留。可修改内容或撤回。问题编号："+rejected.result().problemId() : explanation;
             try {
@@ -140,8 +147,29 @@ public final class DialogueService implements BackgroundWorkSource {
             } catch (RuntimeException obsolete) { System.getLogger(getClass().getName()).log(System.Logger.Level.INFO, "DIALOGUE_FAILURE_NOT_COMMITTED"); }
         }
     }
-    /** @param c 已锁上下文 @param result 结构化语义；不以模型回复声称业务已提交 */
-    private void route(Dialogue.Claim c, DialogueIntent.Result result) {
+
+    /** 单次理解的失败位置；不是运行时业务状态机，不参与恢复或预算判定。 */
+    private enum FailurePhase {
+        /** 输入安全检查。 */ INPUT, /** 上下文装载与装配。 */ CONTEXT,
+        /** 理解适配器执行。 */ MODEL, /** 输出安全与结构序列化。 */ OUTPUT,
+        /** 原文依据及解决对象校验。 */ SOURCE, /** 需求确定性预检。 */ REQUIREMENTS,
+        /** 事务内路由、归属与提交。 */ COMMIT
+    }
+
+    /** @param phase 实际失败位置 @param failure 仅按可信Java类型和枚举分类，不读取message、cause或SQL
+     * @return 最长48字符的持久化固定码，保留原门禁与安全分类语义 */
+    private static String failureReason(FailurePhase phase, RuntimeException failure) {
+        if (failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException) return "PREFERENCE_CHANGED";
+        if (failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) return "SAFETY_" + rejected.result().status().name();
+        if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) return rejected.reason().name();
+        if (failure instanceof DialogueInterpretationFailure rejected) return "DIALOGUE_" + rejected.code().name();
+        if (failure instanceof TravelStorageFailure rejected) return "DIALOGUE_" + phase.name() + "_" + rejected.code().name();
+        return "DIALOGUE_" + phase.name() + "_FAILED";
+    }
+
+    /** @param c 已锁上下文 @param result 结构化语义；不以模型回复声称业务已提交
+     * @param mark 本次调用私有失败位置标记，不包含正文或凭据 */
+    private void route(Dialogue.Claim c, DialogueIntent.Result result, java.util.function.Consumer<FailurePhase> mark) {
         var actor = actor(c.userId());
         var operations = result.intents().stream().filter(i -> i.kind() == DialogueIntent.Kind.OPERATION).toList();
         boolean planning = result.intents().stream().anyMatch(i -> i.kind() == DialogueIntent.Kind.PLANNING);
@@ -187,7 +215,9 @@ public final class DialogueService implements BackgroundWorkSource {
         }
         if (planning) {
             var facts = result.facts().stream().map(f -> new Negotiation.Fact(f.field(), f.value(), f.quote(), f.operation())).toList();
+            mark.accept(FailurePhase.REQUIREMENTS);
             RequirementFields.merge(c.basis().taskId() == null ? List.of() : travel.revision(new TaskScope(c.userId(), c.basis().taskId()), c.basis().revision()).requirements(), NegotiationHandler.updates(facts), com.lawrence.travel.domain.travel.ConstraintRevision.Source.USER, NegotiationHandler.replacements(facts));
+            mark.accept(FailurePhase.COMMIT);
             UUID task = negotiation.applyInterpreted(actor, c.basis().taskId(), c.messageId(), c.text(), facts);
             if (c.basis().taskId() == null) store.link(c, task);
             store.finish(c, "DONE", result.reply().isBlank() ? "已记录你的规划要求，将继续核对缺项并生成候选。" : result.reply(), null, ""); return;

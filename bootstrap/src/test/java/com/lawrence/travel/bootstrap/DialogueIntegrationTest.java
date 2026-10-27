@@ -100,11 +100,50 @@ class DialogueIntegrationTest {
     @Autowired private PreferenceService preferences;
     @Autowired private org.springframework.transaction.PlatformTransactionManager manager;
     @MockitoBean private DialogueInterpreter interpreter;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.lawrence.travel.application.interaction.NegotiationService negotiation;
     private final List<UUID> users = new ArrayList<>();
     @Autowired private org.springframework.session.SessionRepository<? extends org.springframework.session.Session> sessions;
     @Autowired private com.lawrence.travel.infrastructure.travel.TravelJson json;
     @org.springframework.boot.test.web.server.LocalServerPort private int port;
     private final List<String> sessionIds = new ArrayList<>();
+
+    /** 模型、引用与需求预检固定码实际写入输入和问题事件；不保留底层合成错误正文。 */
+    @Test void diagnosticCodesPersistWithoutExceptionBody() {
+        var user = actor(); UUID chat = UUID.randomUUID(); String text = "开始规划北京旅行";
+        service.send(user, chat, UUID.randomUUID(), text);
+        when(interpreter.interpret(any())).thenThrow(new com.lawrence.travel.application.interaction.DialogueInterpretationFailure(
+                com.lawrence.travel.application.interaction.DialogueInterpretationFailure.Code.RESULT_DECODE_FAILED));
+        service.claimWork().orElseThrow().run();
+        assertThat(service.read(user, chat).messages().getLast().error()).isEqualTo("DIALOGUE_RESULT_DECODE_FAILED");
+        assertThat(jdbc.queryForList("SELECT code FROM problem_event WHERE user_id=?", String.class, user.id())).contains("DIALOGUE_RESULT_DECODE_FAILED");
+        org.mockito.Mockito.reset(interpreter);
+        UUID other = UUID.randomUUID(); service.send(user, other, UUID.randomUUID(), text);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, "不在本轮原文的依据", List.of()));
+        assertThat(service.read(user, other).messages().getLast().error()).isEqualTo("DIALOGUE_SOURCE_FAILED");
+        UUID invalid = UUID.randomUUID(); String badDates = "开始规划北京旅行，2026-12-03到2026-12-01";
+        service.send(user, invalid, UUID.randomUUID(), badDates);
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, badDates, List.of(
+                new DialogueIntent.Fact("startDate", "2026-12-03", "2026-12-03"),
+                new DialogueIntent.Fact("endDate", "2026-12-01", "2026-12-01"))));
+        assertThat(service.read(user, invalid).messages().getLast().error()).isEqualTo("DIALOGUE_REQUIREMENTS_FAILED");
+        assertThat(service.read(user, invalid).chat().taskId()).isNull();
+    }
+
+    /** 提交内真实创建任务后注入存储失败，事务必须回滚；错误码可辨别阶段但不回显SQL或异常文本。 */
+    @Test void commitFailureRollsBackAndRecordsSafeCode() {
+        var user = actor(); UUID chat = UUID.randomUUID(); String text = "开始规划北京旅行";
+        service.send(user, chat, UUID.randomUUID(), text);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.callRealMethod(); throw new com.lawrence.travel.application.travel.TravelStorageFailure(
+                    com.lawrence.travel.application.travel.TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE);
+        }).when(negotiation).applyInterpreted(any(), any(), any(), any(), any());
+        process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, text, List.of(new DialogueIntent.Fact("cities", "北京", "北京"))));
+        var message = service.read(user, chat).messages().getLast();
+        assertThat(message.error()).isEqualTo("DIALOGUE_COMMIT_DEPENDENCY_UNAVAILABLE");
+        assertThat(message.state()).isEqualTo("PAUSED"); assertThat(service.read(user, chat).chat().taskId()).isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM travel_task WHERE user_id=?", Integer.class, user.id())).isZero();
+    }
     /** 聊天到旅行阶段交接保持trace，实际调用只归旅行预算及唯一日配额。 */
     @Test void travelHandoffKeepsTraceAndUniqueCallOwnership() {
         var user=actor(); UUID chat=UUID.randomUUID(); service.send(user,chat,UUID.randomUUID(),"去杭州");

@@ -1,6 +1,8 @@
 package com.lawrence.travel.agent.runtime;
 
 import com.lawrence.travel.application.interaction.Dialogue;
+import com.lawrence.travel.application.interaction.DialogueInterpretationFailure;
+import com.lawrence.travel.application.interaction.DialogueInterpretationFailure.Code;
 import com.lawrence.travel.application.port.AgentRuntimePort;
 import com.lawrence.travel.application.port.DialogueInterpreter;
 import com.lawrence.travel.application.port.InteractionCodec;
@@ -42,11 +44,27 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
                 + "缺少预算口径、已订安排状态等关键字段时，回复说明仍待补充或确认；不得承诺按通用方案、默认预算或默认没有预订继续。未采纳的建议只能表述为待确认建议，不能当成已确认需求。"
                 + "unresolved是尚未完成的原始诉求。本轮明确澄清其中某条时在resolvedInputs返回该ID，同时保留它仍有效的全部要求，facts可引用这些原文。无关聊天不能解除旧问题，操作及偏好授权只能来自本轮。"
                 + json.encode(Map.of("context", json.decode(c.context(), Object.class), "text", c.text(), "receivedAt", c.receivedAt().atZone(java.time.ZoneId.of("Asia/Shanghai")).toString()));
-        try (var call = runtime.startContextual(c.budgetId(), "coordinator", prompt, new com.lawrence.travel.application.memory.AgentContext.Basis(0,null,c.token()))) {
-            try { return json.decode(call.result().toCompletableFuture().get(305, TimeUnit.SECONDS), DialogueIntent.Result.class); }
-            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException("DIALOGUE_INTERRUPTED"); }
-            catch (java.util.concurrent.TimeoutException timeout) { throw new IllegalStateException("DIALOGUE_TIMEOUT"); }
-            catch (java.util.concurrent.ExecutionException failure) { if (failure.getCause() instanceof CallRejectedException rejected) throw rejected; if(failure.getCause() instanceof com.lawrence.travel.application.memory.PreferenceChangedException rejected) throw rejected; if(failure.getCause() instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) throw rejected; throw new IllegalStateException("DIALOGUE_MODEL_FAILED"); }
-        }
+        AgentRuntimePort.Invocation call;
+        try { call = runtime.startContextual(c.budgetId(), "coordinator", prompt, new com.lawrence.travel.application.memory.AgentContext.Basis(0,null,c.token())); }
+        catch (RuntimeException failure) { throw classified(failure, Code.MODEL_START_FAILED); }
+        try (call) {
+            String body;
+            try { body = call.result().toCompletableFuture().get(305, TimeUnit.SECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new DialogueInterpretationFailure(Code.MODEL_INTERRUPTED); }
+            catch (java.util.concurrent.TimeoutException timeout) { throw new DialogueInterpretationFailure(Code.MODEL_TIMEOUT); }
+            catch (java.util.concurrent.ExecutionException failure) { throw classified(failure.getCause(), Code.MODEL_EXECUTION_FAILED); }
+            try { return json.decode(body, DialogueIntent.Result.class); }
+            catch (RuntimeException invalid) { throw new DialogueInterpretationFailure(Code.RESULT_DECODE_FAILED); }
+        } catch (RuntimeException failure) { throw classified(failure, Code.MODEL_EXECUTION_FAILED); }
+    }
+
+    /** @param failure 仅提取可信异常类型，不读取或保存异常文本/原因链
+     * @param fallback 当前边界的固定后备分类 @return 原有门禁、安全、版本分类优先；其余只返回脱敏固定码 */
+    private static RuntimeException classified(Throwable failure, Code fallback) {
+        if (failure instanceof DialogueInterpretationFailure known) return known;
+        if (failure instanceof CallRejectedException known) return known;
+        if (failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException known) return known;
+        if (failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure known) return known;
+        return new DialogueInterpretationFailure(fallback);
     }
 }
