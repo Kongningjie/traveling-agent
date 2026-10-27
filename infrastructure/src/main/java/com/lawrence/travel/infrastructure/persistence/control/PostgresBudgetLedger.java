@@ -13,7 +13,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** PostgreSQL 计量适配器；每次预占是短事务，不在模型或工具请求期间持锁。 */
+/**
+ * 模型和外部工具的PG预算/用量账本，串接准入许可与call_meter、配额及诊断记录。
+ *
+ * <p>ModelCallAdmission.begin经reserve短事务锁预算、校验次数/主动时间/配额并保存预占；
+ * 实际网络调用发生在事务外。Permit结束经finish写可信Token或UNKNOWN，关联原请求轨迹，
+ * 请求失败不退次数，重启遗留预占也不自动当成零。
+ * 不允许在持有业务事务时reserve/finish，避免外层回滚后供应商已消耗却账本没有记录。
+ */
 public final class PostgresBudgetLedger implements BudgetLedger {
     private final BudgetMapper mapper;
     private final TransactionTemplate transaction;
@@ -70,7 +77,13 @@ public final class PostgresBudgetLedger implements BudgetLedger {
         mapper.create(Objects.requireNonNull(runId));
     }
 
-    /** {@inheritDoc} 先锁预算行，再更新次数并插入计量记录；任一失败整体回滚。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>受控模型/工具发送前调用，独立短事务中核对原预算、有效限制和归属配额，更新调用计数、
+     * 插入唯一call_meter预占，并绑定诊断身份。预占提交后才允许网络发送，不能靠业务大事务回滚退还。
+     * 并发槽由上层实际请求持有，本账本不负责取消网络或运行模型。
+     */
     @Override
     public Reservation reserve(
             UUID runId,
@@ -171,7 +184,12 @@ public final class PostgresBudgetLedger implements BudgetLedger {
                 });
     }
 
-    /** {@inheritDoc} 首次结束事件幂等生效，失败不退还任何请求计数。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>请求真正结束后登记COMPLETED或UNKNOWN及延迟；SQL只允许首次结束改变预占状态。
+     * 可信Token结算与配额/诊断更新使用同一短事务，未知用量保留保守边界；不能重复结束冲掉历史失败或降低消耗。
+     */
     @Override
     public void finish(UUID reservationId, TokenUsage usage, Duration latency) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {

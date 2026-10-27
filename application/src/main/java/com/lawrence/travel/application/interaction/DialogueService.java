@@ -22,23 +22,32 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 统一聊天用例；事务外理解，事务内确认路由与业务提交，不另建调度器。 */
+/**
+ * 聊天主链的应用编排中心：收件、后台理解、结果路由和显式操作确认统一由本类串接。
+ *
+ * <p>入口DialogueController.send → send在短事务内可靠收件；唯一Worker通过claimWorkExcluding
+ * 领取输入 → process在事务外调用DialogueIntentInterpreter → route在短事务内处理确定性业务。
+ * PostgresDialogueStore.finish保存回复及消息/作业状态，页面随后读取该权威投影。
+ *
+ * <p>模型只能提议意图和字段，不能直接写需求、接受行程或授权。提交前复查领取围栏、业务版本、
+ * 偏好版本与附件可读性；失效或安全失败保持原文并澄清/暂停，不让迟到回复覆盖新输入。
+ */
 public final class DialogueService implements BackgroundWorkSource {
-    private final com.lawrence.travel.application.document.AdviceService advice;
-    private final DialogueStore store;
-    private final DialogueInterpreter interpreter;
-    private final BusinessTransactions transactions;
-    private final AccountStore accounts;
-    private final NegotiationService negotiation;
-    private final RunService runs;
-    private final ItineraryService itineraries;
-    private final VersionService versions;
-    private final PreferenceService preferences;
-    private final TravelStore travel;
-    private final InteractionCodec json;
-    private final ExecutionEngineStore engine;
-    private final boolean externalEnabled;
-    private final com.lawrence.travel.application.safety.SafetyGate safety;
+    private final com.lawrence.travel.application.document.AdviceService advice;//保存分析建议
+    private final DialogueStore store;//聊天持久化、消息状态、任务领取
+    private final DialogueInterpreter interpreter;//	将用户自然语言理解为结构化意图
+    private final BusinessTransactions transactions;//管理数据库事务
+    private final AccountStore accounts;//查找和检查用户身份
+    private final NegotiationService negotiation;//收集、合并旅行需求和处理问题卡片
+    private final RunService runs;//取消旅行规划的执行
+    private final ItineraryService itineraries;//查询、接受候选行程
+    private final VersionService versions;//恢复历史行程版本
+    private final PreferenceService preferences;//读取、修改长期偏好
+    private final TravelStore travel;//	查询旅行任务及版本数据
+    private final InteractionCodec json;//	JSON 编解码
+    private final ExecutionEngineStore engine;//查询执行状态、恢复原运行
+    private final boolean externalEnabled;//控制真实外部调用是否获准
+    private final com.lawrence.travel.application.safety.SafetyGate safety;//输入和输出安全检查
 
     /**
      * @param store 聊天权威
@@ -186,6 +195,7 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 这个版本没有附件，直接调用带附件的版本，并传入空列表。
      * @param actor 认证
      * @param chat 可重试的创建ID
      * @param input 消息幂等键
@@ -197,20 +207,34 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
-     * @param actor 身份
-     * @param chat 聊天
-     * @param input 幂等消息
-     * @param text 原文
-     * @param documents 本轮选中文件；缺省为空，不从文本猜文件ID
-     * @return 收件视图；同ID异文本或异附件拒绝，附件归属与版本由存储端口同事务检查
+     * 可靠接收一条聊天消息及其显式附件；必要时创建聊天，明确的停止命令直接执行。
+     *
+     * <p>本方法只在短业务事务中保存输入或处理停止，不同步调用模型，也不等待规划完成。
+     * 普通消息的理解由后台后续执行；返回的视图代表收件结果，不代表已经生成模型回复。
+     * 聊天创建、消息收件、附件版本绑定及停止状态变更共用事务，任一步失败均不提交本次变更。
+     * 并发归属检查、加锁及消息幂等由存储端口实现，本方法的存在性预查不能代替这些保障。
+     *
+     * @param actor 已认证的当前用户，不能为空；以其身份限定聊天、文件与关联旅行的访问范围
+     * @param chat 调用方提供的稳定聊天ID，不能为空；首次发送可创建聊天，后续发送复用原聊天
+     * @param input 本条消息的幂等ID，不能为空；网络重试应复用，同ID不得更换原文或附件选择
+     * @param text 用户原文，非空且不能全为空白，不超过MAX_TEXT_LENGTH个UTF-16代码单元，不能含NUL
+     * @param documents 本轮明确选择的文件ID；null视为空列表，最多10个、不得含null或重复，不从正文猜测
+     * @return 收件或停止处理后的聊天视图；停止命令附应用生成的完成说明，已有对话和行程保留
+     * @throws TravelStorageFailure 参数不符合条件、幂等内容冲突、归属或附件版本校验失败等；
+     *     本地require失败使用现有STALE_VERSION错误码，具体存储错误由端口向上传递
      */
     public Dialogue.View send(
             UserIdentity actor, UUID chat, UUID input, String text, List<UUID> documents) {
+        // 将未选择附件统一为空列表；有附件时复制调用方列表，避免后续操作直接依赖其可变集合。
+        // 这里仅检查请求形状；文件是否属于当前用户/聊天、能否读取以及绑定哪个版本，由收件端口核对。
         var selected = documents == null ? List.<UUID>of() : new java.util.ArrayList<>(documents);
+        // 不静默去重或过滤null，否则重试可能在用户未察觉时改变附件选择，破坏消息幂等契约。
         require(
                 selected.size() <= 10
                         && selected.stream().noneMatch(Objects::isNull)
                         && new java.util.HashSet<>(selected).size() == selected.size());
+        // 按短路顺序先排除null，再访问文本；这里只校验原文，不trim或改写实际保存的消息。
+        // NUL不允许进入文本持久化链路；length限制按Java字符串长度计算，不是模型Token数量。
         require(
                 actor != null
                         && chat != null
@@ -219,11 +243,13 @@ public final class DialogueService implements BackgroundWorkSource {
                         && !text.isBlank()
                         && text.length() <= DialogueIntent.MAX_TEXT_LENGTH
                         && text.indexOf(0) < 0);
+        // REQUIRED事务使下面的数据库变更共同提交或回滚；不能将模型推理放进此事务长期占锁。
         return transactions.required(
                 () -> {
-                    // 创建和首条消息同事务；后续消息不能用新标题覆盖旧标题。
-                    boolean exists =
-                            store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chat));
+                    // 先在当前用户的聊天列表中，寻找是否存在指定 chat ID。
+                    boolean exists = store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chat));
+                    // 再按ID读取，覆盖较早聊天不在第一页的情况。只有明确NOT_FOUND才进入创建分支；
+                    // 其他存储失败必须向上传递，不能把数据库异常当作缺失并尝试创建。
                     if (!exists) {
                         try {
                             store.read(actor.id(), chat);
@@ -233,32 +259,48 @@ public final class DialogueService implements BackgroundWorkSource {
                                 throw missing;
                         }
                     }
+                    // 新聊天与首条消息同事务创建，标题按当前长度上限截取原文的UTF-16代码单元。
+                    // 已有聊天不重新赋标题；并发创建的最终一致性仍由store.create约束保障。
                     if (!exists)
                         store.create(
                                 actor.id(), chat, text.substring(0, Math.min(60, text.length())));
+                    // 只对这些完整、明确的短命令走确定性停止，不调用模型判断。
+                    // trim与移除一个末尾句号/感叹号仅用于匹配；原文仍原样保存，不做子串匹配。
                     if (java.util.Set.of("停止", "停止规划", "停止当前规划", "停止当前执行")
                             .contains(text.trim().replaceAll("[。！!]$", ""))) {
+                        // 停止命令不兼作附件解释请求，禁止同时带附件，避免一条输入有两种执行语义。
                         require(selected.isEmpty());
+                        // 先核对幂等键与原文：已经收过的停止请求只返回原收件结果，不能再次撤销
+                        // 此后新启动的执行；同ID异原文由端口拒绝，不覆盖历史消息。
                         if (store.containsInput(actor.id(), chat, input, text))
                             return store.receive(actor.id(), chat, input, text);
+                        // 先撤销聊天内未完成输入的提交资格，保留原文；旧后台尝试不能再提交结果。
+                        // 这是业务围栏失效，不承诺供应商侧推理在这一行执行时已物理终止。
                         store.stopPending(actor.id(), chat);
                         var current = store.read(actor.id(), chat).chat();
+                        // 聊天可能尚未关联旅行，此时只需停止聊天输入；关联旅行后还要处理其当前运行。
                         if (current.taskId() != null) {
                             var run = store.currentRun(actor.id(), chat);
+                            // 没有当前运行或已处于终态则不重复取消；用当前用户与任务构造scope做归属限定。
                             if (run != null
                                     && !engine.run(new TaskScope(actor.id(), current.taskId()), run)
                                             .state()
                                             .terminal()) runs.cancel(actor, current.taskId(), run);
                         }
+                        // 仍登记这条停止消息，保留可重放的输入记录；随即以应用事实完成命令及对应作业，
+                        // 不让后台把它当作普通消息再送给模型。最后读取包含完成说明的最新视图。
                         store.receive(actor.id(), chat, input, text);
                         store.completeCommand(actor.id(), chat, input, "已处理停止请求，已有行程和对话保留。");
                         return store.read(actor.id(), chat);
                     }
+                    // 普通消息由端口在同事务中保存正文、文件版本绑定和待处理作业；这里不直接规划。
+                    // 同ID重试必须保持原文与附件一致；文件归属、删除状态及版本有效性仍须在端口校验。
                     return store.receive(actor.id(), chat, input, text, selected);
                 });
     }
 
     /**
+     * 获取当前用户的聊天列表。
      * @param actor 认证
      * @param offset 分页
      * @return 仅本人聊天
@@ -268,6 +310,7 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 读取指定聊天的持久化视图。
      * @param actor 认证
      * @param chat 聊天
      * @return 持久化的完整可见结果
@@ -277,6 +320,7 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 将当前聊天关联到已有的旅行任务，然后返回关联后的聊天视图。
      * @param actor 已认证用户
      * @param chat 新聊天幂等身份
      * @param task 历史私有旅行
@@ -293,13 +337,24 @@ public final class DialogueService implements BackgroundWorkSource {
         return claimed(transactions.required(store::claim));
     }
 
-    /** {@inheritDoc} 领取前排除仍持物理槽的用户，不靠取消后数据库终态提前放行。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>PersistentStageWorker在已取得物理容量后调用；此处仅在短事务中经store.claimExcluding
+     * 领取一条输入并构造Runnable，不在领取事务中执行模型。排除集合来自尚未实际退出的用户线程，
+     * 不能因逻辑暂停就给同一用户叠加新的物理执行。返回空表示目前无可领取输入。
+     */
     @Override
     public Optional<Runnable> claimWorkExcluding(java.util.Set<UUID> excluded) {
         return claimed(transactions.required(() -> store.claimExcluding(excluded)));
     }
 
     /**
+     * 把持久Claim包装为Worker可执行且可续租的LeasedWork，保持输入/预算/围栏身份不变。
+     *
+     * <p>userId用于调度公平性，renew委托原存储围栏续租；run恢复原ExecutionCorrelation后调用process。
+     * 领取和执行分离，因此不把请求线程ThreadLocal或登录Cookie传给后台模型，也不长期持有收件事务。
+     *
      * @param selected 原输入
      * @return 维持关联和心跳的实际工作
      */
@@ -337,6 +392,15 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 后台处理一条已领取输入：安全检查 → 组装本轮业务数据 → 模型理解 → 输出/原文依据校验 → 事务提交。
+     *
+     * <p>由claimWorkExcluding返回的LeasedWork.run调用，模型阶段不占用户、聊天或任务行锁。
+     * Claim携带原输入、预算和领取token；补充长期偏好与问题卡片后交给DialogueIntentInterpreter，
+     * 模型运行时发生的取消、资料删除或需求/偏好变化必须在提交前被重新识别。
+     *
+     * <p>成功由route决定只读回复、规划字段或确认卡，统一经store.finish落库。失败只存固定分类和
+     * 安全说明；旧领取失效时放弃提交失败结果，不输出供应商异常正文，也不自动发起第二次模型调用。
+     *
      * @param c 原领取；任何模型或协议失败保存固定原因，屏障必须等待重试或撤回
      */
     private void process(Dialogue.Claim c) {
@@ -504,6 +568,13 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 把通过安全和原文依据检查的模型结果转换为应用动作；调用方已进入短事务并复查原领取资格。
+     *
+     * <p>先处理歧义/冲突，避免在范围未明确时修改业务；再区分操作、规划和只读咨询。
+     * 重要操作通过prepare生成待确认对象；规划字段经RequirementFields预检后交给
+     * NegotiationService.applyInterpreted，创建或变更旅行并进入阶段链。只读建议独立保存，
+     * 不能因模型写了“已采纳”就视为需求已修改。所有分支最终由store.finish记录实际结果。
+     *
      * @param c 已锁上下文
      * @param result 结构化语义；不以模型回复声称业务已提交
      * @param mark 本次调用私有失败位置标记，不包含正文或凭据
@@ -547,6 +618,8 @@ public final class DialogueService implements BackgroundWorkSource {
                     "DIALOGUE_PLANNING_FACTS_MISSING");
             return;
         }
+// 只有前面的歧义和字段完整性门槛通过后，才将用户本轮明确解决的旧澄清输入标记为已解决。
+// 该更新与后续路由同事务；业务执行失败会回滚，避免旧问题被消除而新要求没有保存。
         store.resolve(c, result.resolvedInputs());
         if (!operations.isEmpty()) {
             var action = operations.getFirst().action();
@@ -625,6 +698,8 @@ public final class DialogueService implements BackgroundWorkSource {
                                                     f.field(), f.value(), f.quote(), f.operation()))
                             .toList();
             mark.accept(FailurePhase.REQUIREMENTS);
+// 先用领域合并规则验证提取字段及ADD/REPLACE语义，再登记解释结果。
+// 这里不以模型reply为修改成功依据；真正的需求版本与后继阶段由协商服务及提交链管理。
             RequirementFields.merge(
                     c.basis().taskId() == null
                             ? List.of()
@@ -664,6 +739,11 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 为接受候选、恢复版本、保存/删除长期偏好构造待确认操作快照，不在此处执行操作。
+     *
+     * <p>对象只能来自当前上下文或已归属验证的详情；找不到唯一对象则返回null交回澄清。
+     * Operation保存当时旅行Basis及偏好版本，用户稍后CONFIRM时act必须重新核对，不能仅凭模型targetId写库。
+     *
      * @param actor 用户
      * @param c 当前业务基础
      * @param r 模型参数
@@ -723,6 +803,12 @@ public final class DialogueService implements BackgroundWorkSource {
     }
 
     /**
+     * 执行用户在精确消息上明确点击的CONFIRM、WITHDRAW或RETRY，全部在短业务事务中处理。
+     *
+     * <p>先锁消息及归属。撤回使原输入失去后续执行资格；重试沿用原输入/预算，不重置调用限制。
+     * 确认只适用于仍有效的Operation，重新比对旅行Basis或偏好版本后才委托行程/版本/偏好应用服务。
+     * operationResult记录应用实际执行结果，不把模型先前生成的reply当作操作已成功的凭据。
+     *
      * @param actor 认证
      * @param chat 聊天
      * @param input 精确确认消息

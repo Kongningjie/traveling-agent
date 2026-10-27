@@ -5,7 +5,14 @@ import com.lawrence.travel.domain.execution.ExecutionFence;
 import com.lawrence.travel.domain.execution.StageType;
 import java.util.UUID;
 
-/** 阶段事务内的业务产物投影；仅引擎通过 fence 后调用，不能凭模型自报角色写报告。 */
+/**
+ * 引擎阶段提交事务内的业务投影端口，隔离统一调度与需求/调查/候选各自的持久化规则。
+ *
+ * <p>PostgresExecutionEngine.commit先调用beforeTaskLock维护原锁序，再在围栏通过后调用project。
+ * 实现包括PostgresNegotiationStore、PostgresResearchStore和PostgresCandidateStore；
+ * 按各自识别的产物处理，不能由模型自报角色决定写入权限。投影、检查点、事件完成和
+ * 后继登记同事务，失败不能留下半完成业务状态。
+ */
 public interface StageProjection {
     /**
      * @param candidateId 可接受候选或空

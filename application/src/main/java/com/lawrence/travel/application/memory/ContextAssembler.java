@@ -10,7 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 版本化上下文装配；保护区不能截断，历史可摘录和按引用卸载，审核永不读取规划对话。 */
+/**
+ * 旅行角色兼容上下文装配器；统一会话路径优先使用SessionContextService，本类不是第二套调度器。
+ *
+ * <p>上游HarnessAgentRuntimeAdapter在会话服务路径不可用且存在业务basis时调用prepare；
+ * 通过ContextStore读取权威数据并检查需求/偏好版本，保护请求及权威区，仅压缩可选历史。
+ * reviewer完全隔离规划历史和自评；摘要引用可追溯原文，存储仍归PG，不让模型摘要成为业务事实。
+ */
 public final class ContextAssembler {
     /** 摘要格式或装配优先级改变时提升此版本，使既有缓存失效。 */
     public static final String POLICY_VERSION = "context-v1";

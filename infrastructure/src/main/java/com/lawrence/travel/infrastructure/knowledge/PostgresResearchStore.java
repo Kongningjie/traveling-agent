@@ -22,7 +22,13 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** 证据在引擎 C 事务登记；来源冲突、失效另记通知，绝不覆盖旧事实。 */
+/**
+ * 调查上下文、查询结果及字段证据的PG适配器，承接RESEARCH阶段的可恢复产物。
+ *
+ * <p>ResearchHandler事务外规划和调用工具，StageOutput交回引擎；project只在阶段提交
+ * 事务和有效围栏内保存查询/来源/字段证据并核对依赖。原始网络结果不是自动可信事实，
+ * 来源、适用日期和有效期仍由既有证据规则判定；复用已提交产物不能跳过新需求版本检查。
+ */
 public final class PostgresResearchStore implements ResearchStore {
     private final EvidenceMapper mapper;
     private final TravelMapper tasks;

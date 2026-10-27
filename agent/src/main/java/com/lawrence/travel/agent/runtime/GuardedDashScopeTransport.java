@@ -23,7 +23,16 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import reactor.core.publisher.Flux;
 
-/** 北京原生实时接口的发送边界；使用多模态端点但只允许文本，每次 HTTP 独立预占。 */
+/**
+ * 模型真实HTTP的唯一受控发送边界，接在DashScope SDK与OkHttp之间。
+ *
+ * <p>上游Harness可能因工具继续或压缩发出多次请求，每次都需prepare检查真实序列化输入、
+ * 版本守卫及上下文空间，再经ModelCallAdmission.begin持久预占，发送到固定北京原生端点。
+ * 响应由非流式或DashScopeSseReader路径提取用量，调用Permit结算，完整结果继续交还Harness。
+ *
+ * <p>禁止重定向、隐藏重试和任意媒体载荷。close取消在途连接，但请求实际结束前仍占物理容量；
+ * 缺少可信用量保守记UNKNOWN，不把取消、异常或HTTP失败当作零Token。认证信息不进入诊断输出。
+ */
 public final class GuardedDashScopeTransport implements HttpTransport, AutoCloseable {
     public static final String ENDPOINT =
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
@@ -157,6 +166,11 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     }
 
     /**
+     * 非流式发送路径：校验真实请求 → 预占预算/并发 → 发送 → 读取并关闭响应 → 结算用量。
+     *
+     * <p>预占target必须与SDK实际模型一致，超时使用原运行剩余限制。先释放响应资源，再完成Permit；
+     * HTTP非成功也先尝试读取可信用量。IO异常只返回固定分类，未取得用量由Permit.close保守结算。
+     *
      * @param request 已格式化文本请求
      * @return 发送及已结束计量的响应；关联由外层显式恢复
      */
@@ -208,7 +222,12 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     }
 
     /**
-     * 共用发送前输入限制，避免流式绕过非流式的免费额度和文本权限检查。
+     * 检查SDK最终序列化请求，而不是仅估算应用最初传入的prompt。
+     *
+     * <p>验证固定端点/模型、文本载荷、真实消息体预算及发送前上下文版本；由完整请求计算保守预占上界。
+     * 工具返回和消息格式产生的开销同样计入，避免初始prompt虽小但工具继续后超限。
+     * 返回结果随后才可进入ModelCallAdmission.begin，校验失败不发送请求。
+     *
      * @param request SDK 已格式化请求
      * @return 验证后的正文、型号及保守 Token 上界
      */
@@ -379,7 +398,12 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     }
 
     /**
-     * 每次订阅只发送一次受门禁保护的 SSE 请求，不缓冲完整生成结果。
+     * {@inheritDoc}
+     *
+     * <p>这是供应商到SDK的SSE传输，不是浏览器RunEventController的SSE。每次订阅建立独立取消状态，
+     * 在虚拟线程恢复原诊断关联，readStream执行检查、预占、HTTP读取及用量结算后才发终止信号。
+     * 订阅取消会关闭实际Call；仍需等待读取路径退出才能归还在途许可，不自行重试订阅。
+     *
      * @param request SDK 完成格式化后的请求
      * @return 逐个 SSE data 帧的 JSON，终止信号在响应关闭和计量结束后发出
      */
@@ -498,7 +522,12 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
     }
 
     /**
-     * 后台读取实际流；取消只关闭连接，计量及许可释放必须等待此方法的实际退出。
+     * 执行实际流式HTTP请求，并将有界、校验过的供应商帧交给SDK继续结构化输出或工具循环。
+     *
+     * <p>每次真实发送独立预占；DashScopeSseReader累计可信用量及流完整性，结束后结算Permit。
+     * 断流、取消或异常不等于零消耗；缺少可信用量保守处理，原始错误正文不进入应用失败记录。
+     * finally关闭连接并解除inFlight登记，业务取消不能提前释放仍占用网络的请求。
+     *
      * @param request 原始请求，仅固定端点可发送
      * @param sink 下游数据接收器，不输出内部推理日志
      * @param cancelled 本订阅取消标记
@@ -611,12 +640,21 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         if (interrupted) Thread.currentThread().interrupt();
     }
 
-    /** 返回模型产物前再次检查权威版本；不发起外部请求，不代替C事务资格检查。 */
+    /**
+     * 调用本次上下文守卫，复查PG原领取、偏好/需求和删除等依赖是否仍有效。
+     *
+     * <p>受控传输发送前及ControlledHarnessCall返回结果前均可使用；只检查业务版本，不授予新的工具权限或预算。
+     */
     public void checkContext() {
         contextGuard.run();
     }
 
-    /** 停止新的发送并取消实际连接；许可仍由 execute 的退出路径结算，不提前释放。 */
+    /**
+     * 幂等关闭本次调用的真实传输范围，取消已登记及与关闭竞争中新登记的连接。
+     *
+     * <p>不伪造完成用量、不直接归还Permit；实际读取方法退出后才结算和释放并发。
+     * ActiveInvocation随后awaitIdle并等待执行线程退出，阻止逻辑取消后遗留网络继续占用未统计资源。
+     */
     @Override
     public void close() {
         synchronized (lifecycle) {

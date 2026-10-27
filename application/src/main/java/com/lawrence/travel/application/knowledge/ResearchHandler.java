@@ -18,7 +18,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 一个工具查询一个可恢复 RESEARCH 实例；已提交查询可复用，网络不占业务事务。 */
+/**
+ * RESEARCH阶段处理器：协调调查策略、受控资料工具和字段证据，不自行调度另一套任务。
+ *
+ * <p>StageExecutor调用execute；无queries时先通过ResearchAdvisor规划查询，后继RESEARCH
+ * 实例再执行单个工具查询并按EvidencePolicy核对适用日期、来源与有效期。
+ * 网络调用在阶段业务区，产物与后继计划由StageOutput交回引擎提交；已提交且依赖仍有效
+ * 的结果可复用，搜索线索或未知字段不能冒充已核实事实，门禁失败不以模型记忆兜底。
+ */
 public final class ResearchHandler implements StageHandler {
     private final ResearchStore store;
     private final ResearchAdvisor advisor;
@@ -56,7 +63,13 @@ public final class ResearchHandler implements StageHandler {
         return type == StageType.RESEARCH;
     }
 
-    /** {@inheritDoc} 计划和结果按阶段保存，重试沿用预算；免费开关拒绝不能降级成供应商事实。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>无queries的输入先调用调查Advisor形成受限查询及分支；已有查询的阶段经TravelToolService
+     * 访问受控资料源并核对证据依赖。每个StageOutput只描述检查点、业务结果与下一步计划，
+     * 网络执行与PG提交分开，免费/权限/预算拒绝不能降级为模型记忆中的事实。
+     */
     @Override
     public StageOutput execute(ExecutionEngineStore.Claim claim) {
         var context = store.context(claim.fence());

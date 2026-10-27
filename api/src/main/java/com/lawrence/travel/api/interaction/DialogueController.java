@@ -16,7 +16,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 已认证独立聊天接口；Cookie/CSRF沿用身份模块，禁止私有回复被缓存。 */
+/**
+ * 已认证聊天的HTTP入口：接收用户原文、稳定消息ID及显式附件选择，委托DialogueService处理。
+ *
+ * <p>阅读顺序：send → DialogueService.send → PostgresDialogueStore.receive；后台处理入口是
+ * PersistentStageWorker调用DialogueService.claimWorkExcluding，而不是本Controller同步等待模型。
+ * read用于读取已保存回复；act用于用户明确确认、撤回或重试。身份来自Spring Security，
+ * 不接受正文自报userId；Controller不访问Mapper、不自行写需求，也不因收件成功宣称规划完成。
+ */
 @RestController
 @Profile("local")
 @RequestMapping("/api/v1/chats")
@@ -32,6 +39,7 @@ public final class DialogueController {
 
     /**
      * @param response 私有缓存控制
+     * ModelAttribute：禁止缓存私有聊天内容
      */
     @ModelAttribute
     public void noStore(jakarta.servlet.http.HttpServletResponse response) {
@@ -56,6 +64,7 @@ public final class DialogueController {
     public record Link(UUID taskId) {}
 
     /**
+     * 关联已有的旅行任务
      * @param actor 身份
      * @param chat 新会话幂等键
      * @param body 历史旅行归属
@@ -70,6 +79,7 @@ public final class DialogueController {
     }
 
     /**
+     * 查询聊天列表 list()
      * @param actor 已认证用户
      * @param offset 分页
      * @return 本人独立聊天
@@ -82,6 +92,10 @@ public final class DialogueController {
     }
 
     /**
+     * 读取当前用户的聊天投影，包含已持久化的消息状态、回复、附件及关联旅行。
+     *
+     * <p>调用DialogueService.read，不启动模型或恢复任务；刷新页面和轮询不会额外产生推理请求。
+     *
      * @param actor 身份
      * @param chat 聊天
      * @return 可靠保存的消息及关联任务
@@ -93,6 +107,11 @@ public final class DialogueController {
     }
 
     /**
+     * 接收一次用户输入并返回收件后的聊天视图，不在HTTP请求线程调用LLM。
+     *
+     * <p>路径chat与正文inputId分别承担会话身份和消息幂等身份；附件列表原样交给应用层核对归属、
+     * 版本和重放一致性。后续回复由后台保存，再通过read读取；客户端不能用新的inputId冒充同一次重试。
+     *
      * @param actor 身份
      * @param chat 幂等聊天ID
      * @param input 消息
@@ -107,6 +126,10 @@ public final class DialogueController {
     }
 
     /**
+     * 接收用户对精确消息的明确动作，交给DialogueService.act执行事务内校验。
+     *
+     * <p>确认所指对象和版本必须仍有效；RETRY沿用原作业约束，不能因为前端点击而绕过预算或权限。
+     *
      * @param actor 身份
      * @param chat 聊天
      * @param input 精确消息

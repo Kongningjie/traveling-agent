@@ -6,7 +6,13 @@ import com.lawrence.travel.domain.identity.UserIdentity;
 import com.lawrence.travel.domain.travel.TaskScope;
 import java.util.UUID;
 
-/** 游标和归属用例；客户端 userId、运行代次及时间戳均不能取代服务端认证或数据库水位。 */
+/**
+ * 用户可见旅行事件的应用读取服务，串接RunEventController/EventStreams与RunEventStore。
+ *
+ * <p>以已认证用户生成TaskScope，校验复合游标属于当前任务并限制页大小；PG返回的水位
+ * 用于补读已提交事件，不接受客户端时间戳或自报运行代次替代权威游标。
+ * 本类不写业务、不调用模型、不取消任务，也不把诊断内部轨迹直接当作用户消息展示。
+ */
 public final class RunEventService {
     private final RunEventStore store;
 

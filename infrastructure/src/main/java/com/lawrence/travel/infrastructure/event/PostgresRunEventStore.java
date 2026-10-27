@@ -10,7 +10,13 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.dao.DataAccessException;
 
-/** PostgreSQL 为事件事实源；不用内存消息或通知替代持久补读。 */
+/**
+ * 用户可见旅行事件的PG读取/写入适配器，事件水位与任务归属是恢复页面的依据。
+ *
+ * <p>引擎业务提交登记可见事件；RunEventService读取view/page，EventStreams据此SSE补发。
+ * 输出按任务游标推进，客户端断线后可重放而不重新执行阶段。事件是已提交状态的通知，
+ * 不能代替完整行程快照，也不是携带提示词/供应商原始Token的调试日志。
+ */
 public final class PostgresRunEventStore implements RunEventStore {
     private final EventMapper mapper;
     private final TravelJson json;

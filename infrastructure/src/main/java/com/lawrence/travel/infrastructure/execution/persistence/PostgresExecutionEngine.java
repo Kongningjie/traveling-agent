@@ -45,8 +45,14 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 唯一数据库执行引擎；短事务只做状态与产物提交，没有网络调用。
- * 全部写路径先锁任务，再运行，阶段与事件按稳定 UUID 锁定；预算只做增量，不覆盖并发请求预占。
+ * 旅行阶段的PG权威执行引擎，管理Outbox事件、租约、围栏、检查点、业务投影与后继阶段。
+ *
+ * <p>上游协商服务start登记运行，Worker经candidates/claim领取，StageExecutor事务外执行；
+ * prepare独立保存产物，commit在短事务内复查generation/需求版本/attempt/租约，
+ * 投影业务结果、保存检查点、完成事件并可靠登记下一阶段。模型返回不等于commit成功。
+ *
+ * <p>cancel/supersede使旧执行失去提交权，recover找回可恢复事件但不重置原预算。
+ * 用户可见运行事件与诊断执行轨迹有不同用途：前者供SSE补读，后者供追踪固定分类问题及计量。
  */
 public final class PostgresExecutionEngine implements ExecutionEngineStore {
     /** {@inheritDoc} 归属先经原运行读取校验，不能凭任意runId取得其他用户链路。 */
@@ -343,7 +349,11 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
     }
 
     /**
-     * {@inheritDoc} 先独立保存可审计文本；选择引用、检查点与阶段完成仍在 commit 事务内。
+     * {@inheritDoc}
+     *
+     * <p>StageExecutor在业务处理结束后调用，先验证检查点JSON并保存本attempt的完整产物、哈希与长度。
+     * 产物单独持久化便于审计，但尚未被业务选中，不能因此对用户展示或推进阶段。
+     * 返回命令携带原围栏及确定性后继身份，随后commit决定是否正式提交；取消可使此产物最终不被采用。
      */
     @Override
     public StageCommitCommand prepare(Claim claim, StageOutput output) {
@@ -373,7 +383,12 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
     }
 
     /**
-     * {@inheritDoc} 已完成回执先做相同内容重放校验；其他提交必须在锁内重新通过全部 fence。
+     * {@inheritDoc}
+     *
+     * <p>最终业务生效边界：核对产物归属/哈希/后继与相同内容重放回执，再锁定原任务和运行，
+     * 复查围栏及数据库租约。占定完成资格后调用业务投影，更新需求/候选/决策等检查点，
+     * 并登记后继Outbox及可见事件；任一步失败共同回滚，不允许完成阶段却丢失下一步。
+     * 已提交同内容返回ALREADY_COMMITTED；旧代次/租约/attempt返回STALE，不通过重新签名旧产物强行提交。
      */
     @Override
     public Result commit(StageCommitCommand command) {

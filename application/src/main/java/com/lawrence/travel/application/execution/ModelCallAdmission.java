@@ -13,7 +13,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 模型请求的统一预占入口；本类不创建 SDK 或发送请求，下一阶段适配器必须通过此入口。 */
+/**
+ * 每个实际模型HTTP请求的准入与计量入口，连接受控传输和持久BudgetLedger。
+ *
+ * <p>GuardedDashScopeTransport在发送前调用begin：核对开关、角色型号、地域接口、免费证据、
+ * 保守余额及在途槽，再持久化预占；只有取得Permit才能发送。压缩、工具继续、失败和恢复
+ * 均沿用相同规则，不能把一次Agent调用误算为一次HTTP请求。
+ * 网络完成后Permit.complete/close结算；本类本身不创建SDK、不读取密钥、不执行网络请求。
+ */
 public final class ModelCallAdmission {
     private final boolean enabled;
     private final Map<String, String> models;
@@ -148,7 +155,12 @@ public final class ModelCallAdmission {
         }
 
         /**
-         * 实际请求结束后登记明确用量，随后释放并发；首个结束结果生效。
+         * 在实际HTTP结束后幂等结算一次请求；首个完成结果生效，并最终释放真实在途槽。
+         *
+         * <p>可信usage交BudgetLedger.finish写COMPLETED；null保持UNKNOWN并按预占上界保守计入。
+         * 超出预占上界或计量写入失败需保持阻断，不能通过释放槽或重复complete把故障改写成成功。
+         * 请求次数和已消耗Token不因失败/取消退还；调用方不得在HTTP仍运行时提前调用。
+         *
          * @param usage 供应商已知 Token；null 表示失败或结束后仍未知
          */
         public void complete(TokenUsage usage) {

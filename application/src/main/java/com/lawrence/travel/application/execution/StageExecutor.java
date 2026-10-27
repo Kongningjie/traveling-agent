@@ -9,7 +9,12 @@ import com.lawrence.travel.application.travel.TravelStorageFailure;
 import java.util.List;
 
 /**
- * 唯一阶段执行器；业务处理在数据库事务外运行，异常只转换为固定分类。
+ * 旅行运行的统一阶段执行器，连接PersistentStageWorker与UNDERSTAND/RESEARCH/规划等处理器。
+ *
+ * <p>execute先续租并选择唯一StageHandler，事务外执行模型/工具业务，得到StageOutput后
+ * 经ExecutionEngineStore.prepare保存可审计产物，再commit执行围栏校验与业务原子提交。
+ * 处理器产物并非已生效状态，取消后即使模型返回也不允许继续提交。
+ * 阶段、提交和等待节点通过ExecutionTrace关联计量；异常转固定失败分类，禁止写异常正文。
  */
 public final class StageExecutor {
     /** 框架处理器中断窗口；数据库阶段不能使用线程中断取消。 */
@@ -63,6 +68,12 @@ public final class StageExecutor {
     }
 
     /**
+     * 执行一次已领取阶段并尝试提交，其预算、需求版本、generation与attempt围栏均来自原Claim。
+     *
+     * <p>业务可中断区与数据库提交区分开：control.enter/leave只包围处理器，避免中断污染JDBC。
+     * 处理器返回后再次检查取消，再prepare/commit；commit仍以数据库时间和当前围栏决定是否生效。
+     * STALE或取消不会将旧产物冒充新结果；等待用户不占用后台线程，下一步依赖持久事件继续。
+     *
      * @param claim 已领取执行；中断后只尽力停止，业务资格以数据库判断
      * @param control 仅框架／业务处理阶段可中断，数据库操作始终由事务和 fence 判定
      */

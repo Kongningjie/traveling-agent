@@ -24,7 +24,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
-/** 独立聊天唯一装配；注册到既有Worker，关闭外部调用时仍可可靠收件和显示暂停。 */
+/**
+ * 聊天主链的唯一装配位置，只在local profile下绑定接口与实现，不承载业务分支。
+ *
+ * <p>DialogueStore → PostgresDialogueStore；DialogueInterpreter → DialogueIntentInterpreter；
+ * 应用DialogueService同时注入二者及事务、协商和运行控制端口。最后通过
+ * dialogueRegistration把服务注册到已有PersistentStageWorker，避免第二套调度和装配循环。
+ * 模型实际调用仍受ExecutionControlProperties及计量门禁限制，Bean创建不代表真实请求被授权。
+ */
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class DialogueConfiguration {

@@ -10,7 +10,14 @@ import io.agentscope.harness.agent.middleware.ToolResultEvictionMiddleware;
 import java.lang.reflect.Proxy;
 import java.util.UUID;
 
-/** 每次调用隔离的逻辑工作文件；复用原生卸载，正文先写PG，文件系统没有宿主路径或shell能力。 */
+/**
+ * 协调Agent按需读取个人资料及会话工作文件的受限工具集合，不授予业务写入权限。
+ *
+ * <p>由HarnessAgentRuntimeAdapter仅为有原attempt token的协调调用创建；工具进入
+ * SourceReadService，按原budget/token核对用户、会话、原件版本和删除水位。
+ * 目录不是全文，搜索/页段读取才产生有界来源；结果预算与模型剩余上下文联动，
+ * 不能因为Agent看过文件就把个人材料升级为官方证据、偏好确认或操作授权。
+ */
 public final class SourceToolkit extends SafetyToolkit {
     private final SourceReadService service;
     private final UUID budget;

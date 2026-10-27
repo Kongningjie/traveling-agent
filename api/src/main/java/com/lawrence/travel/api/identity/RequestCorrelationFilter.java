@@ -12,7 +12,13 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** 服务端生成非敏感关联身份，不能把客户端header或登录Cookie作为trace。 */
+/**
+ * 用户HTTP请求进入主链时生成服务端requestId/traceId，供后续作业、模型、工具和问题记录关联。
+ *
+ * <p>过滤器先绑定ExecutionCorrelation再执行Controller，线程归还前恢复原绑定。
+ * 后台不继承请求线程状态，而是从PG归属记录显式恢复同一关联；不能用登录Cookie、Session ID
+ * 或客户端自报header作为诊断trace。响应关联ID只用于排障，不授予用户数据读取权限。
+ */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public final class RequestCorrelationFilter extends OncePerRequestFilter {

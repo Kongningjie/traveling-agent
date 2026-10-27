@@ -15,7 +15,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 聊天和理解请求共用PostgreSQL事务；加锁从用户到任务，不与候选接受形成反向锁序。 */
+/**
+ * 聊天主链的PostgreSQL适配器：把应用收件、后台领取和回复提交映射为持久消息与统一作业。
+ *
+ * <p>上游DialogueService通过DialogueStore使用本类；下游DialogueMapper处理聊天/输入/附件，
+ * JobStore管理background_job的预算、租约与执行资格。写方法要求应用事务，按归属加锁，
+ * 不能让Controller或模型直接操作Mapper。回复和状态是PG权威数据，框架内存不是业务记录。
+ */
 public final class PostgresDialogueStore implements DialogueStore {
     /** {@inheritDoc} 与停止命令共用归属锁，不能定位其他聊天的运行。 */
     @Override
@@ -129,7 +135,12 @@ public final class PostgresDialogueStore implements DialogueStore {
         return mapper.chat(user, id);
     }
 
-    /** {@inheritDoc} 不返回其他用户的聊天存在性。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>DialogueController.read及收件/提交返回路径均使用此投影；它读取已保存消息并组合当前任务信息。
+     * 已完成历史与未决输入按既有界限返回，附件只展示当前可读性。读取不会领取作业、启动模型或自动接受候选。
+     */
     @Override
     public Dialogue.View read(UUID user, UUID chat) {
         return safe(
@@ -175,7 +186,13 @@ public final class PostgresDialogueStore implements DialogueStore {
         return receive(user, chat, id, text, List.of());
     }
 
-    /** {@inheritDoc} 锁归属后原子保存消息、原件版本及作业；幂等比较附件集合，不依赖顺序。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>由DialogueService.send的事务调用：锁定归属 → 检查重放原文/附件集合 → 限制未决输入数量
+     * → 插入原文 → 绑定文件内容版本 → ensureJob登记持久作业。重复消息只返回现有视图，不重建作业。
+     * 附件绑定失败会与消息插入共同回滚；此处不调用模型，作业稍后由Worker领取。
+     */
     @Override
     public Dialogue.View receive(UUID user, UUID chat, UUID id, String text, List<UUID> documents) {
         transaction();
@@ -237,7 +254,14 @@ public final class PostgresDialogueStore implements DialogueStore {
         return claimExcluding(java.util.Set.of());
     }
 
-    /** {@inheritDoc} 在取得用户锁之前排除物理忙用户，按持久轮转顺序发现。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>由Worker经DialogueService调用，在短事务中按提示发现聊天，并先排除物理运行尚未退出的用户。
+     * 锁定归属后只领取可执行输入；JobStore提供原预算和新围栏token，旧作业不会凭重启获得新额度。
+     * 读取需求、当前行程、未决澄清和本轮附件构成Claim快照；完整历史另由SessionContextService装载。
+     * 返回Claim后事务结束，模型等待期间不保留这些数据库行锁。
+     */
     @Override
     public Optional<Dialogue.Claim> claimExcluding(java.util.Set<UUID> excluded) {
         transaction();
@@ -327,7 +351,12 @@ public final class PostgresDialogueStore implements DialogueStore {
         return Optional.empty();
     }
 
-    /** {@inheritDoc} 业务版本改变后拒绝旧理解；后续由应用标记澄清，不强行合并旧上下文。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>由process提交前调用，同时比较JobStore围栏、输入有效状态及旅行Basis。
+     * 任何一项变化都不能让旧模型结果取得业务提交资格；此检查不代表外部推理已停止。
+     */
     @Override
     public boolean guard(Dialogue.Claim claim) {
         transaction();
@@ -367,7 +396,13 @@ public final class PostgresDialogueStore implements DialogueStore {
         return mapper.chat(claim.userId(), claim.chatId());
     }
 
-    /** {@inheritDoc} CAS同时检查租约有效期，迟到结果不得清除屏障。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>由DialogueService的路由或失败处理调用。先检查原输入仍可提交，将DONE映射为作业完成、
+     * PAUSED映射为暂停、CONFIRM/CLARIFY映射为等待用户，再以条件更新保存reply、operation和固定error。
+     * 作业结束和聊天回复共用调用方事务；任何更新不符合原租约都失败回滚，不能用迟到回复解除屏障。
+     */
     @Override
     public void finish(
             Dialogue.Claim claim,
@@ -427,7 +462,12 @@ public final class PostgresDialogueStore implements DialogueStore {
         require(mapper.state(user, chat, message, state) == 1, false);
     }
 
-    /** {@inheritDoc} 同事务续租并刷新投影，失效时不延长任何租约。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Worker心跳调用；先检查同一输入/聊天的业务基础仍匹配，再沿原作业围栏续租并同步投影。
+     * 失败返回false由Worker发出中断；中断只是尽力停止，提交仍由guard/finish及数据库条件更新把关。
+     */
     @Override
     public boolean renew(Dialogue.Claim c) {
         transaction();
@@ -483,6 +523,11 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
 
     /**
+     * 保证聊天输入关联唯一持久作业，作为receive与claimExcluding衔接后台调度的桥梁。
+     *
+     * <p>稳定job身份由原用户/聊天/输入推导，已存在时复用；兼容历史输入迁移保留原尝试次数和预算限制，
+     * 不能借迁移重新授予一次运行。实际领取/续租/完成由统一JobStore控制，消息状态只是其页面投影。
+     *
      * @param user 归属
      * @param chat 聊天
      * @param input 输入

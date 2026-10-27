@@ -10,7 +10,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 单一压缩责任方：按完整消息预算选近期交流，显式复用Harness压缩器，不启用重复自动摘要或后台Flush。 */
+/**
+ * 会话上下文与压缩的应用责任方，控制从PG事实到本次模型消息序列的装配。
+ *
+ * <p>HarnessAgentRuntimeAdapter在实际执行前调用prepare；PostgresSessionContextStore装载
+ * 权威需求/偏好/文件目录、历史与删除水位，再以原预算Harness压缩器处理历史。
+ * 权威区和本轮请求完整保护，只有历史可按完整轮次缩减；审核角色不读取规划对话历史。
+ *
+ * <p>摘要只是带原文引用及依赖指纹的派生产物，不覆盖结构化需求。缓存、摘要写入和每次发送
+ * 都需版本守卫；超限不能通过截断硬约束或悄悄更换文件绕过，必要时明确暂停。
+ */
 public final class SessionContextService {
     private final SessionContextStore store;
     private final InteractionCodec json;
@@ -48,6 +57,13 @@ public final class SessionContextService {
     }
 
     /**
+     * 为本次调用生成完整角色消息序列，并绑定摘要及模型发送前的权威快照守卫。
+     *
+     * <p>先load与安全检查，再核对attempt/需求/偏好版本；权威区与当前请求单独检查能否放入窗口。
+     * 审核直接返回保护区；其他角色优先复用有效摘要及近期历史，达到阈值才调用同预算压缩器。
+     * 压缩失败可记录固定问题并缩减可选历史，不能伪造摘要或删除保护区；最终重检预算与快照。
+     * 本方法没有包围整个模型压缩过程的数据库长事务，具体load/save/guard由存储端口短事务执行。
+     *
      * @param budget 原预算
      * @param role 角色
      * @param request 本轮
@@ -261,6 +277,11 @@ public final class SessionContextService {
     }
 
     /**
+     * 校验缓存摘要与当前Source是否精确对应，确认摘要只覆盖可核对的历史前缀。
+     *
+     * <p>依赖哈希、消息身份/序号/内容哈希及摘录原文必须一致；失效摘要不进入模型上下文，
+     * 记录固定缓存问题并回到原文/重新压缩路径，不能从旧摘要恢复已删除偏好或附件。
+     *
      * @param summary 缓存
      * @param source 当前原文
      * @return 只有完整前缀指纹相同才允许复用
@@ -293,6 +314,11 @@ public final class SessionContextService {
     }
 
     /**
+     * 装配模型消息：历史不完整提示及有效摘要 → 完整近期轮次 → 完整权威区和本轮请求。
+     *
+     * <p>摘要以USER数据而非系统指令注入，不可从历史获得操作授权。current始终置于末尾并受保护；
+     * 后续SourceResultBudgetMiddleware只能卸载可选历史，不能裁掉当前约束来强行塞进上下文窗口。
+     *
      * @param recent 完整近期
      * @param summary 校验摘要
      * @param current 保护区及本轮

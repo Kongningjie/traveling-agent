@@ -17,7 +17,14 @@ import java.util.ArrayList;
 import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
-/** 最终请求零发送超限时卸载工具结果或可选历史；不裁剪权威区、不重做工具、不重试未知用量请求。 */
+/**
+ * 资料工具结果与可选历史的发送前预算兜底，挂在受限Harness的推理中间件链上。
+ *
+ * <p>SourceToolkit提供原生卸载能力；onReasoning先正常卸载，再仅对明确尚未发送的
+ * 本地上下文超限缩小可卸载结果或移出带标记历史。工具调用/结果配对、权威区与本轮输入保留，
+ * 原文仍在PG并可分页读取，不重做已完成工具，不重试未知用量的供应商请求。
+ * 此处的本地重新装配不是另起业务预算，也不应误记为一次已完成模型回复。
+ */
 public final class SourceResultBudgetMiddleware implements HarnessRuntimeMiddleware {
     static final String OPTIONAL_HISTORY = "travel.context.optionalHistory";
     private static final Set<String> PAGED_TOOLS = Set.of("read_file", "ReadDocumentSection");

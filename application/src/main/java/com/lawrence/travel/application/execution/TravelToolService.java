@@ -11,7 +11,13 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
-/** 将工具服务组配额、原运行预算和证据保存串起来；网络请求不占数据库事务。 */
+/**
+ * 旅行外部资料工具的应用准入边界，串接ResearchHandler/Agent工具与供应商适配端口。
+ *
+ * <p>统一处理原运行预算、工具计数及实际执行，调用链不能从工具直接访问任意Mapper。
+ * 网络结果只是待核实资料，字段证据需调查规则与阶段提交确认；门禁关闭、超时或未知结果
+ * 不以模型常识补造。只读工具也可能产生费用，仍须原外部调用许可及预算。
+ */
 public final class TravelToolService {
     private final TravelToolPort tools;
     private final ToolEvidenceJournal journal;

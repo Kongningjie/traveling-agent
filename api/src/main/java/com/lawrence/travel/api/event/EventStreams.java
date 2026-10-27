@@ -17,8 +17,11 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 有界本地 SSE 传输器；每次从数据库按游标拉取，连接不拥有业务执行，也不积累无界发送队列。
- * 独立四线程与连接超时隔离慢连接；连接释放不调用运行取消或改变检查点。
+ * 旅行事件的有界SSE传输管理器，负责连接容量、认证复查、心跳及成功发送后的游标推进。
+ *
+ * <p>由RunEventController.stream调用open，连接定时经RunEventService.page补读PG可见事件；
+ * 没有新事件不代表模型不存在，也不会因此另起推理。IO失败/超时只清理连接，后台继续保存，
+ * 客户端按最后已收到的游标重连。连接内的会话身份只存在内存，不序列化或打印。
  */
 public final class EventStreams implements AutoCloseable {
     private final RunEventService service;

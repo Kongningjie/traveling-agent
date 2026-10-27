@@ -9,13 +9,25 @@ import io.agentscope.harness.agent.HarnessAgent;
 import java.nio.file.Path;
 import java.time.Duration;
 
-/** 每次调用创建独立 Harness；历史摘要由应用受控复用框架压缩器，禁止隐式重复压缩或旧文件记忆。 */
+/**
+ * 创建单次隔离Harness及严格工具白名单，是业务角色进入框架前的权限收口。
+ *
+ * <p>HarnessAgentRuntimeAdapter提供经准入传输的Model、角色工具集和独立workspace；
+ * create限制框架迭代和隐藏重试，关闭默认文件系统、Shell、网络、技能及子Agent扩权入口。
+ * 会话/摘要/文件记忆由应用PG端口与受控组件接管，禁用框架默认持久化不代表业务没有记忆。
+ * 最终输出统一为StructuredReply.answer；业务JSON位于answer字符串内部，模型产物不能直接提交业务。
+ */
 public final class RestrictedHarnessFactory {
     /** 工具类不允许实例化。 */
     private RestrictedHarnessFactory() {}
 
     /**
-     * 构建只含显式白名单工具的 Harness，没有隐式失败重试。
+     * 为本次角色创建隔离Agent，不读取项目工作目录的技能或旧框架会话作为隐式授权。
+     *
+     * <p>只保留调用方显式提供的工具；协调资料工具可安装受控卸载中间件，其他默认能力关闭。
+     * 框架内部工具继续仍走原受控Model，不能绕过HTTP计量；StructuredReply只是输出信封，
+     * 完整业务类型和原文/版本校验继续由上游解释器、领域对象与应用用例执行。
+     *
      * @param model 经发送门禁的模型
      * @param toolkit 本次工具白名单
      * @param workspace 隔离目录，不能为项目或用户主目录

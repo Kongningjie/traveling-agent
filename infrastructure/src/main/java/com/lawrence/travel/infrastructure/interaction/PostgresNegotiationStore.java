@@ -28,7 +28,14 @@ import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.I
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.NOT_FOUND;
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.STALE_VERSION;
 
-/** 协商收件箱与阶段提交投影；没有网络调用，需求、卡片和采纳记录与引擎 C 事务共同提交。 */
+/**
+ * 协商输入、问题卡片与需求版本的PG适配器，同时负责UNDERSTAND阶段的业务投影。
+ *
+ * <p>NegotiationService登记原文/解释字段；NegotiationHandler事务外生成Prepared产物；
+ * 引擎commit在有效围栏事务中调用project，再核对字段与版本，保存需求修订、决策及输入结果。
+ * 问题回答和新修改保留原文，不因模型已经提取字段就认定需求提交完成；
+ * 模型期间不持有这里的用户/任务写锁，最终提交仍须按当前业务状态重查。
+ */
 public final class PostgresNegotiationStore implements NegotiationStore {
     /** {@inheritDoc} 仅受信应用调用；自由文本的原文已经通过意图解释的来源检查。 */
     @Override

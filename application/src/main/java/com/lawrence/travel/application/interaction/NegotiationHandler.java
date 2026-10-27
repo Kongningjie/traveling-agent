@@ -21,7 +21,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** UNDERSTAND 在事务外提取、Java 合并校验；建议只生成卡片，最终状态仍在 fence 事务提交。 */
+/**
+ * UNDERSTAND阶段处理器，接在NegotiationService登记输入之后，负责规范化需求及生成缺项问题。
+ *
+ * <p>StageExecutor调用execute，在事务外读取协商上下文；已经INTERPRETED的聊天facts直接复用，
+ * 其他自由回答才进入InputInterpreter。原文摘录、字段冲突、ADD/REPLACE和硬约束由Java核对。
+ * execute只返回Prepared检查点、问题卡片和后继阶段计划；实际需求版本及状态更新由
+ * PostgresExecutionEngine.commit调用投影端口，在复查围栏的事务中完成，不能在模型中直接提交。
+ */
 public final class NegotiationHandler implements StageHandler {
     private final NegotiationStore store;
     private final InteractionCodec json;
@@ -56,7 +63,11 @@ public final class NegotiationHandler implements StageHandler {
     }
 
     /**
-     * {@inheritDoc} 模型调用结束后只产出待提交内容，没有事务或 Mapper 访问。
+     * {@inheritDoc}
+     *
+     * <p>解码阶段inputId后读取协商上下文：INTERPRETED输入直接复用聊天已提取facts，其他原文才调用
+     * InputInterpreter。核对字段原文、回答授权范围及领域合并，保留冲突而不自动覆盖旧硬约束。
+     * 缺项生成等待用户的决策/检查点，需求满足时给出后继阶段；真正落库仍由引擎提交投影完成。
      */
     @Override
     public StageOutput execute(ExecutionEngineStore.Claim claim) {

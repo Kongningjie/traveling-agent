@@ -12,7 +12,13 @@ import java.nio.file.Path;
 import com.lawrence.travel.application.execution.TravelToolService;
 import com.lawrence.travel.agent.runtime.TravelAgentTools;
 
-/** 统一绑定应用端口及运行配置，使 api 和 application 不依赖具体 Agent 实现。 */
+/**
+ * Agent运行时的根装配点，绑定原调用门禁、模型角色配置、工作区、上下文服务和受控资料工具。
+ *
+ * <p>业务层只依赖AgentRuntimePort；本配置选择HarnessAgentRuntimeAdapter生产实现，
+ * 缺少真实准入能力时使用明确不可真实调用的适配状态，不自动创建可调用替身。
+ * SDK密钥由进程内供应器读取，不写提示词或诊断；实例装配完成不代表已获得真实联调授权。
+ */
 @Configuration(proxyBeanMethods = false)
 public class ApplicationAssembly {
     /**

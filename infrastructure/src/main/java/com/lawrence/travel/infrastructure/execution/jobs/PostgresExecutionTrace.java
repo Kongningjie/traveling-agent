@@ -7,7 +7,14 @@ import com.lawrence.travel.infrastructure.travel.TravelJson;
 import java.util.Map;
 import java.util.UUID;
 
-/** PG事实轨迹；失败/取消保留骨架，计量通过子请求关联原call_meter，禁止复制原文。 */
+/**
+ * 执行诊断的PG事实轨迹实现，连接模型/工具/压缩/阶段/提交节点与真实请求计量。
+ *
+ * <p>由ExecutionTrace.open创建节点，利用ExecutionCorrelation关联request/chat/run/job及父节点；
+ * Guarded传输的call_meter通过原预算/节点汇总，不复制提示词、用户原文或认证信息。
+ * Span.close登记成功或首个固定失败分类，失败会生成问题记录；诊断节点存在不等于业务已提交，
+ * 不能用轨迹的成功替代行程校验、确认或版本提交。
+ */
 public final class PostgresExecutionTrace implements ExecutionTrace {
     private final DiagnosticMapper mapper;
     private final QuotaMapper ownership;

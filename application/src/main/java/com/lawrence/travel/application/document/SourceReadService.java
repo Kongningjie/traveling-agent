@@ -12,7 +12,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** 有界字面检索、原文引用及工作文件；不执行文件指令，不调用模型或外部服务。 */
+/**
+ * 资料读取主链的应用边界，串接SourceToolkit和PG来源/附件索引端口。
+ *
+ * <p>Agent通过budget/token恢复真实归属，浏览器通过已认证user/chat读取；两条入口最终使用
+ * 同一资料可读性、解析状态和删除检查。目录不注入全文；字面搜索和section读取返回有界片段，
+ * 并绑定原件哈希、解析版本及原文范围，回复可以据此提供可鉴权预览。
+ * 文件文本是数据，不执行其中指令；本服务不调用模型、地图、检索供应商，也不修改旅行需求。
+ */
 public final class SourceReadService {
     private final SourceReadStore sources;
     private final DocumentStore documents;
@@ -185,6 +192,11 @@ public final class SourceReadService {
     }
 
     /**
+     * 把实际读取到的有界原文片段登记为可验证引用，再返回给Agent或浏览器。
+     *
+     * <p>引用绑定当前用户/聊天、原件内容和解析版本及文本范围；后续reply可据引用生成预览。
+     * 只是目录发现或模型自报引用不能走本路径冒充已读，个人材料也不会因此变为官方字段证据。
+     *
      * @param s 归属
      * @param e 文档
      * @param r 报告
@@ -322,6 +334,11 @@ public final class SourceReadService {
     }
 
     /**
+     * 将有界工具/会话文本卸载为当前归属下可恢复的工作文件，返回路径供后续按需读取。
+     *
+     * <p>SourceToolkit使用原budget/token进入；路径与文本经本地校验/安全检查，写入受控存储，
+     * 不是允许模型访问服务器任意路径。工作文件是讨论材料，不覆盖已确认需求或长期偏好。
+     *
      * @param budget 原预算
      * @param token 原尝试
      * @param path 框架生成的逻辑路径

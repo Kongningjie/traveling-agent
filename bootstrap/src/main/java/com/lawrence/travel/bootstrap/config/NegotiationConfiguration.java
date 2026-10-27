@@ -28,7 +28,13 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 
-/** 唯一协商装配和投影组合；没有框架后台会话或第二套调度。 */
+/**
+ * 协商用例、UNDERSTAND处理器与统一JSON端口的装配入口，不执行用户业务。
+ *
+ * <p>InteractionCodec委托TravelJson；聊天DialogueIntent.Result使用专门decodeDialogue分类路径，
+ * 普通产物使用严格类型解码。InputInterpreter用于未解释的协商原文，聊天INTERPRETED输入
+ * 可复用已核验facts；处理器仍注册到既有阶段执行链，不能另起后台调度绕过提交边界。
+ */
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class NegotiationConfiguration {

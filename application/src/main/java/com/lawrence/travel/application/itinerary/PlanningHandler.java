@@ -19,7 +19,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** PLAN／VALIDATE／REVIEW／PRESENT 唯一业务处理器；模型调用在事务外，C事务重新判定门禁。 */
+/**
+ * 旅行候选生成到展示的业务处理器，统一承接PLAN、VALIDATE、REVIEW和PRESENT阶段。
+ *
+ * <p>StageExecutor → execute读取权威需求/证据/偏好 → executeAt按阶段分支。
+ * PLAN由PlanningAdvisor生成草案或受限Patch；VALIDATE由Java确定性规则检查；
+ * REVIEW用独立审核上下文；PRESENT仍需满足候选展示门槛，不等于用户接受。
+ * 各分支只返回StageOutput与后继计划，由引擎提交事务复查版本、围栏和预算后投影落库。
+ * 局部修改范围与锁定受Java约束，失败可有限次修订或等待用户，不能自动放宽硬约束。
+ */
 public final class PlanningHandler implements StageHandler {
     private final CandidateStore store;
     private final PlanningAdvisor advisor;
@@ -50,7 +58,13 @@ public final class PlanningHandler implements StageHandler {
                 .contains(type);
     }
 
-    /** {@inheritDoc} 预测分支必须与C事务重新计算相符；未知不伪造通过。 */
+    /**
+     * {@inheritDoc}
+     *
+     * <p>StageExecutor的处理器入口；先从CandidateStore重装当前权威上下文，再调用executeAt。
+     * 若使用长期偏好，将实际revision写入检查点，使提交事务能拒绝模型运行期间发生的偏好变更。
+     * 返回StageOutput后由执行器prepare/commit，本方法不把模型草案直接发布为生效行程。
+     */
     @Override
     public StageOutput execute(ExecutionEngineStore.Claim claim) {
         var context = store.context(claim.fence());
@@ -69,6 +83,12 @@ public final class PlanningHandler implements StageHandler {
     }
 
     /**
+     * 按持久阶段类型处理候选，模型产物与确定性检查结论保持分离。
+     *
+     * <p>PLAN校验草案的任务/需求/基础版本绑定；已有基础版本走受限重规划。VALIDATE读取Java问题列表，
+     * 通过后才可REVIEW；审核不读取规划自评。偏好版本改变时沿原预算重新规划，不能给旧草案贴新标签。
+     * 所有输出只是提交建议，最终候选可见性和状态由提交事务重新判断。
+     *
      * @param claim 领取
      * @param context 本次调用前重装的权威偏好和需求
      * @return 输出必须在C事务再次比较该偏好版本

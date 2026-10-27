@@ -10,7 +10,13 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/** 有界 SSE data 解析；正文是不可信产物，只有完整终帧用量可用于结算。 */
+/**
+ * 供应商SSE响应的有界解析器，由GuardedDashScopeTransport.readStream调用。
+ *
+ * <p>逐字符限制行/事件/整流体积，把完整data帧交给SDK；只有合法终帧的累计用量可结算，
+ * 不能逐块累加usage，也不能把断流尾部猜成完整结果。模型/工具帧仍是不可信业务产物，
+ * 后续Harness、严格解码、安全门禁和应用提交检查均不可省略。解析器不直连浏览器或数据库。
+ */
 final class DashScopeSseReader {
     /** 工具类不允许实例化。 */
     private DashScopeSseReader() {}

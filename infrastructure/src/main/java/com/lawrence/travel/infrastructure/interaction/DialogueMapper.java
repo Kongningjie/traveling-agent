@@ -10,7 +10,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 独立聊天SQL；用户、任务、聊天、输入依次加锁，所有私有查询限定用户。 */
+/**
+ * 聊天主链的SQL边界，仅由基础设施适配器使用，所有私有查询按用户和聊天限定。
+ *
+ * <p>PostgresDialogueStore.receive使用insert/bindDocument保存原文与文件版本；claimExcluding读取
+ * 可执行输入和业务快照；finish通过条件更新保存回复与状态。SQL中的token、租约及状态条件
+ * 是防止取消后迟到写入的一部分，不能为了“更新成功”移除。分页列表不等于完整会话目录。
+ */
 public interface DialogueMapper {
     /**
      * @param user 用户
