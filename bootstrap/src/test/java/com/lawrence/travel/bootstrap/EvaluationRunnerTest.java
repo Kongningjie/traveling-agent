@@ -14,6 +14,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 评测协议及数据冻结的确定性检查；不连接数据库、模型或任何HTTP。 */
 class EvaluationRunnerTest {
+    /** 独立回归保留R01身份，不冒充封存场景；未注册的R02在调用执行器前拒绝。 */
+    @Test void supplementalRegressionKeepsItsOwnIdentity() {
+        var calls = new AtomicInteger();
+        var runner = new EvaluationRunner(executor(input -> {
+            calls.incrementAndGet(); return new Evaluation.Observation("READY", Map.of("KNOWN", true), Map.of(), List.of());
+        }));
+        for (String id : List.of("R01", "R02")) {
+            var input = new Evaluation.Case(id, "DEVELOPMENT", "CONTEXT", "本地补充回归", Map.of(), Map.of());
+            var selected = new Evaluation.Suite("supplement-v1", "0".repeat(64), List.of(input), Map.of(id, new Evaluation.Oracle("READY", Set.of("KNOWN"))));
+            if (id.equals("R01")) assertThat(runner.run(selected, true, Map.of()).rows().getFirst()).satisfies(row -> {
+                assertThat(row.caseId()).isEqualTo("R01"); assertThat(row.status()).isEqualTo("PASS");
+            });
+            else assertThatThrownBy(() -> runner.run(selected, false, Map.of())).hasMessage("ORACLE_INVALID");
+        }
+        assertThat(calls).hasValue(1);
+    }
     /** 默认选择8个开发样本，留出仅显式选择；原始输入和Oracle不混在执行端口里。 */
     @Test void partitionsAreExplicitAndLocked() {
         var loader = new FixedEvaluationSuite(EvaluationBaselineTest::resource); var dev = loader.load(false); var all = loader.load(true);

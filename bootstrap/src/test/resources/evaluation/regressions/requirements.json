@@ -1,0 +1,13 @@
+[
+  {
+    "id": "R01",
+    "partition": "DEVELOPMENT",
+    "scenario": "CONTEXT",
+    "input": "多字段改期、节奏追加与明确替换回归；独立于封存P01至P24",
+    "facts": {
+      "script": "[{\"action\":\"MESSAGE\",\"text\":\"开始规划北京旅行，2026年11月1日至3日，2人，希望每天午休。\",\"fixture\":null},{\"action\":\"MESSAGE\",\"text\":\"同一趟旅行改到2026年12月1日至3日，其余要求不变。\",\"fixture\":null},{\"action\":\"MESSAGE\",\"text\":\"再补充一个节奏偏好：最后一天希望早点结束。\",\"fixture\":null},{\"action\":\"MESSAGE\",\"text\":\"节奏偏好整体改为紧凑游览，之前午休和早点结束的偏好都不保留；城市、日期和人数不变。\",\"fixture\":null}]",
+      "fixtureFamily": "NONE"
+    },
+    "seed": {"source": "SYNTHETIC_TEST_DATA", "network": "DISABLED", "version": "requirements-regression-v1"}
+  }
+]

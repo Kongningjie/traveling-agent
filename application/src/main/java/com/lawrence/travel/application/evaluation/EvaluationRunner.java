@@ -64,7 +64,7 @@ public final class EvaluationRunner {
         if (suite == null || suite.cases().isEmpty() || suite.cases().size() > 24 || suite.cases().stream().map(Evaluation.Case::id).distinct().count() != suite.cases().size()) throw new IllegalArgumentException("SUITE_INVALID");
         for (var input : suite.cases()) {
             var oracle = suite.oracles().get(input.id());
-            if (!input.id().matches("E(0[1-9]|1[0-2])|P(0[1-9]|1[0-9]|2[0-4])") || !Set.of("DEVELOPMENT", "HOLDOUT").contains(input.partition()) || oracle == null || oracle.outcome() == null || !oracle.outcome().matches("[A-Z][A-Z0-9_]{0,79}(\\|[A-Z][A-Z0-9_]{0,79}){0,7}") || oracle.required().isEmpty() || oracle.required().size() > 32 || oracle.required().stream().anyMatch(key -> !key.matches("[A-Z][A-Z0-9_]{0,79}"))) throw new IllegalArgumentException("ORACLE_INVALID");
+            if (!input.id().matches("E(0[1-9]|1[0-2])|P(0[1-9]|1[0-9]|2[0-4])|R01") || !Set.of("DEVELOPMENT", "HOLDOUT").contains(input.partition()) || oracle == null || oracle.outcome() == null || !oracle.outcome().matches("[A-Z][A-Z0-9_]{0,79}(\\|[A-Z][A-Z0-9_]{0,79}){0,7}") || oracle.required().isEmpty() || oracle.required().size() > 32 || oracle.required().stream().anyMatch(key -> !key.matches("[A-Z][A-Z0-9_]{0,79}"))) throw new IllegalArgumentException("ORACLE_INVALID");
         }
     }
 

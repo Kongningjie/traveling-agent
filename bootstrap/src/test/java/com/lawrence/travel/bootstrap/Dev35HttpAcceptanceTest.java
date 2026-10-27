@@ -64,6 +64,7 @@ class Dev35HttpAcceptanceTest {
     private final List<Evaluation.Row> rows = new ArrayList<>();
     private final List<SessionEvaluationExecutor.Capture> captures = new ArrayList<>();
     private final TravelJson json = new TravelJson();
+    private String suiteHash = "UNLOADED";
 
     /** 在后台Worker创建前验证独立库名及隔离存储根，禁止借错误配置对开发库开启真实Worker。 */
     @DynamicPropertySource static void isolatedProperties(DynamicPropertyRegistry registry) {
@@ -82,7 +83,30 @@ class Dev35HttpAcceptanceTest {
     /** @return 只有脚本明确设置的真实模式才打开当前测试进程的模型开关 */
     private static boolean real() { return "true".equals(System.getenv("TRAVEL_DEV35_HTTP_REAL")); }
 
-    /** 执行两个已封存开发场景的HTTP闭环；首个失败停止后续场景，未完成判据绝不填true。
+    /** @return 显式选择补充回归才返回true；非法批次在首个HTTP或模型请求前拒绝 */
+    private static boolean requirementsBatch() {
+        String batch = System.getenv("TRAVEL_DEV35_HTTP_BATCH");
+        if (batch == null || "Conversation".equals(batch)) return false;
+        if ("Requirements".equals(batch)) return true;
+        throw new IllegalArgumentException("HTTP_ACCEPTANCE_BATCH_INVALID");
+    }
+
+    /** @return 封存会话或独立补充回归；输入哈希写入报告，补充用例不修改原24例锁
+     * @throws java.io.IOException 补充合成资源不可读 */
+    private Evaluation.Suite selectedSuite() throws java.io.IOException {
+        if (!requirementsBatch()) return new PhaseTwoEvaluationSuite(PhaseTwoEvaluationTest::resource).load(false);
+        try (var stream = getClass().getResourceAsStream("/evaluation/regressions/requirements.json")) {
+            if (stream == null) throw new IllegalStateException("REGRESSION_FIXTURE_MISSING");
+            byte[] bytes = stream.readAllBytes();
+            var cases = List.of(json.decode(new String(bytes, java.nio.charset.StandardCharsets.UTF_8), Evaluation.Case[].class));
+            if (cases.size() != 1 || !"R01".equals(cases.getFirst().id())) throw new IllegalStateException("REGRESSION_FIXTURE_INVALID");
+            var oracle = new Evaluation.Oracle("WAITING_USER", Set.of("OWNER_ISOLATED", "NO_UNCONFIRMED_WRITE", "NO_SECRET_OUTPUT",
+                    "SCRIPT_COMPLETED", "CONTEXT_BOUNDED", "CURRENT_REQUIREMENTS_PRESERVED"));
+            return new Evaluation.Suite("requirements-regression-v1", com.lawrence.travel.application.artifact.ArtifactService.hash(bytes), cases, Map.of("R01", oracle));
+        }
+    }
+
+    /** 执行所选封存会话或独立回归的HTTP闭环；首个失败停止后续场景，未完成判据绝不填true。
      * @throws Exception 报告或本机HTTP证据不可用 */
     @Test void runsLockedConversationCasesOverHttp() throws Exception {
         assertThat(properties.models().get("coordinator")).isEqualTo("qwen3.8-27b");
@@ -95,24 +119,40 @@ class Dev35HttpAcceptanceTest {
             countModelReservation(modelReservations, invocation.getArgument(1));
             return invocation.callRealMethod();
         }).when(ledger).reserve(any(), any(), any(), any(), anyLong(), any());
-        var suite = new PhaseTwoEvaluationSuite(PhaseTwoEvaluationTest::resource).load(false);
+        var suite = selectedSuite(); suiteHash = suite.fingerprint();
         var evidence = new JdbcSessionEvaluationEvidence(jdbc, transactions, Set.of(properties.models().get("coordinator")));
         var judge = new JdbcConversationAcceptanceJudge(jdbc, transactions, safety, properties.models().get("coordinator"), real());
         var driver = new HttpSessionEvaluationDriver(URI.create("http://127.0.0.1:" + port), evidence,
                 name -> { throw new IllegalArgumentException("HTTP_ACCEPTANCE_FIXTURE_NOT_SUPPORTED"); }, () -> false, Duration.ofMinutes(3), true);
         var mode = real() ? Evaluation.Mode.REAL_MODEL : Evaluation.Mode.LOCAL_CONTRACT;
         var executor = new SessionEvaluationExecutor(mode, input -> { var c = driver.execute(input); captures.add(c); return c; }, judge, real());
-        for (String id : List.of("P01", "P02")) {
+        var ids = requirementsBatch() ? List.of("R01") : List.of("P01", "P02");
+        for (String id : ids) {
             var input = suite.cases().stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
             var selected = new Evaluation.Suite(suite.version(), suite.fingerprint(), List.of(input), Map.of(id, suite.oracles().get(id)));
             var report = real() ? EvaluationRunner.modelsOnly().runModels(selected, executor, true, Map.of())
                     : new EvaluationRunner(executor).run(selected, false, Map.of());
             var row = report.rows().stream().filter(r -> r.mode() == mode).findFirst().orElseThrow(); rows.add(row);
             if (!real() && id.equals("P01") && row.status().equals("PASS")) verifyJudgeRejectsMissingProof(judge, captures.getLast());
+            if (!real() && id.equals("R01") && row.status().equals("PASS")) verifyRegressionRejectsLostPreference(judge, captures.getLast());
             System.out.println("DEV35_HTTP case=" + id + " mode=" + mode + " status=" + row.status());
             if (!row.status().equals("PASS")) break;
         }
-        assertThat(rows).hasSize(2).allMatch(r -> r.status().equals("PASS"));
+        assertThat(rows).hasSize(ids.size()).allMatch(r -> r.status().equals("PASS"));
+    }
+
+    /** 对只读观察器注入第三轮偏好丢失负例，不更新不可变业务快照，不能只因最终正确掩盖中途丢失。
+     * @param judge 同库只读裁判 @param c 本地四轮完成证据 */
+    private void verifyRegressionRejectsLostPreference(JdbcConversationAcceptanceJudge judge, SessionEvaluationExecutor.Capture c) {
+        var task = jdbc.queryForObject("SELECT task_id FROM dialogue_chat WHERE user_id=? AND id=?", java.util.UUID.class, c.userId(), c.chatId());
+        String sql = "SELECT payload::text FROM travel_constraint_revision WHERE user_id=? AND task_id=? AND revision BETWEEN 2 AND 5 ORDER BY revision";
+        var broken = new ArrayList<>(jdbc.queryForList(sql, String.class, c.userId(), task));
+        broken.set(2, broken.get(2).replace("每天午休", "偏好丢失"));
+        var reader = org.mockito.Mockito.spy(jdbc);
+        org.mockito.Mockito.doReturn(List.copyOf(broken)).when(reader).queryForList(sql, String.class, c.userId(), task);
+        var rejecting = new JdbcConversationAcceptanceJudge(reader, transactions, safety, properties.models().get("coordinator"), false);
+        assertThat(rejecting.check("R01", c)).containsEntry("CURRENT_REQUIREMENTS_PRESERVED", false);
+        assertThat(judge.check("R01", c)).containsEntry("CURRENT_REQUIREMENTS_PRESERVED", true);
     }
 
     /** @param judge 实际PG裁判 @param c 已完成本地HTTP咨询；负例只改观察输入，不伪造真实成绩或破坏业务数据 */
@@ -143,13 +183,26 @@ class Dev35HttpAcceptanceTest {
     /** 本地固定解释仅验证生产HTTP、Worker和裁判接线；不得当真实模型成绩。
      * @param c 实际领取的合成消息 @return 有真实原文引用的固定业务协议 */
     private DialogueIntent.Result localReply(com.lawrence.travel.application.interaction.Dialogue.Claim c) {
-        if (c.text().startsWith("开始规划北京旅行")) return new DialogueIntent.Result(
+        if (c.text().startsWith("开始规划北京旅行")) {
+            var facts = new ArrayList<>(List.of(new DialogueIntent.Fact("cities", "北京", "北京"),
+                    new DialogueIntent.Fact("startDate", "2026-11-01", "2026年11月1日至3日"),
+                    new DialogueIntent.Fact("endDate", "2026-11-03", "2026年11月1日至3日"), new DialogueIntent.Fact("travelers", "2", "2人")));
+            if (c.text().contains("每天午休")) facts.add(new DialogueIntent.Fact("pace", "每天午休", "每天午休"));
+            return new DialogueIntent.Result(
                 List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, c.text())),
-                List.of(new DialogueIntent.Fact("cities", "北京", "北京"),
-                        new DialogueIntent.Fact("startDate", "2026-11-01", "2026年11月1日至3日"),
-                        new DialogueIntent.Fact("endDate", "2026-11-03", "2026年11月1日至3日"), new DialogueIntent.Fact("travelers", "2", "2人")),
+                List.copyOf(facts),
                 "本地替身已理解北京、日期与2人。", "", null, "", "", "");
-        if (c.text().startsWith("刚才说的城市不变")) return new DialogueIntent.Result(
+        }
+        if (c.text().startsWith("同一趟旅行改到")) return new DialogueIntent.Result(
+                List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, c.text())),
+                List.of(new DialogueIntent.Fact("startDate", "2026-12-01", "2026年12月1日至3日"),
+                        new DialogueIntent.Fact("endDate", "2026-12-03", "2026年12月1日至3日")),
+                "本地替身将起止日期一起改到12月。", "", null, "", "", "");
+        if (c.text().startsWith("节奏偏好整体改为")) return new DialogueIntent.Result(
+                List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, c.text())),
+                List.of(new DialogueIntent.Fact("pace", "紧凑游览", c.text(), com.lawrence.travel.domain.interaction.RequirementFields.PreferenceOperation.REPLACE)),
+                "本地替身替换全部节奏偏好。", "", null, "", "", "");
+        if (c.text().startsWith("刚才说的城市不变") || c.text().startsWith("再补充一个节奏偏好")) return new DialogueIntent.Result(
                 List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.SUPPLEMENT, c.text())),
                 List.of(new DialogueIntent.Fact("pace", "最后一天希望早点结束", "最后一天希望早点结束")),
                 "本地替身已理解最后一天早点结束。", "", null, "", "", "");
@@ -166,8 +219,8 @@ class Dev35HttpAcceptanceTest {
                 "messages", jdbc.queryForList("SELECT text,reply,state FROM dialogue_input WHERE user_id=? AND chat_id=? ORDER BY sequence", c.userId(), c.chatId())));
         var meters = jdbc.queryForMap("SELECT count(*) FILTER(WHERE kind='MODEL') AS requests,coalesce(sum(input_tokens),0) AS input,coalesce(sum(output_tokens),0) AS output,count(*) FILTER(WHERE kind='MODEL' AND status<>'COMPLETED') AS unknown FROM call_meter");
         String body = json.encode(Map.of("version", "dev35-http-v1", "mode", real() ? "REAL_MODEL" : "LOCAL_CONTRACT",
-                "coverage", "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE", "requestLimit", 16,
-                "suiteHash", PhaseTwoEvaluationSuite.LOCK_HASH, "rows", rows, "meterTotals", meters, "manualReview", "PENDING", "reviews", reviews,
+                "coverage", requirementsBatch() ? "HTTP_WORKER_PG_R01_SUPPLEMENT_NOT_FROZEN_SUITE" : "HTTP_WORKER_PG_P01_P02_NOT_BROWSER_OR_FULL_SUITE", "requestLimit", 16,
+                "suiteHash", suiteHash, "rows", rows, "meterTotals", meters, "manualReview", "PENDING", "reviews", reviews,
                 "modelId", real() ? properties.models().get("coordinator") : "LOCAL_INTERPRETER_STUB"));
         safety.require("EVALUATION_REPORT", body);
         Path report = Path.of(environment.getRequiredProperty("TRAVEL_DEV35_HTTP_REPORT")); Files.createDirectories(report.getParent()); Files.writeString(report, body);

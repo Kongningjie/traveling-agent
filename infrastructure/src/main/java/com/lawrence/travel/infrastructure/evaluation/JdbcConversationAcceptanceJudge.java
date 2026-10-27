@@ -13,7 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** P01/P02专用独立程序裁判；只读权威状态和HTTP审计，不由回复自评安全或语义，不自动装配生产。 */
+/** P01/P02及独立R01回归的程序裁判；只读权威状态和HTTP审计，不由回复自评，不自动装配生产。 */
 public final class JdbcConversationAcceptanceJudge implements SessionEvaluationExecutor.Judge {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate snapshot;
@@ -31,9 +31,9 @@ public final class JdbcConversationAcceptanceJudge implements SessionEvaluationE
         snapshot.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
 
-    /** {@inheritDoc} 只支持已实现程序判据的两例；其他场景不得复用这些true。 */
+    /** {@inheritDoc} 仅接受已实现判据的场景；R01是补充回归，不能计入封存24例成绩。 */
     @Override public Map<String,Boolean> check(String caseId, SessionEvaluationExecutor.Capture capture) {
-        if (!Set.of("P01", "P02").contains(caseId)) throw new IllegalArgumentException("JUDGE_CASE_NOT_SUPPORTED");
+        if (!Set.of("P01", "P02", "R01").contains(caseId)) throw new IllegalArgumentException("JUDGE_CASE_NOT_SUPPORTED");
         return java.util.Objects.requireNonNull(snapshot.execute(status -> inspect(caseId, capture)));
     }
 
@@ -46,17 +46,57 @@ public final class JdbcConversationAcceptanceJudge implements SessionEvaluationE
                 && count("SELECT count(*) FROM itinerary_snapshot WHERE user_id=?", c.userId()) == 0
                 && count("SELECT count(*) FROM deletion_tombstone WHERE user_id=?", c.userId()) == 0
                 && (id.equals("P01") ? allTasks == 0 : allTasks == 1 && tasks.size() == 1 && tasks.getFirst().get("current_version_id") == null);
-        boolean requirements = id.equals("P01") ? tasks.isEmpty() && allTasks == 0 : requirements(c, tasks);
+        boolean requirements = id.equals("P01") ? tasks.isEmpty() && allTasks == 0
+                : id.equals("R01") ? regressionRequirements(c, tasks) : requirements(c, tasks);
+        int turns = id.equals("R01") ? 4 : 2;
         var checks = new HashMap<String,Boolean>();
         checks.put("OWNER_ISOLATED", Boolean.TRUE.equals(c.state().get("httpOwnerVisible"))
                 && Boolean.TRUE.equals(c.state().get("httpOtherUserReadDenied"))
                 && count("SELECT count(*) FROM dialogue_chat WHERE user_id=? AND id=?", c.userId(), c.chatId()) == 1);
         checks.put("NO_UNCONFIRMED_WRITE", noWrites);
-        checks.put("NO_SECRET_OUTPUT", messages.size() == 2 && messages.stream().allMatch(m -> safety.check("EVALUATION_REPLY", (String)m.get("reply")).status() == SafetyGate.Status.ALLOW));
-        checks.put("SCRIPT_COMPLETED", c.turns() == 2 && c.trace().equals(List.of("MESSAGE", "MESSAGE"))
-                && messages.size() == 2 && messages.stream().allMatch(m -> "DONE".equals(m.get("state")) && !((String)m.get("reply")).isBlank()));
-        checks.put("CONTEXT_BOUNDED", bounded(c)); checks.put("CURRENT_REQUIREMENTS_PRESERVED", requirements);
+        checks.put("NO_SECRET_OUTPUT", messages.size() == turns && messages.stream().allMatch(m -> safety.check("EVALUATION_REPLY", (String)m.get("reply")).status() == SafetyGate.Status.ALLOW));
+        checks.put("SCRIPT_COMPLETED", c.turns() == turns && c.trace().equals(java.util.Collections.nCopies(turns, "MESSAGE"))
+                && messages.size() == turns && messages.stream().allMatch(m -> "DONE".equals(m.get("state")) && !((String)m.get("reply")).isBlank()));
+        checks.put("CONTEXT_BOUNDED", bounded(c, turns)); checks.put("CURRENT_REQUIREMENTS_PRESERVED", requirements);
         return Map.copyOf(checks);
+    }
+
+    /** 四轮分别检查不可变需求版本，不能仅凭最终快照掩盖中途丢失偏好或日期混合。
+     * @param c 本批身份 @param tasks 当前聊天旅行 @return 初始/改期/追加/替换均真实落库才通过；回复语义另审 */
+    private boolean regressionRequirements(SessionEvaluationExecutor.Capture c, List<Map<String,Object>> tasks) {
+        if (tasks.size() != 1 || ((Number)tasks.getFirst().get("constraint_revision")).longValue() != 5) return false;
+        var versions = jdbc.queryForList("SELECT payload::text FROM travel_constraint_revision WHERE user_id=? AND task_id=? AND revision BETWEEN 2 AND 5 ORDER BY revision",
+                String.class, c.userId(), tasks.getFirst().get("id"));
+        if (versions.size() != 4) return false;
+        String paceId = null;
+        for (int i = 0; i < versions.size(); i++) {
+            var root = json.decode(versions.get(i), Map.class);
+            if (!(root.get("fixedArrangements") instanceof List<?> fixed) || !fixed.isEmpty()
+                    || !(root.get("requirements") instanceof List<?> requirements)) return false;
+            var fields = new HashMap<String,String>(); String pace = null;
+            for (Object item : requirements) {
+                if (!(item instanceof Map<?,?> value) || !"USER".equals(value.get("source"))) return false;
+                String field = (String)value.get("field");
+                if (fields.put(field, (String)value.get("value")) != null) return false;
+                if (!"pace".equals(field)) { if (!"HARD".equals(value.get("kind"))) return false; }
+                else {
+                    if (!"SOFT".equals(value.get("kind"))) return false;
+                    String currentId = (String)value.get("id");
+                    if (currentId == null || (paceId != null && !paceId.equals(currentId))) return false;
+                    paceId = currentId; pace = (String)value.get("value");
+                }
+            }
+            String month = i == 0 ? "11" : "12";
+            if (!fields.keySet().equals(Set.of("cities", "startDate", "endDate", "travelers", "pace"))
+                    || !"北京".equals(fields.get("cities")) || !"2".equals(fields.get("travelers"))
+                    || !("2026-" + month + "-01").equals(fields.get("startDate"))
+                    || !("2026-" + month + "-03").equals(fields.get("endDate")) || pace == null) return false;
+            // 新增必须累计，只有第四轮明确整体替换才能去掉原偏好；不以助手声称“已保存”作证据。
+            if (i < 3 && !pace.contains("午休")) return false;
+            if (i == 2 && !pace.contains("早点结束")) return false;
+            if (i == 3 && (!pace.contains("紧凑游览") || pace.contains("午休") || pace.contains("早点结束"))) return false;
+        }
+        return true;
     }
 
     /** @param c 实际身份 @param tasks 仅当前聊天关联的旅行 @return 原四字段保留且新增节奏以软偏好保存；具体内容仍需语义复核 */
@@ -79,8 +119,9 @@ public final class JdbcConversationAcceptanceJudge implements SessionEvaluationE
                 && softPace && fields.get("pace") != null && !fields.get("pace").isBlank();
     }
 
-    /** @param c 实际身份 @return 每个实际模型请求都在批准型号/输入/输出边界；本地模式要求没有模型请求 */
-    private boolean bounded(SessionEvaluationExecutor.Capture c) {
+    /** @param c 实际身份 @param minimumRequests 每轮至少一次真实模型请求，不能以部分模型调用覆盖四轮
+     * @return 每个实际模型请求都在批准型号/输入/输出边界；本地模式要求没有模型请求 */
+    private boolean bounded(SessionEvaluationExecutor.Capture c, int minimumRequests) {
         var rows = jdbc.queryForList("""
                 SELECT status,model_id,input_tokens,output_tokens FROM call_meter WHERE kind='MODEL' AND run_id IN (
                   SELECT budget_id FROM operation_context WHERE user_id=? AND chat_id=?
@@ -88,7 +129,7 @@ public final class JdbcConversationAcceptanceJudge implements SessionEvaluationE
                   UNION SELECT r.id FROM execution_run r JOIN dialogue_chat c ON c.user_id=r.user_id AND c.task_id=r.task_id WHERE c.user_id=? AND c.id=?)
                 """, c.userId(), c.chatId(), c.userId(), c.chatId(), c.userId(), c.chatId());
         if (!real) return rows.isEmpty();
-        return rows.size() >= 2 && rows.size() == c.metrics().getOrDefault("actualModelRequests", -1L)
+        return rows.size() >= minimumRequests && rows.size() == c.metrics().getOrDefault("actualModelRequests", -1L)
                 && rows.stream().allMatch(m -> "COMPLETED".equals(m.get("status")) && model.equals(m.get("model_id"))
                 && m.get("input_tokens") instanceof Number input && input.longValue() <= ContextAssembler.limit("coordinator")
                 && m.get("output_tokens") instanceof Number output && output.longValue() <= 4096);

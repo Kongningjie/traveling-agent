@@ -10,7 +10,7 @@ public final class Evaluation {
     private Evaluation() { }
     /** 执行层次是报告的一部分，不能把本地规则探针换名为模型质量。 */
     public enum Mode { /** 本地领域／应用契约。 */ LOCAL_CONTRACT, /** 固定工具下的真实模型，需独立授权与接线。 */ REAL_MODEL, /** 动态外部工具，需另行授权。 */ REAL_TOOL }
-    /** @param id 一期E01～E12或二期P01～P24 @param partition DEVELOPMENT或HOLDOUT @param scenario 场景类型 @param input 原始合成需求 @param facts 固定结构化输入；二期script字段为完整会话步骤JSON，不包含裁判 @param seed 固定工具资料，不能当真实事实 */
+    /** @param id 一期E01～E12、二期P01～P24或独立回归R01，回归不计入封存场景 @param partition DEVELOPMENT或HOLDOUT @param scenario 场景类型 @param input 原始合成需求 @param facts 固定结构化输入；二期script字段为完整会话步骤JSON，不包含裁判 @param seed 固定工具资料，不能当真实事实 */
     public record Case(String id, String partition, String scenario, String input, Map<String, String> facts, Map<String, String> seed) { }
     /** @param outcome 预期业务结果，与“生成成功”分开 @param required 必须由程序验证的检查项 */
     public record Oracle(String outcome, Set<String> required) { }
