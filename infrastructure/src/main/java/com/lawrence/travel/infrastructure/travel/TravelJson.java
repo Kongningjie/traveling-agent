@@ -1,6 +1,9 @@
 package com.lawrence.travel.infrastructure.travel;
 
 import com.lawrence.travel.application.travel.TravelStorageFailure;
+import com.lawrence.travel.application.interaction.DialogueDecodeFailure;
+import com.lawrence.travel.application.interaction.DialogueDecodeFailure.Kind;
+import com.lawrence.travel.application.interaction.DialogueDecodeFailure.Field;
 import com.lawrence.travel.domain.itinerary.ItineraryVersion;
 import com.lawrence.travel.domain.travel.TravelTask;
 import java.nio.charset.StandardCharsets;
@@ -50,6 +53,57 @@ public final class TravelJson {
     public <T> T decode(String text, Class<T> type) {
         try { return mapper.readValue(text, type); }
         catch (RuntimeException failure) { throw new TravelStorageFailure(INVALID_INPUT); }
+    }
+
+    /** @param text 不可信模型业务JSON @return 严格领域结果，不修复或容忍非法结构
+     * @throws DialogueDecodeFailure 只含固定类别和白名单路径 */
+    public com.lawrence.travel.domain.interaction.DialogueIntent.Result decodeDialogue(String text) {
+        try {
+            var result = mapper.readValue(text, com.lawrence.travel.domain.interaction.DialogueIntent.Result.class);
+            if (result == null) throw new DialogueDecodeFailure(
+                    Kind.SHAPE,
+                    Field.ROOT);
+            return result;
+        } catch (tools.jackson.core.JacksonException failure) {
+            // 不读取message、source、非法值或cause；Jackson路径只用于匹配编译期字段白名单。
+            var kind = Kind.UNKNOWN;
+            if (failure instanceof tools.jackson.core.exc.StreamReadException) kind = Kind.SYNTAX;
+            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format && format.getTargetType() != null && format.getTargetType().isEnum()) kind = Kind.ENUM;
+            else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format && format.getTargetType() == UUID.class) kind = Kind.UUID;
+            else if (failure instanceof tools.jackson.databind.exc.ValueInstantiationException) kind = Kind.CONSTRAINT;
+            else if (failure instanceof tools.jackson.databind.exc.MismatchedInputException) kind = Kind.SHAPE;
+            throw new DialogueDecodeFailure(kind, dialogueField(failure));
+        }
+    }
+
+    /** @param failure 仅在栈内读取路径，不保存解析器引用 @return 未知或过深路径一律ROOT，不输出动态属性名 */
+    private static Field dialogueField(tools.jackson.core.JacksonException failure) {
+        if (failure.getPath().size() > 8) return Field.ROOT;
+        // 动态键中若含点号等分隔符，不能伪装成facts.operation一类嵌套路径。
+        if (failure.getPath().stream().map(tools.jackson.core.JacksonException.Reference::getPropertyName)
+                .filter(java.util.Objects::nonNull).anyMatch(name -> !name.matches("[A-Za-z]{1,32}"))) return Field.ROOT;
+        String key = failure.getPath().stream().map(tools.jackson.core.JacksonException.Reference::getPropertyName)
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining("."));
+        return switch (key) {
+            case "intents" -> Field.INTENTS;
+            case "intents.kind" -> Field.INTENT_KIND;
+            case "intents.action" -> Field.INTENT_ACTION;
+            case "intents.quote" -> Field.INTENT_QUOTE;
+            case "facts" -> Field.FACTS;
+            case "facts.field" -> Field.FACT_FIELD;
+            case "facts.value" -> Field.FACT_VALUE;
+            case "facts.quote" -> Field.FACT_QUOTE;
+            case "facts.operation" -> Field.FACT_OPERATION;
+            case "reply" -> Field.REPLY;
+            case "clarification" -> Field.CLARIFICATION;
+            case "targetId" -> Field.TARGET_ID;
+            case "category" -> Field.CATEGORY;
+            case "value" -> Field.VALUE;
+            case "city" -> Field.CITY;
+            case "resolvedInputs" -> Field.RESOLVED_INPUTS;
+            case "advice" -> Field.ADVICE;
+            default -> Field.ROOT;
+        };
     }
 
     /**

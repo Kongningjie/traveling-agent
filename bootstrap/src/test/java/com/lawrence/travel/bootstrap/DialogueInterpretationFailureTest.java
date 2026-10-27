@@ -27,8 +27,8 @@ class DialogueInterpretationFailureTest {
         when(runtime.startContextual(any(), anyString(), anyString(), any())).thenReturn(call);
         when(call.result()).thenReturn(CompletableFuture.completedFuture("SYNTHETIC_PRIVATE_BODY"));
         org.mockito.Mockito.doThrow(new IllegalStateException("SYNTHETIC_PRIVATE_CLOSE_FAILURE")).when(call).close();
-        assertThatThrownBy(() -> adapter(runtime).interpret(claim())).isInstanceOf(DialogueInterpretationFailure.class)
-                .hasMessage("DIALOGUE_RESULT_DECODE_FAILED").hasNoCause().satisfies(e -> assertThat(e.getSuppressed()).isEmpty());
+        assertThatThrownBy(() -> adapter(runtime).interpret(claim())).isInstanceOf(com.lawrence.travel.application.interaction.DialogueDecodeFailure.class)
+                .hasMessage("DIALOGUE_DECODE_SYNTAX_ROOT").hasNoCause().satisfies(e -> assertThat(e.getSuppressed()).isEmpty());
         verify(call).close();
     }
 

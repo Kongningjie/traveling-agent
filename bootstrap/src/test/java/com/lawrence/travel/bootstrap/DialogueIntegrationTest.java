@@ -117,6 +117,13 @@ class DialogueIntegrationTest {
         service.claimWork().orElseThrow().run();
         assertThat(service.read(user, chat).messages().getLast().error()).isEqualTo("DIALOGUE_RESULT_DECODE_FAILED");
         assertThat(jdbc.queryForList("SELECT code FROM problem_event WHERE user_id=?", String.class, user.id())).contains("DIALOGUE_RESULT_DECODE_FAILED");
+        UUID detailed = UUID.randomUUID(); service.send(user, detailed, UUID.randomUUID(), text);
+        org.mockito.Mockito.doThrow(new com.lawrence.travel.application.interaction.DialogueDecodeFailure(
+                com.lawrence.travel.application.interaction.DialogueDecodeFailure.Kind.ENUM,
+                com.lawrence.travel.application.interaction.DialogueDecodeFailure.Field.FACT_OPERATION)).when(interpreter).interpret(any());
+        service.claimWork().orElseThrow().run();
+        assertThat(service.read(user, detailed).messages().getLast().error()).isEqualTo("DIALOGUE_DECODE_ENUM_FACT_OPERATION");
+        assertThat(jdbc.queryForList("SELECT code FROM problem_event WHERE user_id=?", String.class, user.id())).contains("DIALOGUE_DECODE_ENUM_FACT_OPERATION");
         org.mockito.Mockito.reset(interpreter);
         UUID other = UUID.randomUUID(); service.send(user, other, UUID.randomUUID(), text);
         process(result(DialogueIntent.Kind.PLANNING, DialogueIntent.Action.START_PLAN, "不在本轮原文的依据", List.of()));

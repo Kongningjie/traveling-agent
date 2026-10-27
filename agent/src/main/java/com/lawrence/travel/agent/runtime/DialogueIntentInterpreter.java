@@ -54,6 +54,7 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
             catch (java.util.concurrent.TimeoutException timeout) { throw new DialogueInterpretationFailure(Code.MODEL_TIMEOUT); }
             catch (java.util.concurrent.ExecutionException failure) { throw classified(failure.getCause(), Code.MODEL_EXECUTION_FAILED); }
             try { return json.decode(body, DialogueIntent.Result.class); }
+            catch (com.lawrence.travel.application.interaction.DialogueDecodeFailure diagnostic) { throw diagnostic; }
             catch (RuntimeException invalid) { throw new DialogueInterpretationFailure(Code.RESULT_DECODE_FAILED); }
         } catch (RuntimeException failure) { throw classified(failure, Code.MODEL_EXECUTION_FAILED); }
     }
@@ -62,6 +63,7 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
      * @param fallback 当前边界的固定后备分类 @return 原有门禁、安全、版本分类优先；其余只返回脱敏固定码 */
     private static RuntimeException classified(Throwable failure, Code fallback) {
         if (failure instanceof DialogueInterpretationFailure known) return known;
+        if (failure instanceof com.lawrence.travel.application.interaction.DialogueDecodeFailure known) return known;
         if (failure instanceof CallRejectedException known) return known;
         if (failure instanceof com.lawrence.travel.application.memory.PreferenceChangedException known) return known;
         if (failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure known) return known;

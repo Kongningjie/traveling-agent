@@ -163,6 +163,7 @@ public final class DialogueService implements BackgroundWorkSource {
         if (failure instanceof com.lawrence.travel.application.safety.SafetyGate.Failure rejected) return "SAFETY_" + rejected.result().status().name();
         if (failure instanceof com.lawrence.travel.domain.execution.control.CallRejectedException rejected) return rejected.reason().name();
         if (failure instanceof DialogueInterpretationFailure rejected) return "DIALOGUE_" + rejected.code().name();
+        if (failure instanceof DialogueDecodeFailure rejected) return rejected.diagnosticCode();
         if (failure instanceof TravelStorageFailure rejected) return "DIALOGUE_" + phase.name() + "_" + rejected.code().name();
         return "DIALOGUE_" + phase.name() + "_FAILED";
     }

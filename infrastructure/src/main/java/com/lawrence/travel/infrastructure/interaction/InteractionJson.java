@@ -17,5 +17,8 @@ public final class InteractionJson implements InteractionCodec {
     /**
      * {@inheritDoc} 解析失败使用固定错误。
      */
-    @Override public <T> T decode(String text, Class<T> type) { return json.decode(text, type); }
+    @Override public <T> T decode(String text, Class<T> type) {
+        if (type == com.lawrence.travel.domain.interaction.DialogueIntent.Result.class) return type.cast(json.decodeDialogue(text));
+        return json.decode(text, type);
+    }
 }
