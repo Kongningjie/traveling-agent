@@ -43,16 +43,28 @@ defineExpose({ inspect, busy });
 <template>
   <span class="lifecycle-delete">
     <button v-if="!preview && !hideTrigger" :disabled="busy" @click="inspect">{{kind === 'DOCUMENT' ? '删除来源' : '删除对话与旅行'}}</button>
-    <dialog v-if="preview" ref="confirmation" aria-label="删除影响确认" class="delete-preview" @cancel.prevent="close">
-      <strong>请确认删除范围</strong><p>{{preview.notice}}</p>
-      <p>附件 {{preview.documents}} 份；{{kind === 'DOCUMENT' ? '保留已确认行程版本' : `行程版本 ${preview.versions} 个`}}。共享长期偏好保留。</p>
-      <ul><li v-for="item in preview.resources" :key="item.kind + item.id">{{item.name}} · {{item.id}}</li></ul>
-      <p v-if="preview.truncated">清单仅展示前40项，确认将作用于上述全部数量。</p>
-      <p>删除后立即不可读取；原件后台清理，最长24小时。此操作不可撤销。</p>
+    <dialog v-if="preview" ref="confirmation" aria-label="确认删除" class="delete-preview" @cancel.prevent="close">
+      <h2>{{kind === 'DOCUMENT' ? '确认删除此资料？' : kind === 'TASK' ? '确认删除此旅行？' : '确认删除此对话？'}}</h2>
+      <p>{{kind === 'DOCUMENT' ? '删除后无法恢复。' : '关联的对话和旅行将一并删除，删除后无法恢复。'}}</p>
       <p v-if="error" role="alert">{{error}}</p>
-      <button :disabled="busy" @click="confirm">确认删除</button><button :disabled="busy" @click="close">取消</button>
+      <div class="delete-actions"><button class="delete-cancel" :disabled="busy" autofocus @click="close">取消</button><button class="delete-confirm" :disabled="busy" @click="confirm">{{busy ? '正在删除…' : '删除'}}</button></div>
     </dialog>
     <span v-if="error && !preview" role="alert" :class="{ 'delete-toast': hideTrigger }">{{error}}</span>
   </span>
 </template>
-<style scoped>.delete-preview{width:min(600px,calc(100vw - 32px));padding:14px;border:1px solid #f1baba;border-radius:10px;background:#fff8f8;font-size:13px;max-width:600px;max-height:55vh;overflow:auto}.delete-preview::backdrop{background:rgb(15 23 42 / 35%)}.delete-preview p{margin:8px 0;line-height:1.6}.delete-preview li{overflow-wrap:anywhere}.lifecycle-delete>span{display:block;color:#a12a2a;font-size:13px}.delete-toast{position:fixed;bottom:20px;right:20px;max-width:min(320px,calc(100vw - 40px));padding:12px;background:#fff4f4;border:1px solid #f1baba;border-radius:10px;z-index:50}</style>
+<style scoped>
+.delete-preview{box-sizing:border-box;width:min(440px,calc(100vw - 32px));padding:24px;border:1px solid #e5e7eb;border-radius:18px;background:#fff;color:#202522;font-size:14px;max-height:80vh;overflow:auto;box-shadow:0 16px 60px #0002}
+.delete-preview::backdrop{background:rgb(0 0 0 / 40%)}
+.delete-preview h2{margin:0 0 12px;font-size:20px;font-weight:600}
+.delete-preview p{margin:0 0 20px;line-height:1.7;color:#626b65}
+.delete-preview [role=alert]{color:#a12a2a}
+.delete-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+.delete-actions button{padding:9px 18px;border-radius:999px;font-size:14px;font-weight:600}
+.delete-cancel{border:1px solid #dce1dd;background:#fff;color:#29352e}
+.delete-cancel:hover{background:#f4f6f4}
+.delete-confirm{border:1px solid #d53939;background:#d53939;color:#fff}
+.delete-confirm:hover{background:#bc2929}
+.delete-actions button:disabled{opacity:.55;cursor:wait}
+.lifecycle-delete>span{display:block;color:#a12a2a;font-size:13px}
+.delete-toast{position:fixed;bottom:20px;right:20px;max-width:min(320px,calc(100vw - 40px));padding:12px;background:#fff4f4;border:1px solid #f1baba;border-radius:10px;z-index:50}
+</style>
