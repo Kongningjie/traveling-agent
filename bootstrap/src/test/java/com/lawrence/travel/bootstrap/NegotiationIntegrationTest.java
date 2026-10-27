@@ -143,6 +143,61 @@ class NegotiationIntegrationTest {
      * @return 当前不可变需求的字段值
      */
     private Map<String, String> fields(Fixture f) { var task = travel.task(f.actor(), f.taskId()).task(); return RequirementFields.fields(travel.revision(f.actor(), f.taskId(), task.constraintRevision()).requirements()); }
+    /** 跨月改期按完整输入提交，不受起止字段顺序影响，历史版本保持不变。 */
+    @Test void reschedulingCommitsBothDatesAtomicallyInEitherOrder() {
+        for (boolean startFirst : List.of(true, false)) {
+            var f = fixture(); advance(f, f.runId());
+            var before = travel.task(f.actor(), f.taskId()).task();
+            var dates = startFirst ? List.of(fact("startDate", "2026-12-01"), fact("endDate", "2026-12-03"))
+                    : List.of(fact("endDate", "2026-12-03"), fact("startDate", "2026-12-01"));
+            var receipt = service.send(f.actor(), f.taskId(), UUID.randomUUID(), "", dates); advance(f, receipt.runId());
+            assertThat(fields(f)).containsEntry("startDate", "2026-12-01").containsEntry("endDate", "2026-12-03");
+            var old = travel.revision(f.actor(), f.taskId(), before.constraintRevision());
+            assertThat(RequirementFields.fields(old.requirements())).containsEntry("startDate", "2026-11-01").containsEntry("endDate", "2026-11-03");
+            assertThat(service.messages(f.actor(), f.taskId()).stream().filter(m -> m.id().equals(receipt.inputId())).findFirst().orElseThrow().state()).isEqualTo("APPLIED");
+        }
+    }
+    /** 完整输入仍必须满足天数限制；拒绝无效改期不能先写入其中一个日期。 */
+    @Test void invalidReschedulingLeavesBothOriginalDates() {
+        var f = fixture(); advance(f, f.runId());
+        assertThatThrownBy(() -> service.send(f.actor(), f.taskId(), UUID.randomUUID(), "",
+                List.of(fact("startDate", "2026-12-01"), fact("endDate", "2026-12-20")))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(fields(f)).containsEntry("startDate", "2026-11-01").containsEntry("endDate", "2026-11-03");
+    }
+    /** 新增与复述预订保留原对象ID/来源，当前字段文本及固定安排列表保持一致，旧版本不变。 */
+    @Test void addingBookingsPreservesExistingObjectsAndDeduplicatesRestatement() {
+        var user = actor(); String train = "TRAIN|2026-11-01T09:00+08:00|2026-11-01T10:00+08:00";
+        String show = "SHOW|2026-11-02T19:00+08:00|2026-11-02T21:00+08:00";
+        var facts = new ArrayList<>(basic().stream().filter(f -> !f.field().equals("fixedStatus")).toList());
+        facts.add(fact("fixedArrangements", train));
+        var created = service.create(user, UUID.randomUUID(), "保留预订", "", facts);
+        var f = new Fixture(user, created.taskId(), created.receipt().runId()); advance(f, f.runId());
+        var before = travel.task(user, f.taskId()).task();
+        var original = travel.revision(user, f.taskId(), before.constraintRevision()).fixedArrangements().getFirst();
+        var receipt = service.send(user, f.taskId(), UUID.randomUUID(), "", List.of(fact("fixedArrangements", show))); advance(f, receipt.runId());
+        var current = travel.task(user, f.taskId()).task();
+        var saved = travel.revision(user, f.taskId(), current.constraintRevision()).fixedArrangements();
+        assertThat(saved).hasSize(2).contains(original);
+        assertThat(RequirementFields.fixed(fields(f).get("fixedArrangements"), UUID.randomUUID())).hasSize(2);
+        String sameTrainInUtc = "TRAIN|2026-11-01T01:00Z|2026-11-01T02:00Z";
+        var repeated = service.send(user, f.taskId(), UUID.randomUUID(), "", List.of(fact("fixedArrangements", sameTrainInUtc + "\n" + show))); advance(f, repeated.runId());
+        current = travel.task(user, f.taskId()).task();
+        assertThat(travel.revision(user, f.taskId(), current.constraintRevision()).fixedArrangements()).isEqualTo(saved);
+        assertThat(travel.revision(user, f.taskId(), before.constraintRevision()).fixedArrangements()).containsExactly(original);
+    }
+    /** 整体合并仍按字段保留来源，不能把已采纳选项与同轮自由补充混为同一种确认。 */
+    @Test void atomicMergePreservesMixedFieldProvenance() {
+        var f = fixture(); advance(f, f.runId()); var selected = choice(f, "NONE", "ANSWER", Set.of());
+        when(interpreter.interpret(any(), any())).thenReturn(new Negotiation.Interpretation(List.of(new Negotiation.Fact("travelers", "3", "3人")), false, ""));
+        var response = new Negotiation.Response(selected.decisionId(), selected.revision(), selected.constraints(), "ANSWER", selected.selected(), "另外改成3人", Set.of());
+        service.answer(f.actor(), f.taskId(), UUID.randomUUID(), response); advance(f, f.runId());
+        var hint = engine.candidates(100).stream().filter(value -> value.scope().taskId().equals(f.taskId())).findFirst().orElseThrow();
+        advance(f, hint.runId());
+        var task = travel.task(f.actor(), f.taskId()).task();
+        var requirements = travel.revision(f.actor(), f.taskId(), task.constraintRevision()).requirements();
+        assertThat(requirements).anyMatch(r -> r.field().equals("budgetRule") && r.source().name().equals("ACCEPTED_SUGGESTION"));
+        assertThat(requirements).anyMatch(r -> r.field().equals("travelers") && r.value().equals("3") && r.source().name().equals("USER"));
+    }
     /** 接收不采纳，推荐未选择也不写入需求。 */
     @Test void receiptAndRecommendationDoNotImplyAcceptance() {
         var f = fixture(); assertThat(fields(f)).isEmpty(); assertThat(service.messages(f.actor(), f.taskId()).getFirst().state()).isEqualTo("RECEIVED");

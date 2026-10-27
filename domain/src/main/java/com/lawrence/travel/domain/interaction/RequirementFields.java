@@ -36,6 +36,12 @@ public final class RequirementFields {
                 value = old.value();
                 if (!value.contains(entry.getValue())) value = value + "；" + entry.getValue();
             }
+            // 固定安排字段表示新增事实；复述旧预订不能替换旧对象或删除未提及预订。
+            if (entry.getKey().equals("fixedArrangements") && old != null) {
+                value = mergeFixed(fixed(old.value(), new UUID(0, 0)), fixed(value, new UUID(0, 0))).stream()
+                        .map(item -> item.type() + "|" + item.startsAt() + "|" + item.endsAt())
+                        .collect(java.util.stream.Collectors.joining("\n"));
+            }
             values.put(entry.getKey(), new ConstraintRevision.Requirement(old == null ? UUID.randomUUID() : old.id(), entry.getKey(), value,
                     Set.of("pace", "diet", "interests", "changeTargets").contains(entry.getKey()) ? ConstraintRevision.Kind.SOFT : ConstraintRevision.Kind.HARD, source, Set.of()));
         }
@@ -92,6 +98,22 @@ public final class RequirementFields {
             var parts = line.split("\\|", -1); if (parts.length != 3) throw new IllegalArgumentException("FIXED_ARRANGEMENT_INVALID");
             var start = java.time.ZonedDateTime.parse(parts[1]); var end = java.time.ZonedDateTime.parse(parts[2]);
             result.add(new ConstraintRevision.FixedArrangement(UUID.nameUUIDFromBytes((source + line).getBytes(java.nio.charset.StandardCharsets.UTF_8)), parts[0], start, end, source));
+        }
+        return List.copyOf(result);
+    }
+    /**
+     * @param current 已确认固定安排，稳定ID及来源必须保留
+     * @param additions 本次新增或复述的安排，不能据此取消、替换旧安排
+     * @return 按类型及实际起止时刻去重的不可变并集；同一安排优先保留原对象
+     */
+    public static List<ConstraintRevision.FixedArrangement> mergeFixed(List<ConstraintRevision.FixedArrangement> current,
+            List<ConstraintRevision.FixedArrangement> additions) {
+        var result = new java.util.ArrayList<>(current);
+        for (var item : additions) {
+            boolean present = result.stream().anyMatch(old -> old.type().equals(item.type())
+                    && old.startsAt().toInstant().equals(item.startsAt().toInstant())
+                    && old.endsAt().toInstant().equals(item.endsAt().toInstant()));
+            if (!present) result.add(item);
         }
         return List.copyOf(result);
     }

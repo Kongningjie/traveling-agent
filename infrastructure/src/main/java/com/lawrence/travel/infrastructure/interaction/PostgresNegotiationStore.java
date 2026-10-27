@@ -156,8 +156,15 @@ public final class PostgresNegotiationStore implements NegotiationStore {
             checked(mapper.inherit(fence.scope(), replacement, context.message().id(), context.response().action().equals("AUTHORIZE") ? "CHANGE_AUTHORIZED" : "CHANGE_ACCEPTED"));
             return new Result(null, null, replacement);
         }
-        var constraints = RequirementFields.inputBase(context.revision().requirements(), prepared.facts().stream().map(Negotiation.Fact::field).collect(java.util.stream.Collectors.toSet()));
-        for (var fact : prepared.facts()) constraints = RequirementFields.merge(constraints, Map.of(fact.field(), fact.value()), source(context, fact));
+        var updates = NegotiationHandler.updates(prepared.facts());
+        // 关联字段必须在完整变更上校验；逐字段合并会把新起日与旧止日混用，拒绝合法改期。
+        var merged = RequirementFields.merge(RequirementFields.inputBase(context.revision().requirements(), updates.keySet()), updates, NegotiationHandler.source(context));
+        var origins = new java.util.HashMap<String, ConstraintRevision.Source>();
+        for (var fact : prepared.facts()) origins.put(fact.field(), source(context, fact));
+        if (origins.containsKey("fixedArrangements")) origins.put("fixedStatus", origins.get("fixedArrangements"));
+        // 一次校验不能抹平选项采纳和用户自由补充的不同来源；未修改字段保持原来源。
+        var constraints = merged.stream().map(value -> origins.containsKey(value.field())
+                ? new ConstraintRevision.Requirement(value.id(), value.field(), value.value(), value.kind(), origins.get(value.field()), value.targetIds()) : value).toList();
         long nextRevision = row.constraintRevision() + 1;
         if (context.response() != null) {
             var original = context.card().decision();
@@ -175,7 +182,7 @@ public final class PostgresNegotiationStore implements NegotiationStore {
         var fixed = context.revision().fixedArrangements();
         for (var fact : prepared.facts()) {
             if (fact.field().equals("fixedStatus") && fact.value().equals("NONE")) fixed = List.of();
-            if (fact.field().equals("fixedArrangements")) fixed = RequirementFields.fixed(fact.value(), context.message().id());
+            if (fact.field().equals("fixedArrangements")) fixed = RequirementFields.mergeFixed(fixed, RequirementFields.fixed(fact.value(), context.message().id()));
         }
         var revision = new ConstraintRevision(fence.scope(), nextRevision, constraints, fixed);
         checked(tasks.insertRevision(fence.scope(), nextRevision, json.encode(revision), "用户协商", prepared.clarification().isBlank() ? "明确增量" : "保留要求待澄清"));
