@@ -14,10 +14,13 @@ const emit = defineEmits<{
   uploaded: [chat: string, document: string];
   analyze: [text: string, document: string];
   changed: [items: DocumentView[]];
+  removed: [document: string];
 }>();
 const menu = ref<HTMLElement>(),
   picker = ref<HTMLInputElement>(),
   activeId = ref("");
+const deletion = ref<InstanceType<typeof LifecycleDelete>>(),
+  deletionId = ref("");
 const api = new Api(),
   items = ref<DocumentView[]>([]),
   error = ref(""),
@@ -48,6 +51,7 @@ watch(
     generation++;
     menu.value?.hidePopover();
     activeId.value = "";
+    deletionId.value = "";
     items.value = [];
     emit("changed", []);
     error.value = "";
@@ -104,7 +108,26 @@ function analyze(text: string, document: string): void {
   menu.value?.hidePopover();
   emit("analyze", text, document);
 }
-defineExpose({ choose, manage });
+/**
+ * 复用服务端范围预览与确认删除，不提前从界面或数据库移除文件。
+ *
+ * @param id 当前聊天有效文件编号；同一时刻只处理一个删除确认。
+ */
+async function remove(id: string): Promise<void> {
+  if (
+    busy.value ||
+    props.disabled ||
+    deletion.value?.busy ||
+    !items.value.some((item) => item.id === id)
+  )
+    return;
+  const stamp = generation;
+  menu.value?.hidePopover();
+  deletionId.value = id;
+  await nextTick();
+  if (stamp === generation) await deletion.value?.inspect();
+}
+defineExpose({ choose, manage, remove });
 /** 请求未知时保留同文件／ID供用户显式重试，不自动发送。 */
 async function upload(): Promise<void> {
   if (busy.value || props.disabled || !file.value) return;
@@ -168,6 +191,14 @@ async function act(id: string, action: string): Promise<void> {
 }
 /** 来源删除后清除所有打开的预览，并重新读取权威状态。 */
 function removed(): void {
+  const id = deletionId.value;
+  generation++;
+  menu.value?.hidePopover();
+  items.value = items.value.filter((item) => item.id !== id);
+  emit("changed", items.value);
+  emit("removed", id);
+  activeId.value = "";
+  deletionId.value = "";
   window.dispatchEvent(new CustomEvent("travel:sources-invalidated", { detail: props.chat }));
   void refresh();
 }
@@ -237,10 +268,18 @@ function removed(): void {
       <button v-if="active.state === 'PAUSED'" :disabled="busy" @click="act(active.id, 'RETRY')">
         重试解析
       </button>
-      <LifecycleDelete kind="DOCUMENT" :target="active.id" @deleted="removed" />
+      <button :disabled="busy || disabled" @click="remove(active.id)">删除文件</button>
       <ReportProblem kind="DOCUMENT" :scope="chat" :target="active.id" />
     </template>
   </div>
+  <LifecycleDelete
+    v-if="deletionId"
+    ref="deletion"
+    kind="DOCUMENT"
+    :target="deletionId"
+    hide-trigger
+    @deleted="removed"
+  />
 </template>
 <style scoped>
 .file-picker {

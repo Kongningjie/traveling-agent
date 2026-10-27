@@ -734,6 +734,7 @@ onMounted(initialize);
               @stop="stopCurrent"
               @attach="documentPanel?.choose()"
               @manage="(id) => documentPanel?.manage(id)"
+              @remove="(id) => documentPanel?.remove(id)"
               @submit="submitMessage"
             />
             <div class="starter-grid">
@@ -894,6 +895,11 @@ onMounted(initialize);
             :disabled="chatBusy || chatRetryable"
             @analyze="analyzeDocument"
             @uploaded="uploadedDocument"
+            @removed="
+              (id) => {
+                selectedDocuments = selectedDocuments.filter((value) => value !== id);
+              }
+            "
             @changed="
               (items) => {
                 chatDocuments = items;
@@ -943,6 +949,7 @@ onMounted(initialize);
             @stop="stopCurrent"
             @attach="documentPanel?.choose()"
             @manage="(id) => documentPanel?.manage(id)"
+            @remove="(id) => documentPanel?.remove(id)"
             @submit="submitMessage"
           />
         </div>

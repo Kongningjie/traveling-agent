@@ -22,6 +22,7 @@ const emit = defineEmits<{
   "update:selectedDocuments": [ids: string[]];
   attach: [];
   manage: [document: string];
+  remove: [document: string];
   stop: [];
 }>();
 const input = ref<HTMLTextAreaElement>();
@@ -109,14 +110,13 @@ function chooseDocument(document: DocumentView): void {
   void focus();
 }
 /**
- * @param id 从本轮草稿解绑，不删除已上传原件或历史消息引用。
+ * 请求删除文件；由父级展示确认，成功前保留卡片，不只解绑草稿。
+ *
+ * @param id 当前文件编号，删除范围与权限仍由服务端确定。
  */
 function removeDocument(id: string): void {
   if (props.disabled) return;
-  emit(
-    "update:selectedDocuments",
-    selected.value.filter((value) => value !== id),
-  );
+  emit("remove", id);
 }
 const remaining = computed(() => 4000 - props.modelValue.length);
 watch(
@@ -213,15 +213,20 @@ defineExpose({ focus });
             :aria-label="`${entry.document.name}的文件操作`"
             @click="manageFile(entry.id)"
           >
-            ⋯
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
+            </svg>
           </button>
           <button
             type="button"
-            :aria-label="`移除${entry.document?.name ?? '资料'}引用`"
+            :aria-label="`删除${entry.document?.name ?? '资料'}`"
+            title="删除文件"
             :disabled="disabled"
             @click="removeDocument(entry.id)"
           >
-            ×
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
           </button>
         </div>
       </div>
@@ -320,7 +325,11 @@ defineExpose({ focus });
                 :aria-label="`${doc.name}的文件操作`"
                 @click="manageFile(doc.id)"
               >
-                ⋯
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="5" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="19" cy="12" r="2" />
+                </svg>
               </button>
             </div>
           </template>
@@ -502,6 +511,37 @@ defineExpose({ focus });
   background: transparent;
   font-size: 18px;
   cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  color: #33483d;
+  border-radius: 8px;
+}
+.file-chip button:hover,
+.attachment-row .file-more:hover {
+  background: #e8eeea;
+  color: #172e22;
+}
+.file-chip button:focus-visible,
+.file-more:focus-visible {
+  outline: 2px solid #2f6654;
+  outline-offset: 2px;
+}
+.file-chip button svg,
+.file-more svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
+}
+.file-chip button[title="删除文件"] svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 .file-mentions {
   margin: 8px 16px;
