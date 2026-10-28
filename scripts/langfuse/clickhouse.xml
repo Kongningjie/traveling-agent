@@ -1,0 +1,13 @@
+<clickhouse>
+    <!-- 输出由 Docker 轮转；关闭查询正文日志并限制后台池，适配本地验证资源。 -->
+    <logger>
+        <level>error</level>
+        <console>true</console>
+        <log remove="1" />
+        <errorlog remove="1" />
+    </logger>
+    <max_server_memory_usage>1500000000</max_server_memory_usage>
+    <background_schedule_pool_size>4</background_schedule_pool_size>
+    <query_log remove="1" />
+    <query_thread_log remove="1" />
+</clickhouse>

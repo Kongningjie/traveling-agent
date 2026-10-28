@@ -19,18 +19,19 @@ class ModuleArchitectureTest {
     void domainRemainsIndependentOfFrameworksAndOuterModules() {
         noClasses()
                 .that()
-                .resideInAPackage("..domain..")
+                .resideInAPackage("com.lawrence.travel.domain..")
                 .should()
                 .dependOnClassesThat()
                 .resideInAnyPackage(
                         "org.springframework..",
                         "org.mybatis..",
                         "io.agentscope..",
-                        "..application..",
-                        "..api..",
-                        "..agent..",
-                        "..infrastructure..",
-                        "..bootstrap..")
+                        "io.opentelemetry..",
+                        "com.lawrence.travel.application..",
+                        "com.lawrence.travel.api..",
+                        "com.lawrence.travel.agent..",
+                        "com.lawrence.travel.infrastructure..",
+                        "com.lawrence.travel.bootstrap..")
                 .check(CLASSES);
     }
 
@@ -39,10 +40,15 @@ class ModuleArchitectureTest {
     void applicationDoesNotDependOnAdaptersOrBootstrap() {
         noClasses()
                 .that()
-                .resideInAPackage("..application..")
+                .resideInAPackage("com.lawrence.travel.application..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("..api..", "..agent..", "..infrastructure..", "..bootstrap..")
+                .resideInAnyPackage(
+                        "io.opentelemetry..",
+                        "com.lawrence.travel.api..",
+                        "com.lawrence.travel.agent..",
+                        "com.lawrence.travel.infrastructure..",
+                        "com.lawrence.travel.bootstrap..")
                 .check(CLASSES);
     }
 
@@ -51,25 +57,34 @@ class ModuleArchitectureTest {
     void adaptersDoNotCallEachOther() {
         noClasses()
                 .that()
-                .resideInAPackage("..api..")
+                .resideInAPackage("com.lawrence.travel.api..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("..agent..", "..infrastructure..", "..bootstrap..")
+                .resideInAnyPackage(
+                        "com.lawrence.travel.agent..",
+                        "com.lawrence.travel.infrastructure..",
+                        "com.lawrence.travel.bootstrap..")
                 .check(CLASSES);
         noClasses()
                 .that()
-                .resideInAPackage("..agent..")
+                .resideInAPackage("com.lawrence.travel.agent..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("..api..", "..infrastructure..", "..bootstrap..")
+                .resideInAnyPackage(
+                        "com.lawrence.travel.api..",
+                        "com.lawrence.travel.infrastructure..",
+                        "com.lawrence.travel.bootstrap..")
                 .check(CLASSES);
         // infrastructure 已包含计量仓储和并发适配，规则必须覆盖这些真实生产类。
         noClasses()
                 .that()
-                .resideInAPackage("..infrastructure..")
+                .resideInAPackage("com.lawrence.travel.infrastructure..")
                 .should()
                 .dependOnClassesThat()
-                .resideInAnyPackage("..api..", "..agent..", "..bootstrap..")
+                .resideInAnyPackage(
+                        "com.lawrence.travel.api..",
+                        "com.lawrence.travel.agent..",
+                        "com.lawrence.travel.bootstrap..")
                 .check(CLASSES);
     }
 }

@@ -1,0 +1,158 @@
+# 独立本地评测栈。用 scripts/langfuse-local.ps1 初始化和启动，不加载旅行侧供应商凭据。
+name: traveling-agent-langfuse
+
+x-common: &common
+  restart: unless-stopped
+  networks: [evaluation]
+  logging:
+    driver: json-file
+    options:
+      max-size: "1m"
+      max-file: "2"
+
+x-env: &env
+  NEXTAUTH_URL: http://127.0.0.1:3100
+  DATABASE_URL: postgresql://langfuse:${LF_POSTGRES_PASSWORD:?初始化本地认证}@postgres:5432/langfuse
+  SALT: ${LF_SALT:?初始化本地认证}
+  ENCRYPTION_KEY: ${LF_ENCRYPTION_KEY:?初始化本地认证}
+  TELEMETRY_ENABLED: "false"
+  NEXT_TELEMETRY_DISABLED: "1"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  LANGFUSE_IN_APP_AGENT_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: langfuse
+  CLICKHOUSE_PASSWORD: ${LF_CLICKHOUSE_PASSWORD:?初始化本地认证}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LF_MINIO_PASSWORD:?初始化本地认证}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LF_MINIO_PASSWORD:?初始化本地认证}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LF_REDIS_PASSWORD:?初始化本地认证}
+  REDIS_TLS_ENABLED: "false"
+
+x-dependencies: &dependencies
+  postgres: {condition: service_healthy}
+  redis: {condition: service_healthy}
+  clickhouse: {condition: service_healthy}
+  minio: {condition: service_healthy}
+
+services:
+  web:
+    <<: *common
+    # Docker Desktop 需要独立入口网；关闭伪装不等于完全断网，仅回环开放 Web。
+    networks: [evaluation, entry]
+    image: docker.langfuse.com/langfuse/langfuse@sha256:5338ee88d4ec07028836f6af9d98a9b411f8eeda0ad9fae66502d849b04da724
+    mem_limit: 2g
+    ports: ["127.0.0.1:3100:3000"]
+    environment:
+      <<: *env
+      HOSTNAME: 0.0.0.0
+      NEXTAUTH_SECRET: ${LF_NEXTAUTH_SECRET:?初始化本地认证}
+      LANGFUSE_INIT_ORG_ID: traveling-agent-local
+      LANGFUSE_INIT_ORG_NAME: Traveling Agent Local
+      LANGFUSE_INIT_PROJECT_ID: traveling-agent-evaluation
+      LANGFUSE_INIT_PROJECT_NAME: Traveling Agent Evaluation
+      # 声明目标；本镜像实测未写入项目保留期，完整清理须 LF-3 验证后才能启用业务采集。
+      LANGFUSE_INIT_PROJECT_RETENTION: "30"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LF_PUBLIC_KEY:?初始化本地认证}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LF_SECRET_KEY:?初始化本地认证}
+      LANGFUSE_INIT_USER_EMAIL: ${LF_USER_EMAIL:?初始化本地账号}
+      LANGFUSE_INIT_USER_NAME: Local Operator
+      LANGFUSE_INIT_USER_PASSWORD: ${LF_USER_PASSWORD:?初始化本地认证}
+    depends_on: *dependencies
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/public/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+  worker:
+    <<: *common
+    image: docker.langfuse.com/langfuse/langfuse-worker@sha256:7a96801ecb291758785d68bb388b628d6cdff3ee67553c432b63244b008d4a47
+    mem_limit: 1g
+    environment: *env
+    depends_on: *dependencies
+  postgres:
+    <<: *common
+    image: postgres@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LF_POSTGRES_PASSWORD:?初始化本地认证}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "langfuse", "-d", "langfuse"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis:
+    <<: *common
+    image: redis@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    mem_limit: 256m
+    environment:
+      REDIS_PASSWORD: ${LF_REDIS_PASSWORD:?初始化本地认证}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory 160mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  clickhouse:
+    <<: *common
+    # 使用同一官方内容摘要的公共缓存，避免本机直连 Docker Hub 下载过慢。
+    image: mirror.gcr.io/clickhouse/clickhouse-server@sha256:8ecb92fa564142a2bad5fef7b39f89af7265ddbfd782693b15f002ca0f70be14
+    mem_limit: 2g
+    environment:
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LF_CLICKHOUSE_PASSWORD:?初始化本地认证}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./scripts/langfuse/clickhouse.xml:/etc/clickhouse-server/config.d/local.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  minio:
+    <<: *common
+    image: cgr.dev/chainguard/minio@sha256:f707e2cad184e114a9090d162d6b98e6e7f5ce43928ddb12722334a9a63cc32f
+    mem_limit: 512m
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: langfuse
+      MINIO_ROOT_PASSWORD: ${LF_MINIO_PASSWORD:?初始化本地认证}
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+networks:
+  evaluation:
+    internal: true
+  entry:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  minio-data:

@@ -9,6 +9,15 @@
     <artifactId>traveling-agent-infrastructure</artifactId>
     <name>infrastructure</name>
     <dependencies>
+        <!-- 只提供局部 OTEL 导出器，不启用全局自动采集；版本跟随 Boot BOM。 -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
         <dependency><groupId>org.apache.pdfbox</groupId><artifactId>pdfbox</artifactId><version>3.0.8</version></dependency>
         <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><version>5.5.1</version></dependency>
         <dependency>
