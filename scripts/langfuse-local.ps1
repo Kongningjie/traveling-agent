@@ -5,9 +5,10 @@
 .DESCRIPTION
     Init 仅在 .env 追加缺失的 LF_ 配置；Up 初始化后启动；Status 只显示服务状态。
     Verify 只运行本地合成链路测试；不启用真实模型、地图或检索开关。
+    VerifyMetadata 使用随机测试用户验证PG元数据到本机平台，结束只清理该用户。
     首次初始化后登录邮箱与密码查看本机 .env 的 LF_USER_EMAIL、LF_USER_PASSWORD。
 #>
-param([ValidateSet('Init', 'Up', 'Status', 'Verify')][string]$Action = 'Status')
+param([ValidateSet('Init', 'Up', 'Status', 'Verify', 'VerifyMetadata')][string]$Action = 'Status')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $root '.env'
@@ -46,7 +47,7 @@ if ($Action -eq 'Status') {
     & docker compose --env-file $envPath -f $composePath ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}'
     if ($LASTEXITCODE -ne 0) { throw 'LANGFUSE_STATUS_FAILED' }
 }
-if ($Action -eq 'Verify') {
+if ($Action -in @('Verify', 'VerifyMetadata')) {
     $saved = @{}
     $names = @('LF_PUBLIC_KEY', 'LF_SECRET_KEY', 'LANGFUSE_LOCAL_VERIFY')
     try {
@@ -59,8 +60,13 @@ if ($Action -eq 'Verify') {
         $env:LANGFUSE_LOCAL_VERIFY = 'true'
         Push-Location -LiteralPath $root
         try {
-            & .\mvnw.cmd --batch-mode --no-transfer-progress -pl bootstrap -am test '-Dtest=LangfuseLocalIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' 2>&1 |
-                ForEach-Object { if ($_ -match 'Tests run:|BUILD SUCCESS|BUILD FAILURE|\[ERROR\]') { $_.ToString() } }
+            if ($Action -eq 'VerifyMetadata') {
+                & .\scripts\verify-local.ps1 -Scope Langfuse 2>&1 |
+                    ForEach-Object { if ($_ -match 'Tests run:|BUILD SUCCESS|BUILD FAILURE|\[ERROR\]') { $_.ToString() } }
+            } else {
+                & .\mvnw.cmd --batch-mode --no-transfer-progress -pl bootstrap -am test '-Dtest=LangfuseLocalIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' 2>&1 |
+                    ForEach-Object { if ($_ -match 'Tests run:|BUILD SUCCESS|BUILD FAILURE|\[ERROR\]') { $_.ToString() } }
+            }
             if ($LASTEXITCODE -ne 0) { throw 'LANGFUSE_VERIFY_FAILED' }
         } finally { Pop-Location }
     } finally {

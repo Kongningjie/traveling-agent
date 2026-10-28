@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit', 'PhaseTwo', 'Migration', 'Budget')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit', 'PhaseTwo', 'Migration', 'Budget', 'Langfuse')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -86,6 +86,7 @@ try {
         elseif ($Scope -eq 'Identity') { '-Dtest=IdentityIntegrationTest' }
         elseif ($Scope -eq 'Travel') { '-Dtest=TravelStorageIntegrationTest' }
         elseif ($Scope -eq 'Budget') { '-Dtest=BudgetLedgerIntegrationTest,ModelCallAdmissionTest,LocalModelFaultTest,GuardedTransportTest,GuardedStreamTest,ExecutionControlPolicyTest,ModuleArchitectureTest' }
+        elseif ($Scope -eq 'Langfuse') { '-Dtest=LangfuseMetadataIntegrationTest,LangfuseMetadataExportTest,ModuleArchitectureTest' }
         elseif ($Scope -eq 'Engine') { '-Dtest=ExecutionEngineIntegrationTest' }
         elseif ($Scope -eq 'Candidate') { '-Dtest=CandidateAcceptanceIntegrationTest' }
         elseif ($Scope -eq 'Event') { '-Dtest=RunEventIntegrationTest' }
@@ -96,6 +97,7 @@ try {
         elseif ($Scope -eq 'Workflow') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
         else { '-Dtest=LocalInfrastructureTest,BudgetLedgerIntegrationTest,TravelToolIntegrationTest,IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest,NegotiationIntegrationTest,ResearchIntegrationTest,PlanningIntegrationTest,PreferenceIntegrationTest,ContextIntegrationTest,ArtifactIntegrationTest' }
     if ($TestMethod) {
+        if ($Scope -eq 'Langfuse') { $selectedTest = '-Dtest=LangfuseMetadataIntegrationTest' }
         if ($Scope -eq 'Budget') { $selectedTest = '-Dtest=BudgetLedgerIntegrationTest' }
         if ($Scope -eq 'Lifecycle') { $selectedTest = '-Dtest=LifecycleIntegrationTest' }
         if ($Scope -eq 'SupportCommit') { throw 'SupportCommit为多类回归，不接受方法选择。' }
