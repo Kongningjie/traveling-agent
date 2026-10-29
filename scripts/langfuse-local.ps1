@@ -8,9 +8,10 @@
     VerifyMetadata 使用随机测试用户验证PG元数据到本机平台，入口未核验时拒绝执行。
     VerifyAccess 在固定容器Node运行时测试网关，并验证拒绝状态下的Docker到宿主控制接线。
     VerifyDataset 仅在固定镜像内验证随机协议数据集和PG历史清理，不开放宿主入口或上传评测正文。
+    VerifyTraceScore 运行回环HTTP替身测试并只读核对原生协议/schema，不向平台投递轨迹或分数。
     首次初始化后登录邮箱与密码查看本机 .env 的 LF_USER_EMAIL、LF_USER_PASSWORD。
 #>
-param([ValidateSet('Init', 'Up', 'Status', 'Verify', 'VerifyMetadata', 'VerifyAccess', 'VerifyDataset')][string]$Action = 'Status')
+param([ValidateSet('Init', 'Up', 'Status', 'Verify', 'VerifyMetadata', 'VerifyAccess', 'VerifyDataset', 'VerifyTraceScore')][string]$Action = 'Status')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $root '.env'
@@ -48,6 +49,22 @@ if ($Action -eq 'Up') {
 if ($Action -eq 'Status') {
     & docker compose --env-file $envPath -f $composePath ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}'
     if ($LASTEXITCODE -ne 0) { throw 'LANGFUSE_STATUS_FAILED' }
+}
+if ($Action -eq 'VerifyTraceScore') {
+    # 新轨迹会进入CH/S3/队列；全副本治理完成前，只读原生平台，写请求只发给测试自建的回环替身。
+    $webId = & docker compose --env-file $envPath -f $composePath ps -q web
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($webId -join ''))) { throw 'LANGFUSE_WEB_REQUIRED' }
+    $image = & docker inspect --format '{{.Config.Image}}' $webId
+    if ($LASTEXITCODE -ne 0 -or $image -ne 'docker.langfuse.com/langfuse/langfuse@sha256:5338ee88d4ec07028836f6af9d98a9b411f8eeda0ad9fae66502d849b04da724') { throw 'LANGFUSE_TRACE_SCORE_IMAGE_UNSUPPORTED' }
+    & docker compose --env-file $envPath -f $composePath exec -T web node --test /maintenance/trace-score-protocol.test.mjs 2>&1 |
+        ForEach-Object { if ($_ -match '^([✔✖ℹ]|#|ok |not ok |TAP|[0-9]+\.\.)') { $_.ToString() } }
+    if ($LASTEXITCODE -ne 0) { throw 'LANGFUSE_TRACE_SCORE_PROTOCOL_FAILED' }
+    & docker compose --env-file $envPath -f $composePath exec -T web node /maintenance/trace-score-contract.mjs 2>&1 |
+        ForEach-Object { if ($_ -match '^(TRACE_SCORE_|LANGFUSE_TRACE_SCORE_)') { $_.ToString() } }
+    if ($LASTEXITCODE -ne 0) { throw 'LANGFUSE_TRACE_SCORE_NATIVE_CONTRACT_FAILED' }
+    $closed = Invoke-WebRequest -Uri 'http://127.0.0.1:3100/api/public/health' -TimeoutSec 5 -SkipHttpErrorCheck
+    if ($closed.StatusCode -ne 503) { throw 'LANGFUSE_ACCESS_EXPECTED_CLOSED' }
+    'LANGFUSE_TRACE_SCORE_PROTOCOL_CHECKED_NO_PLATFORM_WRITES'
 }
 if ($Action -eq 'VerifyDataset') {
     # 维护权限仅用于自身随机元数据探针；不读宿主Key，不让两个恢复扫描互相清理活跃探针。
