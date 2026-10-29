@@ -14,7 +14,8 @@ public interface EvaluationPlatformAccessMapper extends EvaluationPlatformAccess
             """
             SELECT a.verified,
               LEAST(clock_timestamp()+INTERVAL '1 second',
-                (SELECT MIN(LEAST(expires_at,revoked_at)) FROM evaluation_retention_run)) AS not_after
+                (SELECT MIN(LEAST(expires_at,revoked_at)) FROM evaluation_retention_run),
+                (SELECT MIN(blocked_at) FROM evaluation_deletion_marker)) AS not_after
             FROM evaluation_platform_access a WHERE a.singleton=true
             """)
     EvaluationPlatformAccess.Decision decision();

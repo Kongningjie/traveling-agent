@@ -22,7 +22,7 @@ public interface EvaluationScoringMapper {
             """
             INSERT INTO evaluation_scoring_source(run_id,source,fingerprint)
             SELECT r.run_id,CAST(#{source} AS JSONB),#{fingerprint} FROM evaluation_retention_run r
-            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp()
+            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id)
               AND r.started_at=CAST(CAST(#{source} AS JSONB)#>>'{context,startedAt}' AS TIMESTAMPTZ)
               AND r.dataset_hash=CAST(#{source} AS JSONB)#>>'{context,datasetHash}'
               AND r.configuration_hash=CAST(#{source} AS JSONB)#>>'{context,configurationHash}'
@@ -43,7 +43,7 @@ public interface EvaluationScoringMapper {
      * @return 可见运行身份，缺失为null
      */
     @Select(
-            "SELECT run_id::text FROM evaluation_retention_run WHERE run_id=#{run} AND owner_id=#{owner} AND revoked_at IS NULL AND expires_at>clock_timestamp() FOR UPDATE")
+            "SELECT run_id::text FROM evaluation_retention_run WHERE run_id=#{run} AND owner_id=#{owner} AND revoked_at IS NULL AND expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=#{run}) FOR UPDATE")
     String lockRun(@Param("owner") UUID owner, @Param("run") UUID run);
 
     /**
@@ -54,7 +54,7 @@ public interface EvaluationScoringMapper {
      * @return 已锁定的来源身份
      */
     @Select(
-            "SELECT s.run_id::text FROM evaluation_scoring_source s JOIN evaluation_retention_run r ON r.run_id=s.run_id WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() FOR UPDATE OF s")
+            "SELECT s.run_id::text FROM evaluation_scoring_source s JOIN evaluation_retention_run r ON r.run_id=s.run_id WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id) FOR UPDATE OF s")
     String lockSource(@Param("owner") UUID owner, @Param("run") UUID run);
 
     /**
@@ -70,7 +70,7 @@ public interface EvaluationScoringMapper {
             SELECT s.source::text AS source,s.fingerprint,s.revision,v.receipt::text AS receipt
             FROM evaluation_scoring_source s JOIN evaluation_retention_run r ON r.run_id=s.run_id
             LEFT JOIN evaluation_scoring_review v ON v.run_id=s.run_id AND v.request_id=s.current_request_id
-            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp()
+            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id)
             """)
     Row read(@Param("owner") UUID owner, @Param("run") UUID run);
 
@@ -87,7 +87,7 @@ public interface EvaluationScoringMapper {
             SELECT v.request_hash,v.receipt::text AS receipt FROM evaluation_scoring_review v
             JOIN evaluation_retention_run r ON r.run_id=v.run_id
             WHERE v.request_id=#{id} AND v.reviewer_id=#{owner} AND r.owner_id=#{owner}
-              AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp()
+              AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id)
             """)
     Saved receipt(@Param("owner") UUID owner, @Param("id") UUID requestId);
 
@@ -107,7 +107,7 @@ public interface EvaluationScoringMapper {
             INSERT INTO evaluation_scoring_review(request_id,run_id,reviewer_id,revision,request_hash,receipt)
             SELECT #{id},r.run_id,#{owner},#{expected}+1,#{requestHash},CAST(#{receipt} AS JSONB)
             FROM evaluation_retention_run r JOIN evaluation_scoring_source s ON s.run_id=r.run_id
-            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp()
+            WHERE r.run_id=#{run} AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id)
               AND s.revision=#{expected}
             ON CONFLICT DO NOTHING
             """)
@@ -132,7 +132,7 @@ public interface EvaluationScoringMapper {
             """
             UPDATE evaluation_scoring_source s SET revision=#{expected}+1,current_request_id=#{id}
             FROM evaluation_retention_run r WHERE s.run_id=r.run_id AND r.run_id=#{run}
-              AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND s.revision=#{expected}
+              AND r.owner_id=#{owner} AND r.revoked_at IS NULL AND r.expires_at>clock_timestamp() AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id) AND s.revision=#{expected}
             """)
     int advance(
             @Param("owner") UUID owner,

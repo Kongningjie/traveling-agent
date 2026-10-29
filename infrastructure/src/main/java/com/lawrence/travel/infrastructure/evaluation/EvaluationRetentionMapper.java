@@ -22,6 +22,7 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
             INSERT INTO evaluation_retention_run(run_id,owner_id,started_at,expires_at,dataset_hash,configuration_hash)
             SELECT #{record.run},#{record.owner},CAST(#{record.startedAt} AS TIMESTAMPTZ),CAST(#{record.startedAt} AS TIMESTAMPTZ)+INTERVAL '720 hours',#{record.datasetHash},#{record.configurationHash}
             WHERE CAST(#{record.startedAt} AS TIMESTAMPTZ)<=clock_timestamp() AND CAST(#{record.startedAt} AS TIMESTAMPTZ)+INTERVAL '720 hours'>clock_timestamp()
+              AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker WHERE run_id=#{record.run})
             ON CONFLICT(run_id) DO UPDATE SET run_id=EXCLUDED.run_id
             WHERE evaluation_retention_run.owner_id=EXCLUDED.owner_id
               AND evaluation_retention_run.started_at=EXCLUDED.started_at
@@ -29,6 +30,7 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
               AND evaluation_retention_run.configuration_hash=EXCLUDED.configuration_hash
               AND evaluation_retention_run.revoked_at IS NULL
               AND evaluation_retention_run.expires_at>clock_timestamp()
+              AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker WHERE run_id=EXCLUDED.run_id)
             """)
     int registerRow(@Param("record") EvaluationRetention.Registration registration);
 
@@ -46,6 +48,7 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
             SELECT run_id AS run,started_at,expires_at,dataset_hash,configuration_hash
             FROM evaluation_retention_run WHERE run_id=#{run} AND owner_id=#{owner}
               AND revoked_at IS NULL AND expires_at>clock_timestamp()
+              AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker WHERE run_id=#{run})
             """)
     EvaluationRetention.Active active(@Param("owner") UUID owner, @Param("run") UUID run);
 
@@ -63,6 +66,7 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
             WITH eligible AS (
               SELECT run_id,expires_at FROM evaluation_retention_run
               WHERE run_id=#{run} AND owner_id=#{owner} AND revoked_at IS NULL
+                AND NOT EXISTS(SELECT 1 FROM evaluation_deletion_marker WHERE run_id=#{run})
                 AND expires_at>clock_timestamp() FOR UPDATE
             ) INSERT INTO evaluation_retention_copy(run_id,kind,locator_hash)
             SELECT run_id,#{kind},#{locatorHash} FROM eligible WHERE expires_at>clock_timestamp()
@@ -90,8 +94,12 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
      */
     @Update(
             """
-            UPDATE evaluation_retention_run SET revoked_at=COALESCE(revoked_at,clock_timestamp())
-            WHERE run_id=#{run} AND owner_id=#{owner}
+            WITH revoked AS (
+              UPDATE evaluation_retention_run SET revoked_at=COALESCE(revoked_at,clock_timestamp())
+              WHERE run_id=#{run} AND owner_id=#{owner}
+              RETURNING run_id,LEAST(expires_at,revoked_at) AS blocked_at
+            ) INSERT INTO evaluation_deletion_marker(run_id,blocked_at) SELECT run_id,blocked_at FROM revoked
+            ON CONFLICT(run_id) DO UPDATE SET blocked_at=LEAST(evaluation_deletion_marker.blocked_at,EXCLUDED.blocked_at)
             """)
     int revokeRow(@Param("owner") UUID owner, @Param("run") UUID run);
 
@@ -106,12 +114,13 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
     @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
     @Select(
             """
-            SELECT r.run_id AS run,c.kind,c.locator_hash,LEAST(r.expires_at,r.revoked_at) AS blocked_at,
-              LEAST(r.expires_at,r.revoked_at)+INTERVAL '24 hours' AS deadline,c.generation,
-              clock_timestamp()>=LEAST(r.expires_at,r.revoked_at)+INTERVAL '24 hours' AS overdue
+            SELECT r.run_id AS run,c.kind,c.locator_hash,LEAST(r.expires_at,r.revoked_at,t.blocked_at) AS blocked_at,
+              LEAST(r.expires_at,r.revoked_at,t.blocked_at)+INTERVAL '24 hours' AS deadline,c.generation,
+              clock_timestamp()>=LEAST(r.expires_at,r.revoked_at,t.blocked_at)+INTERVAL '24 hours' AS overdue
             FROM evaluation_retention_run r JOIN evaluation_retention_copy c ON c.run_id=r.run_id
-            WHERE (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp()) AND c.attested_at IS NULL
-            ORDER BY LEAST(r.expires_at,r.revoked_at),r.run_id,c.kind,c.locator_hash LIMIT #{limit}
+            LEFT JOIN evaluation_deletion_marker t ON t.run_id=r.run_id
+            WHERE (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp() OR t.run_id IS NOT NULL) AND c.attested_at IS NULL
+            ORDER BY LEAST(r.expires_at,r.revoked_at,t.blocked_at),r.run_id,c.kind,c.locator_hash LIMIT #{limit}
             """)
     List<EvaluationRetention.Cleanup> pending(@Param("limit") int limit);
 
@@ -130,7 +139,8 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
             UPDATE evaluation_retention_copy c SET evidence_hash=#{evidenceHash},attested_at=clock_timestamp()
             FROM evaluation_retention_run r WHERE c.run_id=r.run_id AND c.run_id=#{run}
               AND c.kind=#{kind} AND c.locator_hash=#{locatorHash} AND c.generation=#{generation}
-              AND c.attested_at IS NULL AND (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp())
+              AND c.attested_at IS NULL AND (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp()
+                OR EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id))
             """)
     int attestRow(
             @Param("run") UUID run,
@@ -163,7 +173,8 @@ public interface EvaluationRetentionMapper extends EvaluationRetention.Store {
             UPDATE evaluation_retention_copy c SET evidence_hash=NULL,attested_at=NULL,generation=c.generation+1
             FROM evaluation_retention_run r WHERE c.run_id=r.run_id AND c.run_id=#{run}
               AND c.kind=#{kind} AND c.locator_hash=#{locatorHash}
-              AND (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp())
+              AND (r.revoked_at IS NOT NULL OR r.expires_at<=clock_timestamp()
+                OR EXISTS(SELECT 1 FROM evaluation_deletion_marker t WHERE t.run_id=r.run_id))
             """)
     int arrivedLateRow(
             @Param("run") UUID run,

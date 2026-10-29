@@ -85,6 +85,7 @@ class EvaluationScoringIntegrationTest {
     @AfterEach
     void cleanup() {
         jdbc.update("DELETE FROM evaluation_retention_run WHERE run_id=?", run);
+        jdbc.update("DELETE FROM evaluation_deletion_marker WHERE run_id=?", run);
         assertEquals(
                 0L,
                 jdbc.queryForObject(

@@ -49,6 +49,7 @@ class EvaluationRetentionIntegrationTest {
     void cleanup() {
         jdbc.update("DELETE FROM evaluation_retention_copy WHERE run_id=?", run);
         jdbc.update("DELETE FROM evaluation_retention_run WHERE run_id=?", run);
+        jdbc.update("DELETE FROM evaluation_deletion_marker WHERE run_id=?", run);
     }
 
     /** 同身份重试不续期；不同时间、配置、数据和归属均不能接管同ID。 */
