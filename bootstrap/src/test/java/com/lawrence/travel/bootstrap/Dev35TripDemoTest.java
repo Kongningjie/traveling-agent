@@ -60,7 +60,9 @@ class Dev35TripDemoTest {
     @MockitoSpyBean private PlanningAdvisor planner;
     @MockitoSpyBean private TravelToolService tools;
     @MockitoSpyBean private BudgetLedger ledger;
+    @MockitoSpyBean private com.lawrence.travel.application.port.AgentRuntimePort runtime;
     private final TravelJson json = new TravelJson();
+    private final RuntimeFailureEvidence runtimeFailures = new RuntimeFailureEvidence();
 
     /** 验证独立库与文件根；使用项目当前模型配置，不额外设置配额窗口。 */
     @DynamicPropertySource
@@ -72,7 +74,7 @@ class Dev35TripDemoTest {
                 || root == null
                 || root.isBlank()) throw new IllegalStateException("TRIP_DEMO_ISOLATION_REQUIRED");
         registry.add("travel.external-calls-enabled", Dev35TripDemoTest::real);
-        registry.add("travel.tools.enabled", Dev35TripDemoTest::real);
+        registry.add("travel.tools.enabled", () -> real() && !understandOnly());
         registry.add("spring.session.redis.namespace", () -> "travel:demo:" + database);
         registry.add("travel.deletions.root", () -> Path.of(root, "lifecycle").toString());
         registry.add("travel.artifacts.root", () -> Path.of(root, "artifacts").toString());
@@ -92,12 +94,35 @@ class Dev35TripDemoTest {
     }
 
     /**
+     * 是否只定位首条需求的理解协议，禁用后续真实资料调用。
+     *
+     * @return 首条诊断模式，不代表完整旅行验收
+     */
+    private static boolean understandOnly() {
+        return "true".equals(System.getenv("TRAVEL_DEV35_TRIP_UNDERSTAND_ONLY"));
+    }
+
+    /**
      * 验证首次生成不生效、接受后生效、修改不提前覆盖，以及第二次接受和请求重放。
      *
      * @throws Exception 本机HTTP、报告写入或业务判据失败
      */
     @Test
     void plansAcceptsAndRevisesOneTrip() throws Exception {
+        doAnswer(
+                        call -> {
+                            String role = call.getArgument(1);
+                            if (understandOnly() && !"coordinator".equals(role))
+                                throw new CallRejectedException(
+                                        CallRejectedException.Reason.MODEL_NOT_APPROVED);
+                            return runtimeFailures.observe(
+                                    role,
+                                    (com.lawrence.travel.application.port.AgentRuntimePort
+                                                    .Invocation)
+                                            call.callRealMethod());
+                        })
+                .when(runtime)
+                .startContextual(any(), any(), any(), any());
         assertThat(properties.models())
                 .containsEntry("coordinator", "qwen3.8-flash")
                 .containsEntry("planner", "qwen3.8-flash")
@@ -116,7 +141,7 @@ class Dev35TripDemoTest {
                             int count =
                                     (kind == CallKind.MODEL ? modelCalls : toolCalls)
                                             .incrementAndGet();
-                            if (count > (kind == CallKind.MODEL ? 30 : 20))
+                            if (count > (kind == CallKind.MODEL ? (understandOnly() ? 4 : 30) : 20))
                                 throw new CallRejectedException(
                                         CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
                             if (kind == CallKind.MODEL
@@ -133,26 +158,20 @@ class Dev35TripDemoTest {
             new TripDemoLocalFixture(researcher, planner, tools).install();
             doAnswer(call -> localReply(call.getArgument(0))).when(interpreter).interpret(any());
         }
-        String script =
-                json.encode(
-                        List.of(
-                                new HttpSessionEvaluationDriver.Turn(
-                                        "MESSAGE",
-                                        "开始规划北京旅行：2026年11月7日当天，2人，上午只参观故宫一个景点，其余时间自由休息。",
-                                        null),
-                                new HttpSessionEvaluationDriver.Turn(
-                                        "MESSAGE", "预算只计算景点活动，两人合计100元，没有已订安排。", null),
-                                new HttpSessionEvaluationDriver.Turn(
-                                        "ACCEPT_CANDIDATE", null, null),
-                                new HttpSessionEvaluationDriver.Turn(
-                                        "MESSAGE",
-                                        "只把第一个活动的说明补充为“慢慢游览，可随时休息”，不改变活动地点、时间、费用和其他安排。",
-                                        null),
-                                new HttpSessionEvaluationDriver.Turn(
-                                        "ACCEPT_CANDIDATE", null, null)));
+        var turns =
+                List.of(
+                        new HttpSessionEvaluationDriver.Turn(
+                                "MESSAGE", "开始规划北京旅行：2026年11月7日当天，2人，上午只参观故宫一个景点，其余时间自由休息。", null),
+                        new HttpSessionEvaluationDriver.Turn(
+                                "MESSAGE", "预算只计算景点活动，两人合计100元，没有已订安排。", null),
+                        new HttpSessionEvaluationDriver.Turn("ACCEPT_CANDIDATE", null, null),
+                        new HttpSessionEvaluationDriver.Turn(
+                                "MESSAGE", "只把第一个活动的说明补充为“慢慢游览，可随时休息”，不改变活动地点、时间、费用和其他安排。", null),
+                        new HttpSessionEvaluationDriver.Turn("ACCEPT_CANDIDATE", null, null));
+        String script = json.encode(understandOnly() ? turns.subList(0, 1) : turns);
         var input =
                 new Evaluation.Case(
-                        "DEMO-TRIP-01",
+                        understandOnly() ? "DEMO-UNDERSTAND-01" : "DEMO-TRIP-01",
                         "DEVELOPMENT",
                         "TRIP_DEMO",
                         "单日旅行的规划、接受和局部说明修改",
@@ -229,6 +248,24 @@ class Dev35TripDemoTest {
      * @param capture 本次HTTP及数据库观察结果
      */
     private void check(SessionEvaluationExecutor.Capture capture) {
+        if (understandOnly()) {
+            assertThat(capture.turns()).as("首条需求理解完成").isEqualTo(1);
+            assertThat(capture.state().get("messageStates")).isEqualTo(List.of("DONE"));
+            assertThat(capture.metrics()).containsEntry("unknownModelRequests", 0L);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM travel_task WHERE user_id=?",
+                                    Long.class,
+                                    capture.userId()))
+                    .isEqualTo(1);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM itinerary_acceptance WHERE user_id=?",
+                                    Long.class,
+                                    capture.userId()))
+                    .isZero();
+            return;
+        }
         assertThat(capture.turns()).as("完成5个步骤").isEqualTo(5);
         assertThat(capture.metrics())
                 .containsEntry("unknownModelRequests", 0L)
@@ -336,6 +373,7 @@ class Dev35TripDemoTest {
                 jdbc.queryForList(
                         "SELECT last_error_code FROM outbox_event WHERE user_id=? AND last_error_code IS NOT NULL",
                         capture.userId()));
+        review.put("runtimeFailures", runtimeFailures.snapshot());
         String body =
                 json.encode(
                         Map.of(
@@ -351,7 +389,9 @@ class Dev35TripDemoTest {
                                 List.of(
                                         Map.of(
                                                 "caseId",
-                                                "DEMO-TRIP-01",
+                                                understandOnly()
+                                                        ? "DEMO-UNDERSTAND-01"
+                                                        : "DEMO-TRIP-01",
                                                 "mode",
                                                 real() ? "REAL_MODEL_AND_TOOL" : "LOCAL_CONTRACT",
                                                 "status",
@@ -362,6 +402,10 @@ class Dev35TripDemoTest {
         Path report = Path.of(System.getenv("TRAVEL_DEV35_HTTP_REPORT"));
         Files.createDirectories(report.getParent());
         Files.writeString(report, body);
-        System.out.println("DEV35_HTTP case=DEMO-TRIP-01 status=" + (passed ? "PASS" : "FAIL"));
+        System.out.println(
+                "DEV35_HTTP case="
+                        + (understandOnly() ? "DEMO-UNDERSTAND-01" : "DEMO-TRIP-01")
+                        + " status="
+                        + (passed ? "PASS" : "FAIL"));
     }
 }

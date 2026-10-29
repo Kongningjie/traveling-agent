@@ -9,19 +9,20 @@
     Documents选择P07/P19各一次；需本地已有精确解析镜像，使用本批原件根和临时认证，不修改.env或接管用户runner。
     真实模式须RealModel及本次Authorized，使用已配置协调型号，全批最多16模型预占。
     TripDemo使用Flash理解/调查/规划和Max审核，最多30模型预占、两家资料工具合计20次。
-    不调用高德/Tavily；失败停止后续场景。保留结构化报告，不保存控制台日志。
+    UnderstandOnly只诊断首条输入，最多4次协调模型请求且关闭高德/Tavily；其他非TripDemo批次也不调用这些工具。失败停止后续场景。保留结构化报告，不保存控制台日志。
     本地库执行后删除，真实批次库保留供人工核查；不删除任何开发库/用户卷。
 #>
-param([switch]$RealModel, [switch]$Authorized, [ValidateSet('Conversation','Requirements','Documents','DocumentReferences','TripDemo')][string]$Batch = 'Conversation')
+param([switch]$RealModel, [switch]$Authorized, [switch]$UnderstandOnly, [ValidateSet('Conversation','Requirements','Documents','DocumentReferences','TripDemo')][string]$Batch = 'Conversation')
 $ErrorActionPreference = 'Stop'
 if ($RealModel -and -not $Authorized) { throw '本批真实HTTP验收必须先明确授权，再使用Authorized。' }
+if ($UnderstandOnly -and $Batch -ne 'TripDemo') { throw 'UNDERSTAND_ONLY_REQUIRES_TRIP_DEMO' }
 $root = Split-Path -Parent $PSScriptRoot
 $original = Get-Location
 $keys = @('POSTGRES_HOST','POSTGRES_PORT','POSTGRES_DB','POSTGRES_USER','POSTGRES_PASSWORD','REDIS_HOST','REDIS_PORT','REDIS_PASSWORD')
 if ($RealModel) { $keys += 'DASHSCOPE_API_KEY' }
-if ($RealModel -and $Batch -eq 'TripDemo') { $keys += @('AMAP_API_KEY','TAVILY_API_KEY') }
+if ($RealModel -and $Batch -eq 'TripDemo' -and -not $UnderstandOnly) { $keys += @('AMAP_API_KEY','TAVILY_API_KEY') }
 if ($Batch -in @('Documents','DocumentReferences')) { $keys += 'DOCUMENT_PARSER_IMAGE' }
-$runtimeKeys = @('TRAVEL_DEV35_HTTP_ACCEPTANCE','TRAVEL_DEV35_TRIP_DEMO','TRAVEL_DEV35_HTTP_REAL','TRAVEL_DEV35_HTTP_STORAGE','TRAVEL_DEV35_HTTP_REPORT','TRAVEL_DEV35_HTTP_BATCH')
+$runtimeKeys = @('TRAVEL_DEV35_HTTP_ACCEPTANCE','TRAVEL_DEV35_TRIP_DEMO','TRAVEL_DEV35_TRIP_UNDERSTAND_ONLY','TRAVEL_DEV35_HTTP_REAL','TRAVEL_DEV35_HTTP_STORAGE','TRAVEL_DEV35_HTTP_REPORT','TRAVEL_DEV35_HTTP_BATCH')
 $previous = @{}
 foreach ($key in $keys + $runtimeKeys) { $previous[$key] = [Environment]::GetEnvironmentVariable($key,'Process') }
 $mutexName = 'travel-verify-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($root))).Substring(0,16)
@@ -38,7 +39,7 @@ try {
     }
     if ($env:POSTGRES_HOST -and $env:POSTGRES_HOST -notin @('127.0.0.1','localhost')) { throw 'HTTP_ACCEPTANCE_REQUIRES_LOCAL_POSTGRES' }
     if ($RealModel -and -not $env:DASHSCOPE_API_KEY) { throw 'DASHSCOPE_API_KEY_MISSING' }
-    if ($RealModel -and $Batch -eq 'TripDemo' -and (-not $env:AMAP_API_KEY -or -not $env:TAVILY_API_KEY)) { throw 'TRIP_DEMO_TOOL_KEYS_MISSING' }
+    if ($RealModel -and $Batch -eq 'TripDemo' -and -not $UnderstandOnly -and (-not $env:AMAP_API_KEY -or -not $env:TAVILY_API_KEY)) { throw 'TRIP_DEMO_TOOL_KEYS_MISSING' }
     if ($Batch -in @('Documents','DocumentReferences')) {
         if ($env:DOCUMENT_PARSER_IMAGE -notmatch '^sha256:[a-f0-9]{64}$') { throw 'PARSER_IMAGE_NOT_CONFIGURED' }
         & docker image inspect $env:DOCUMENT_PARSER_IMAGE --format '{{.Id}}' 2>&1 | Out-Null
@@ -58,6 +59,7 @@ try {
     $env:TRAVEL_DEV35_HTTP_REPORT = $report
     $env:TRAVEL_DEV35_HTTP_ACCEPTANCE = ($Batch -ne 'TripDemo').ToString().ToLowerInvariant()
     $env:TRAVEL_DEV35_TRIP_DEMO = ($Batch -eq 'TripDemo').ToString().ToLowerInvariant()
+    $env:TRAVEL_DEV35_TRIP_UNDERSTAND_ONLY = $UnderstandOnly.ToString().ToLowerInvariant()
     $env:TRAVEL_DEV35_HTTP_REAL = $RealModel.ToString().ToLowerInvariant()
     $env:TRAVEL_DEV35_HTTP_BATCH = $Batch
     & docker compose exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" -T template0 "$1"' sh $database 2>&1 | Out-Null
@@ -73,7 +75,7 @@ try {
     $result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $report -Encoding utf8
     'REPORT: ' + $report
     $result.rows | Select-Object caseId,mode,status,failedChecks,metrics | ConvertTo-Json -Depth 4 -Compress
-    $expectedCases = if ($Batch -eq 'TripDemo') { @('DEMO-TRIP-01') } elseif ($Batch -eq 'Requirements') { @('R01') } elseif ($Batch -eq 'DocumentReferences') { @('R02','R03') } elseif ($Batch -eq 'Documents') { @('P07','P19') } else { @('P01','P02') }
+    $expectedCases = if ($UnderstandOnly) { @('DEMO-UNDERSTAND-01') } elseif ($Batch -eq 'TripDemo') { @('DEMO-TRIP-01') } elseif ($Batch -eq 'Requirements') { @('R01') } elseif ($Batch -eq 'DocumentReferences') { @('R02','R03') } elseif ($Batch -eq 'Documents') { @('P07','P19') } else { @('P01','P02') }
     if ($testExit -ne 0 -or @($result.rows).Count -ne $expectedCases.Count -or
         (($result.rows.caseId -join ',') -ne ($expectedCases -join ',')) -or
         @($result.rows | Where-Object status -ne 'PASS').Count) { throw 'HTTP_ACCEPTANCE_FAILED_WITH_EVIDENCE' }
