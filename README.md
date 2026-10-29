@@ -333,3 +333,11 @@ Web 另有独立入口网以支持 Docker Desktop 回环访问；已关闭平台
 LF-2提供结束节点的元数据投影：从PG读取阶段/Agent事实并逐条关联`call_meter`，独立有界线程发送，保留取消、UNKNOWN和Token预占，不导出正文或按未知价格估价。64位节点ID以PG映射表持久化，碰撞重试、重启复用；HTTP接收不等于质量通过。仅结束节点进入平台，未结束节点不伪造完成时间。
 
 `./scripts/verify-local.ps1 -Scope Langfuse`验证受影响的PG/导出器/架构；`./scripts/langfuse-local.ps1 -Action VerifyMetadata`额外启用本机平台合成入库查询，仍不调用真实模型。正常`local`配置不创建导出器；只有同时使用`local`与`langfuse-validation` profile、明确指定未过期的`lf2_test_`合成用户才装配。合成批次起点来自用户创建时间，重启不刷新；同批须复用原`LF_SALT`。生产采集仍须等待LF-3清理治理验收，不把验证profile用于真实账号。
+
+### 评分与保留台账基础（LF-3a）
+
+`LangfusePilotSuite`只加载P01/P02/R01/R02/R03固定合成资源，输入与裁判分离；`EvaluationScorecard`分别计算程序门禁、四项人工评分和任务完成状态。未运行不填分、未评审保持待评，不跨执行模式统计。人工回执须绑定原始运行与全轮执行证据；协议本身不认证人工身份，也不提供评分写入口。
+
+`EvaluationRetentionService`和V40台账使用PG时间检查原始开始后720小时到期；幂等登记不修改归属、时间或配置，主动撤销保留标记，迟到副本增加清理代次。清理期限固定为首次阻断后24小时。台账回执只记录清理适配器的声明，不等于物理删除证明。
+
+`./scripts/verify-local.ps1 -Scope LangfuseRetention`验证上述协议及真实本机PG的归属、期限、回滚和撤销竞争，不调用模型。当前未将台账接入平台Web、导出器或物理清理器；平台数据集/分数发布与完整访问治理仍属LF-3b，生产采集及评测全文上传继续关闭。
