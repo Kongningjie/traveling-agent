@@ -89,6 +89,8 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${LF_USER_EMAIL:?初始化本地账号}
       LANGFUSE_INIT_USER_NAME: Local Operator
       LANGFUSE_INIT_USER_PASSWORD: ${LF_USER_PASSWORD:?初始化本地认证}
+    # 受控本机维护命令只验证随机协议数据集；不会经宿主入口开放平台正文。
+    volumes: ["./scripts/langfuse:/maintenance:ro"]
     depends_on: *dependencies
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/public/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
