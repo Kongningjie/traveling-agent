@@ -132,6 +132,11 @@ class Dev35TripDemoTest {
         var toolCalls = new AtomicInteger();
         doAnswer(
                         call -> {
+                            // 真实批次首个运行失败后禁止再预占；不让阶段重试继续发送请求。
+                            if (real() && runtimeFailures.failed()) {
+                                throw new CallRejectedException(
+                                        CallRejectedException.Reason.EXTERNAL_DISABLED);
+                            }
                             if (jdbc.queryForObject(
                                             "SELECT count(*) FROM call_meter WHERE status='UNKNOWN'",
                                             Long.class)

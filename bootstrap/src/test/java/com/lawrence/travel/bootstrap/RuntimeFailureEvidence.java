@@ -81,6 +81,10 @@ final class RuntimeFailureEvidence {
                                         "MODEL_MEDIA_NOT_ALLOWED",
                                         "MODEL_ID_REJECTED",
                                         "MODEL_OUTPUT_INVALID",
+                                        "MODEL_OUTPUT_MISSING",
+                                        "MODEL_OUTPUT_UNSTRUCTURED",
+                                        "MODEL_OUTPUT_ENVELOPE",
+                                        "MODEL_OUTPUT_EMPTY",
                                         "MODEL_STREAM_INVALID",
                                         "MODEL_STREAM_INCOMPLETE",
                                         "MODEL_STREAM_TOO_LARGE")
@@ -125,5 +129,14 @@ final class RuntimeFailureEvidence {
      */
     synchronized List<Map<String, Object>> snapshot() {
         return List.copyOf(failures);
+    }
+
+    /**
+     * 检查本批是否已有运行失败，供真实验收在下一次计量预占前停止请求。
+     *
+     * @return 一旦记录失败就始终为true
+     */
+    synchronized boolean failed() {
+        return !failures.isEmpty();
     }
 }

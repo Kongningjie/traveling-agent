@@ -13,6 +13,42 @@ import java.util.function.Supplier;
  * 执行Harness并读取最终产物；明确零用量的上下文超限允许恢复一次。
  */
 public final class ControlledHarnessCall {
+    /** 结构化产物适配失败位置，不携带模型内容。 */
+    public enum OutputProblem {
+        /** 框架未返回消息。 */
+        MISSING,
+        /** 最终消息没有结构化元数据。 */
+        UNSTRUCTURED,
+        /** answer封装混入其他字段或类型错误。 */
+        ENVELOPE,
+        /** 返回了空对象。 */
+        EMPTY
+    }
+
+    /** 用固定原因标记返回结构问题，保持既有异常消息和拒绝行为。 */
+    public static final class OutputFailure extends IllegalStateException {
+        private final OutputProblem problem;
+
+        /**
+         * 标记适配失败的位置。
+         *
+         * @param problem 编译期固定原因
+         */
+        public OutputFailure(OutputProblem problem) {
+            super("MODEL_OUTPUT_INVALID");
+            this.problem = java.util.Objects.requireNonNull(problem);
+        }
+
+        /**
+         * 返回脱敏错误码，不读取模型内容。
+         *
+         * @return 仅由固定枚举组成的错误码
+         */
+        public String diagnosticCode() {
+            return "MODEL_OUTPUT_" + problem.name();
+        }
+    }
+
     /** 命名空间。 */
     private ControlledHarnessCall() {}
 
@@ -76,7 +112,7 @@ public final class ControlledHarnessCall {
                                                 ? java.util.Map.class
                                                 : RestrictedHarnessFactory.StructuredReply.class)
                                 .block();
-                if (result == null) throw new IllegalStateException("MODEL_OUTPUT_INVALID");
+                if (result == null) throw new OutputFailure(OutputProblem.MISSING);
                 String text = readResult(result, businessJson);
                 safety.require("OUTPUT", text);
                 guard.run();
@@ -96,7 +132,7 @@ public final class ControlledHarnessCall {
      * @return 保留全部字段的产物；空答案及非法封装继续拒绝
      */
     private static String readResult(Msg result, boolean businessJson) {
-        if (!result.hasStructuredData()) throw new IllegalStateException("MODEL_OUTPUT_INVALID");
+        if (!result.hasStructuredData()) throw new OutputFailure(OutputProblem.UNSTRUCTURED);
         if (!businessJson)
             return result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class)
                     .answer();
@@ -106,10 +142,10 @@ public final class ControlledHarnessCall {
             data = nested;
         if (data.containsKey("answer")) {
             if (data.size() != 1 || !(data.get("answer") instanceof String answer))
-                throw new IllegalStateException("MODEL_OUTPUT_INVALID");
+                throw new OutputFailure(OutputProblem.ENVELOPE);
             return new RestrictedHarnessFactory.StructuredReply(answer).answer();
         }
-        if (data.isEmpty()) throw new IllegalStateException("MODEL_OUTPUT_INVALID");
+        if (data.isEmpty()) throw new OutputFailure(OutputProblem.EMPTY);
         return new RestrictedHarnessFactory.StructuredReply(
                         io.agentscope.core.util.JsonUtils.getJsonCodec().toJson(data))
                 .answer();

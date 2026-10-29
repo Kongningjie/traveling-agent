@@ -575,6 +575,9 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private static String failureCode(Throwable failure) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             if (current instanceof CallRejectedException rejected) return rejected.getMessage();
+            if (current instanceof ControlledHarnessCall.OutputFailure invalid) {
+                return invalid.diagnosticCode();
+            }
             if (current instanceof HttpTransportException) {
                 String code = current.getMessage();
                 if (code != null

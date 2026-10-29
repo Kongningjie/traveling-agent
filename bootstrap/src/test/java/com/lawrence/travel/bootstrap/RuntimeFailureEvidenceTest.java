@@ -13,6 +13,32 @@ import static org.mockito.Mockito.when;
 
 /** 本地验证类型诊断不泄露正文，且不改变原句柄结果和关闭行为。 */
 class RuntimeFailureEvidenceTest {
+    /** 首个异步失败完成时立即锁定批次停止标记，后续成功不能清除它。 */
+    @Test
+    void firstFailureLatchesBatchStopBeforeNextReservation() {
+        var evidence = new RuntimeFailureEvidence();
+        var pending = new CompletableFuture<String>();
+        var original = mock(AgentRuntimePort.Invocation.class);
+        when(original.result()).thenReturn(pending);
+        var observed = evidence.observe("coordinator", original);
+        assertThat(evidence.failed()).isFalse();
+        pending.completeExceptionally(
+                new SanitizedAgentFailure(
+                        "MODEL_OUTPUT_UNSTRUCTURED",
+                        new IllegalStateException("SYNTHETIC_PRIVATE")));
+        assertThatThrownBy(() -> observed.result().toCompletableFuture().join())
+                .hasCauseInstanceOf(SanitizedAgentFailure.class);
+        assertThat(evidence.failed()).isTrue();
+        assertThat(evidence.snapshot().getFirst())
+                .containsEntry("code", "MODEL_OUTPUT_UNSTRUCTURED");
+        var success = mock(AgentRuntimePort.Invocation.class);
+        when(success.result()).thenReturn(CompletableFuture.completedFuture("合成成功"));
+        assertThat(evidence.observe("planner", success).result().toCompletableFuture().join())
+                .isEqualTo("合成成功");
+        assertThat(evidence.failed()).isTrue();
+        assertThat(evidence.snapshot().toString()).doesNotContain("SYNTHETIC_PRIVATE");
+    }
+
     /** 只有白名单固定码可以导出；空值或任意异常字符串不能混入诊断。 */
     @Test
     void unlistedCodesAreNotExported() {

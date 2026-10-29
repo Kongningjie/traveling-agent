@@ -20,6 +20,67 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 使用真实Harness delegate与本地Model，验证恢复、消息角色与安全展示边界。 */
 class ControlledHarnessCallTest {
+    /** 框架返回普通文本时不自动提取JSON，固定错误码指出缺少结构化数据。 */
+    @Test
+    void unstructuredReplyIsRejectedWithoutReadingItsBodyIntoDiagnostics() {
+        var model =
+                new HarnessProbeFixture.ProbeModel(
+                        (messages, n) -> HarnessProbeFixture.answer("SYNTHETIC_PRIVATE_BODY"));
+        assertThatThrownBy(
+                        () ->
+                                ControlledHarnessCall.execute(
+                                        () ->
+                                                RestrictedHarnessFactory.create(
+                                                        model,
+                                                        new Toolkit(),
+                                                        root,
+                                                        "coordinator",
+                                                        true),
+                                        () -> List.of(message("本地合成输入", MsgRole.USER)),
+                                        () -> {
+                                            throw new AssertionError("NO_RECOVERY");
+                                        },
+                                        () -> {},
+                                        SafetyGate.local(),
+                                        () -> false,
+                                        agent -> {},
+                                        true))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
+                .hasMessage("MODEL_OUTPUT_INVALID")
+                .satisfies(
+                        failure ->
+                                assertThat(
+                                                ((ControlledHarnessCall.OutputFailure) failure)
+                                                        .diagnosticCode())
+                                        .isEqualTo("MODEL_OUTPUT_UNSTRUCTURED"));
+    }
+
+    /** 空对象和混合封装继续拒绝，只增加固定失败原因，不将无效输出放行。 */
+    @Test
+    void invalidEnvelopeDiagnosticsDoNotContainValues() {
+        assertThatThrownBy(() -> businessFixture(Map.of(), true))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
+                .satisfies(
+                        failure ->
+                                assertThat(
+                                                ((ControlledHarnessCall.OutputFailure) failure)
+                                                        .diagnosticCode())
+                                        .isEqualTo("MODEL_OUTPUT_EMPTY"));
+        assertThatThrownBy(
+                        () ->
+                                businessFixture(
+                                        Map.of("answer", "SYNTHETIC_PRIVATE", "facts", List.of()),
+                                        true))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
+                .hasMessage("MODEL_OUTPUT_INVALID")
+                .satisfies(
+                        failure ->
+                                assertThat(
+                                                ((ControlledHarnessCall.OutputFailure) failure)
+                                                        .diagnosticCode())
+                                        .isEqualTo("MODEL_OUTPUT_ENVELOPE"));
+    }
+
     /** 复现缺少answer的业务对象在旧封装中失败；业务模式保留原字段并交给严格业务解码。 */
     @Test
     void directBusinessJsonKeepsFactsAndRequiresExplicitMode() {
