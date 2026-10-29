@@ -85,6 +85,7 @@ final class RuntimeFailureEvidence {
                                         "MODEL_OUTPUT_UNSTRUCTURED",
                                         "MODEL_OUTPUT_ENVELOPE",
                                         "MODEL_OUTPUT_EMPTY",
+                                        "MODEL_OUTPUT_SCHEMA",
                                         "MODEL_STREAM_INVALID",
                                         "MODEL_STREAM_INCOMPLETE",
                                         "MODEL_STREAM_TOO_LARGE")

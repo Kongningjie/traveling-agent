@@ -257,18 +257,29 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         return startInvocation(runId, role, prompt, false);
     }
 
-    /**
-     * 检查上下文服务是否已配置，然后启动模型调用。
-     */
+    /** {@inheritDoc} 生产调用必须显式提供输出DTO，旧无契约入口在发送前拒绝。 */
     @Override
     public Invocation startContextual(
             UUID runId,
             String role,
             String prompt,
             com.lawrence.travel.application.memory.AgentContext.Basis basis) {
-        if ((sessions == null && contexts == null) || json == null || basis == null)
+        throw new IllegalArgumentException("BUSINESS_OUTPUT_TYPE_REQUIRED");
+    }
+
+    /** {@inheritDoc} 输出类型在读取凭据与创建工作区前检查，不按角色猜测。 */
+    @Override
+    public Invocation startContextual(
+            UUID runId,
+            String role,
+            String prompt,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis,
+            Class<?> outputType) {
+        BusinessOutputSchema.requireType(outputType);
+        if ((sessions == null && contexts == null) || json == null || basis == null) {
             throw new IllegalStateException("CONTEXT_NOT_CONFIGURED");
-        return startInvocation(runId, role, prompt, false, basis);
+        }
+        return startInvocation(runId, role, prompt, false, basis, outputType);
     }
 
     /**
@@ -298,6 +309,27 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             String prompt,
             boolean allowTools,
             com.lawrence.travel.application.memory.AgentContext.Basis basis) {
+        return startInvocation(runId, role, prompt, allowTools, basis, null);
+    }
+
+    /**
+     * 创建带明确输出类型的调用，类型不会改变上下文或工具权限。
+     *
+     * @param runId 原运行
+     * @param role 模型角色
+     * @param prompt 当前请求
+     * @param allowTools 原工具权限
+     * @param basis 权威输入版本
+     * @param outputType 当前业务DTO，旧普通调用可空
+     * @return 使用原计量与取消机制的句柄
+     */
+    private Invocation startInvocation(
+            UUID runId,
+            String role,
+            String prompt,
+            boolean allowTools,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis,
+            Class<?> outputType) {
         if (admission == null) throw new IllegalStateException("EXTERNAL_DISABLED");
         if (runId == null || role == null || !models.containsKey(role)) {
             throw new IllegalArgumentException("MODEL_NOT_APPROVED");
@@ -511,7 +543,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                     if (firstHarness.compareAndSet(true, false)) harness.close();
                                 },
                                 basis != null,
-                                json);
+                                json,
+                                outputType);
                         if (invocation.result.isCompletedExceptionally())
                             roleSpan.fail(
                                     invocation.cancelled.get()
@@ -648,6 +681,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
          * @param cleanupUnused 取消发生在建轮前时释放预建资源
          * @param businessJson 应用声明的业务JSON模式，非上下文调用仍要求answer字符串
          * @param json 严格业务编解码器，不额外开放工具或写入权限
+         * @param outputType 本次输出DTO，旧调用可空
          */
         private void execute(
                 Supplier<List<Msg>> prompt,
@@ -655,7 +689,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                 Supplier<HarnessAgent> factory,
                 Runnable cleanupUnused,
                 boolean businessJson,
-                com.lawrence.travel.application.port.InteractionCodec json) {
+                com.lawrence.travel.application.port.InteractionCodec json,
+                Class<?> outputType) {
             executionThread = Thread.currentThread();
             try (transport) {
                 String answer =
@@ -668,7 +703,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                 cancelled::get,
                                 activeHarness::set,
                                 businessJson,
-                                json);
+                                json,
+                                outputType);
                 if (!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
                 if (!cancelled.get()) {

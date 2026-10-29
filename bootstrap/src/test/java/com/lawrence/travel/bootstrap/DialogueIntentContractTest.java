@@ -99,7 +99,8 @@ class DialogueIntentContractTest {
                                 org.mockito.ArgumentMatchers.eq(claim.budgetId()),
                                 org.mockito.ArgumentMatchers.eq("coordinator"),
                                 org.mockito.ArgumentMatchers.anyString(),
-                                org.mockito.ArgumentMatchers.any()))
+                                org.mockito.ArgumentMatchers.any(),
+                                org.mockito.ArgumentMatchers.eq(DialogueIntent.Result.class)))
                 .thenReturn(invocation);
         var adapter =
                 new com.lawrence.travel.agent.runtime.DialogueIntentInterpreter(
@@ -113,7 +114,8 @@ class DialogueIntentContractTest {
                         org.mockito.ArgumentMatchers.eq(claim.budgetId()),
                         org.mockito.ArgumentMatchers.eq("coordinator"),
                         prompt.capture(),
-                        org.mockito.ArgumentMatchers.any());
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.eq(DialogueIntent.Result.class));
         assertThat(prompt.getValue())
                 .contains(
                         "你好",

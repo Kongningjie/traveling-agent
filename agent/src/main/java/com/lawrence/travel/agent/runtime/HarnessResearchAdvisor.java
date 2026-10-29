@@ -135,7 +135,8 @@ public final class HarnessResearchAdvisor implements ResearchAdvisor {
                         role,
                         prompt,
                         new com.lawrence.travel.application.memory.AgentContext.Basis(
-                                revision, null))) {
+                                revision, null),
+                        type)) {
             try {
                 return json.decode(
                         invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS), type);

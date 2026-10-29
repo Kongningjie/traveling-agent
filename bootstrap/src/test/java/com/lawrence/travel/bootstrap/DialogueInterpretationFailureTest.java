@@ -26,7 +26,15 @@ class DialogueInterpretationFailureTest {
     void malformedResultHasOnlyDecodeCode() {
         var runtime = mock(AgentRuntimePort.class);
         var call = mock(AgentRuntimePort.Invocation.class);
-        when(runtime.startContextual(any(), anyString(), anyString(), any())).thenReturn(call);
+        when(runtime.startContextual(
+                        any(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        org.mockito.ArgumentMatchers.eq(
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result
+                                        .class)))
+                .thenReturn(call);
         when(call.result()).thenReturn(CompletableFuture.completedFuture("SYNTHETIC_PRIVATE_BODY"));
         org.mockito.Mockito.doThrow(new IllegalStateException("SYNTHETIC_PRIVATE_CLOSE_FAILURE"))
                 .when(call)
@@ -44,7 +52,14 @@ class DialogueInterpretationFailureTest {
     @Test
     void startAndExecutionFailuresHaveDifferentCodes() {
         var runtime = mock(AgentRuntimePort.class);
-        when(runtime.startContextual(any(), anyString(), anyString(), any()))
+        when(runtime.startContextual(
+                        any(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        org.mockito.ArgumentMatchers.eq(
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result
+                                        .class)))
                 .thenThrow(new IllegalStateException("SYNTHETIC_PRIVATE_FAILURE"));
         assertThatThrownBy(() -> adapter(runtime).interpret(claim()))
                 .hasMessage("DIALOGUE_MODEL_START_FAILED")
@@ -52,7 +67,14 @@ class DialogueInterpretationFailureTest {
         var call = mock(AgentRuntimePort.Invocation.class);
         org.mockito.Mockito.doReturn(call)
                 .when(runtime)
-                .startContextual(any(), anyString(), anyString(), any());
+                .startContextual(
+                        any(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        org.mockito.ArgumentMatchers.eq(
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result
+                                        .class));
         when(call.result())
                 .thenReturn(
                         CompletableFuture.failedFuture(
@@ -68,7 +90,15 @@ class DialogueInterpretationFailureTest {
     void admissionFailureKeepsItsOriginalType() {
         var runtime = mock(AgentRuntimePort.class);
         var call = mock(AgentRuntimePort.Invocation.class);
-        when(runtime.startContextual(any(), anyString(), anyString(), any())).thenReturn(call);
+        when(runtime.startContextual(
+                        any(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        org.mockito.ArgumentMatchers.eq(
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result
+                                        .class)))
+                .thenReturn(call);
         var denial = new CallRejectedException(CallRejectedException.Reason.CALL_BUDGET_EXHAUSTED);
         when(call.result()).thenReturn(CompletableFuture.failedFuture(denial));
         assertThatThrownBy(() -> adapter(runtime).interpret(claim())).isSameAs(denial);

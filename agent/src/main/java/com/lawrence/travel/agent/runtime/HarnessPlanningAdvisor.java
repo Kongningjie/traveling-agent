@@ -187,7 +187,7 @@ public final class HarnessPlanningAdvisor implements PlanningAdvisor {
             String prompt,
             Class<T> type,
             com.lawrence.travel.application.memory.AgentContext.Basis basis) {
-        try (var invocation = runtime.startContextual(run, role, prompt, basis)) {
+        try (var invocation = runtime.startContextual(run, role, prompt, basis, type)) {
             try {
                 return json.decode(
                         invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS), type);

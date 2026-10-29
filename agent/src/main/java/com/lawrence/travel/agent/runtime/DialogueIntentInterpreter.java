@@ -82,7 +82,8 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
                             "coordinator",
                             prompt,
                             new com.lawrence.travel.application.memory.AgentContext.Basis(
-                                    0, null, c.token()));
+                                    0, null, c.token()),
+                            DialogueIntent.Result.class);
         } catch (RuntimeException failure) {
             throw classified(failure, Code.MODEL_START_FAILED);
         }

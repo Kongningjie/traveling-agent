@@ -65,7 +65,8 @@ public final class NegotiationInterpreter implements InputInterpreter {
                         "coordinator",
                         prompt,
                         new com.lawrence.travel.application.memory.AgentContext.Basis(
-                                context.revision().revision(), null))) {
+                                context.revision().revision(), null),
+                        Negotiation.Interpretation.class)) {
             try {
                 return json.decode(
                         invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS),

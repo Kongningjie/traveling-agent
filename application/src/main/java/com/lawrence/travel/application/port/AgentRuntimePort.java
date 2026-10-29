@@ -36,6 +36,25 @@ public interface AgentRuntimePort {
         return startWithoutTools(runId, role, prompt);
     }
 
+    /**
+     * 按本次业务DTO约束模型返回；生产适配器将其转换为框架Schema。
+     *
+     * @param runId 原运行预算
+     * @param role 配置角色，不能代替本次输出契约
+     * @param prompt 当前请求
+     * @param basis 权威版本
+     * @param outputType 调用方随后解码的业务DTO，不允许由用户输入指定
+     * @return 原预算下的可取消句柄；兼容替身默认沿用旧接口，不生成Schema
+     */
+    default Invocation startContextual(
+            java.util.UUID runId,
+            String role,
+            String prompt,
+            com.lawrence.travel.application.memory.AgentContext.Basis basis,
+            Class<?> outputType) {
+        return startContextual(runId, role, prompt, basis);
+    }
+
     /** 隔离本次执行的结果及取消能力，不暴露 SDK 类型。 */
     interface Invocation extends AutoCloseable {
         /**

@@ -20,6 +20,30 @@ import static org.mockito.Mockito.when;
 class HarnessRuntimeTest {
     @TempDir Path workspace;
 
+    /** 无业务契约或错误类型在读取凭据、上下文和计量前拒绝。 */
+    @Test
+    void contextualCallsRequireExplicitSupportedOutputType() {
+        var admission = mock(ModelCallAdmission.class);
+        var runtime =
+                new HarnessAgentRuntimeAdapter(
+                        admission,
+                        Map.of("coordinator", "local"),
+                        () -> {
+                            throw new AssertionError("MUST_NOT_READ_CREDENTIAL");
+                        },
+                        workspace);
+        var basis = new com.lawrence.travel.application.memory.AgentContext.Basis(0, null);
+        UUID run = UUID.randomUUID();
+        assertThatThrownBy(() -> runtime.startContextual(run, "coordinator", "本地", basis))
+                .hasMessage("BUSINESS_OUTPUT_TYPE_REQUIRED");
+        assertThatThrownBy(
+                        () -> runtime.startContextual(run, "coordinator", "本地", basis, Map.class))
+                .hasMessage("BUSINESS_OUTPUT_TYPE_INVALID");
+        assertThatThrownBy(() -> runtime.startContextual(run, "coordinator", "本地", basis, null))
+                .hasMessage("BUSINESS_OUTPUT_TYPE_INVALID");
+        org.mockito.Mockito.verifyNoInteractions(admission);
+    }
+
     /** 门禁拒绝在 SDK 发送前生效，异步调用方得到可处理的暂停原因。 */
     @Test
     void forwardsAdmissionReasonWithoutRetrying() {

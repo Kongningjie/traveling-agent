@@ -26,7 +26,9 @@ public final class ControlledHarnessCall {
         /** answer封装混入其他字段或类型错误。 */
         ENVELOPE,
         /** 返回了空对象。 */
-        EMPTY
+        EMPTY,
+        /** 返回对象不满足本次业务Schema。 */
+        SCHEMA
     }
 
     /** 用固定原因标记返回结构问题，保持既有异常消息和拒绝行为。 */
@@ -129,6 +131,55 @@ public final class ControlledHarnessCall {
             Consumer<HarnessAgent> active,
             boolean businessJson,
             InteractionCodec json) {
+        return execute(
+                factory,
+                normal,
+                recovery,
+                guard,
+                safety,
+                cancelled,
+                active,
+                businessJson,
+                json,
+                null);
+    }
+
+    /**
+     * 将本次业务DTO的Schema交给Harness；原结果解析、预算与取消机制保持不变。
+     *
+     * @param factory 隔离框架实例
+     * @param normal 完整输入
+     * @param recovery 同预算超限恢复
+     * @param guard 返回前权威检查
+     * @param safety 输出检查
+     * @param cancelled 取消标志
+     * @param active 当前框架句柄
+     * @param businessJson 业务JSON模式
+     * @param json 正文兜底的严格编解码器
+     * @param outputType 明确的业务输出类型；为空仅用于旧调用兼容
+     * @return 仍须调用方业务校验的JSON
+     */
+    public static String execute(
+            Supplier<HarnessAgent> factory,
+            Supplier<List<Msg>> normal,
+            Supplier<List<Msg>> recovery,
+            Runnable guard,
+            SafetyGate safety,
+            BooleanSupplier cancelled,
+            Consumer<HarnessAgent> active,
+            boolean businessJson,
+            InteractionCodec json,
+            Class<?> outputType) {
+        if (outputType != null && !businessJson) {
+            throw new IllegalArgumentException("BUSINESS_OUTPUT_MODE_INVALID");
+        }
+        var contract = outputType == null ? null : BusinessOutputSchema.create(outputType);
+        var schema =
+                contract == null
+                        ? null
+                        : io.agentscope.core.util.JsonUtils.getJsonCodec()
+                                .convertValue(
+                                        contract, com.fasterxml.jackson.databind.JsonNode.class);
         for (int attempt = 0; attempt < 2; attempt++) {
             if (cancelled.getAsBoolean()) throw new IllegalStateException("MODEL_CANCELLED");
             try (var harness = factory.get()) {
@@ -137,16 +188,25 @@ public final class ControlledHarnessCall {
                 var messages = (attempt == 0 ? normal : recovery).get();
                 if (cancelled.getAsBoolean()) throw new IllegalStateException("MODEL_CANCELLED");
                 var result =
-                        harness.getDelegate()
-                                .call(
-                                        messages,
-                                        businessJson
-                                                ? Map.class
-                                                : RestrictedHarnessFactory.StructuredReply.class)
-                                .block();
+                        schema != null
+                                ? harness.getDelegate().call(messages, schema).block()
+                                : harness.getDelegate()
+                                        .call(
+                                                messages,
+                                                businessJson
+                                                        ? Map.class
+                                                        : RestrictedHarnessFactory.StructuredReply
+                                                                .class)
+                                        .block();
                 if (result == null) throw new OutputFailure(OutputProblem.MISSING);
                 String text = readResult(result, businessJson, json, safety);
                 safety.require("OUTPUT", text);
+                // 两种返回路径检查同一份契约；不保存验证器返回的字段值或详细异常。
+                if (contract != null
+                        && io.agentscope.core.tool.ToolValidator.validateInput(text, contract)
+                                != null) {
+                    throw new OutputFailure(OutputProblem.SCHEMA);
+                }
                 guard.run();
                 return text;
             } catch (RuntimeException failure) {

@@ -122,7 +122,7 @@ class Dev35TripDemoTest {
                                             call.callRealMethod());
                         })
                 .when(runtime)
-                .startContextual(any(), any(), any(), any());
+                .startContextual(any(), any(), any(), any(), any());
         assertThat(properties.models())
                 .containsEntry("coordinator", "qwen3.8-flash")
                 .containsEntry("planner", "qwen3.8-flash")

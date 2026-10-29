@@ -276,7 +276,8 @@ class ResearchRulesTest {
                                 org.mockito.ArgumentMatchers.eq(run),
                                 org.mockito.ArgumentMatchers.eq("research"),
                                 org.mockito.ArgumentMatchers.anyString(),
-                                org.mockito.ArgumentMatchers.any()))
+                                org.mockito.ArgumentMatchers.any(),
+                                org.mockito.ArgumentMatchers.eq(Research.Extraction.class)))
                 .thenReturn(invocation);
         org.mockito.Mockito.when(invocation.result())
                 .thenReturn(

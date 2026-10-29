@@ -20,6 +20,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 使用真实Harness delegate与本地Model，验证恢复、消息角色与安全展示边界。 */
 class ControlledHarnessCallTest {
+    /** 正文兜底也执行本次Schema，不能把缺失布尔字段默认为false后当作合法结果。 */
+    @Test
+    void typedTextFallbackCannotBypassRequiredFields() {
+        Class<?> type =
+                com.lawrence.travel.application.interaction.Negotiation.Interpretation.class;
+        assertThatThrownBy(
+                        () ->
+                                plainFixture(
+                                        "{\"facts\":[],\"clarification\":\"SYNTHETIC_PRIVATE\"}",
+                                        true,
+                                        true,
+                                        type))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
+                .hasMessage("MODEL_OUTPUT_INVALID")
+                .satisfies(
+                        failure -> {
+                            assertThat(
+                                            ((ControlledHarnessCall.OutputFailure) failure)
+                                                    .diagnosticCode())
+                                    .isEqualTo("MODEL_OUTPUT_SCHEMA");
+                            assertThat(failure.getCause()).isNull();
+                        });
+        assertThat(
+                        plainFixture(
+                                "{\"facts\":[],\"outsideScope\":false,\"clarification\":\"\"}",
+                                true,
+                                true,
+                                type))
+                .contains("outsideScope");
+    }
+
     /** 完整合法JSON正文可进入同一业务解码器，保留原字段，不靠框架元数据判定业务有效性。 */
     @Test
     void completeBusinessJsonTextUsesStrictApplicationCodec() {
@@ -100,6 +131,20 @@ class ControlledHarnessCallTest {
      * @return 完整规范化产物；不发外部请求
      */
     private String plainFixture(String text, boolean businessJson, boolean withCodec) {
+        return plainFixture(text, businessJson, withCodec, null);
+    }
+
+    /**
+     * 在本地纯文本夹具上显式指定Schema，与旧无契约夹具共用相同执行链。
+     *
+     * @param text 合成返回
+     * @param businessJson 应用声明模式
+     * @param withCodec 是否注入严格编解码器
+     * @param outputType 业务输出类型，兼容调用可空
+     * @return 未改变字段含义的最终产物
+     */
+    private String plainFixture(
+            String text, boolean businessJson, boolean withCodec, Class<?> outputType) {
         var model =
                 new HarnessProbeFixture.ProbeModel(
                         (messages, n) -> HarnessProbeFixture.answer(text));
@@ -126,7 +171,8 @@ class ControlledHarnessCallTest {
                                 ? new com.lawrence.travel.infrastructure.interaction
                                         .InteractionJson(
                                         new com.lawrence.travel.infrastructure.travel.TravelJson())
-                                : null);
+                                : null,
+                        outputType);
         assertThat(checks).hasValue(1);
         assertThat(model.requests).hasSize(1);
         return result;
@@ -446,7 +492,8 @@ class ControlledHarnessCallTest {
                         java.util.UUID.randomUUID(),
                         "coordinator",
                         "当前输入",
-                        new com.lawrence.travel.application.memory.AgentContext.Basis(0, null));
+                        new com.lawrence.travel.application.memory.AgentContext.Basis(0, null),
+                        com.lawrence.travel.domain.interaction.DialogueIntent.Result.class);
         assertThat(entered.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
         var closer =
                 Thread.ofVirtual()
