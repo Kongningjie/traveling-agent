@@ -51,13 +51,29 @@ x-dependencies: &dependencies
   minio: {condition: service_healthy}
 
 services:
+  gateway:
+    <<: *common
+    # 复用已固定的Node运行时；不挂载Docker socket，也不接收供应商或平台登录密钥。
+    image: docker.langfuse.com/langfuse/langfuse@sha256:5338ee88d4ec07028836f6af9d98a9b411f8eeda0ad9fae66502d849b04da724
+    networks: [evaluation, entry]
+    entrypoint: ["node", "/guard/gateway.mjs"]
+    mem_limit: 256m
+    ports: ["127.0.0.1:3100:3000"]
+    environment:
+      LF_GATE_TOKEN: ${LF_GATE_TOKEN:?初始化本地访问闸门认证}
+    volumes: ["./scripts/langfuse/gateway.mjs:/guard/gateway.mjs:ro"]
+    depends_on:
+      web: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/_gateway/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
   web:
     <<: *common
-    # Docker Desktop 需要独立入口网；关闭伪装不等于完全断网，仅回环开放 Web。
-    networks: [evaluation, entry]
+    # 原始Web仅连接内部网；应用入口由gateway发布，不保留调试直连端口。
     image: docker.langfuse.com/langfuse/langfuse@sha256:5338ee88d4ec07028836f6af9d98a9b411f8eeda0ad9fae66502d849b04da724
     mem_limit: 2g
-    ports: ["127.0.0.1:3100:3000"]
     environment:
       <<: *env
       HOSTNAME: 0.0.0.0
