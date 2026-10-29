@@ -126,6 +126,9 @@ class DialogueIntentContractTest {
                         "无法确定规范值时省略该fact",
                         "只输出fixedStatus=NONE，不输出空fixedArrangements",
                         "其他字段不输出operation")
+                .contains(
+                        "resolvedInputs只能选取本次context.unresolved[].id",
+                        "unresolved为空或没有解决其中诉求时必须返回[]")
                 .doesNotContain("所有字符串必填，未知用空串");
         org.mockito.Mockito.verify(invocation).close();
     }

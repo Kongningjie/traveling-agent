@@ -434,7 +434,10 @@ public final class DialogueService implements BackgroundWorkSource {
                         sources.put(
                                 UUID.fromString((String) item.get("id")),
                                 (String) item.get("text"));
-            require(sources.keySet().containsAll(result.resolvedInputs()));
+            if (!sources.keySet().containsAll(result.resolvedInputs())) {
+                throw new DialogueInterpretationFailure(
+                        DialogueInterpretationFailure.Code.RESOLVED_INPUT_INVALID);
+            }
             result.validateSources(
                     c.text(), result.resolvedInputs().stream().map(sources::get).toList());
             phase.set(FailurePhase.COMMIT);

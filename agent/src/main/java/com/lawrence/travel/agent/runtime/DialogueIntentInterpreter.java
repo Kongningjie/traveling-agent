@@ -63,7 +63,7 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
                         + "reply自然简短，区分事实/建议；无证据不编造实时天气/价格/营业时间，不声称已执行/接受/停止/保存偏好。"
                         + "普通规划缺项由应用追问，不写clarification；语义歧义、冲突或修改范围不清才澄清。"
                         + "缺少预算口径、已订安排状态等关键字段时，回复说明仍待补充或确认；不得承诺按通用方案、默认预算或默认没有预订继续。未采纳的建议只能表述为待确认建议，不能当成已确认需求。"
-                        + "unresolved是尚未完成的原始诉求。本轮明确澄清其中某条时在resolvedInputs返回该ID，同时保留它仍有效的全部要求，facts可引用这些原文。无关聊天不能解除旧问题，操作及偏好授权只能来自本轮。"
+                        + "unresolved是尚未完成的原始诉求。resolvedInputs只能选取本次context.unresolved[].id，本轮确实澄清对应诉求时才返回；unresolved为空或没有解决其中诉求时必须返回[]。不能填本轮消息ID、聊天/任务/问题卡/预算ID、普通历史消息ID，也不能猜测或新建ID。保留被解决诉求仍有效的全部要求，facts可引用这些原文。无关聊天不能解除旧问题，操作及偏好授权只能来自本轮。"
                         + json.encode(
                                 Map.of(
                                         "context",

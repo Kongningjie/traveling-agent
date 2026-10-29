@@ -14,6 +14,8 @@ public final class DialogueInterpretationFailure extends RuntimeException {
         MODEL_INTERRUPTED,
         /** 等待结果超时，用量仍按原计量门禁处理。 */
         MODEL_TIMEOUT,
+        /** 模型声称解决的消息不在服务端本轮待解决列表中。 */
+        RESOLVED_INPUT_INVALID,
         /** 返回内容不能解码为合法业务结构，含字段/枚举契约不满足。 */
         RESULT_DECODE_FAILED
     }

@@ -216,6 +216,41 @@ class DialogueIntegrationTest {
     @org.springframework.boot.test.web.server.LocalServerPort private int port;
     private final List<String> sessionIds = new ArrayList<>();
 
+    /** 不允许用本轮或未知消息ID解除旧问题；拒绝后保留输入，且不创建旅行任务。 */
+    @Test
+    void unknownResolvedInputIsRejectedWithoutChangingTrip() {
+        var user = actor();
+        UUID chat = UUID.randomUUID();
+        UUID input = UUID.randomUUID();
+        String text = "开始规划北京旅行";
+        service.send(user, chat, input, text);
+        process(
+                new DialogueIntent.Result(
+                        List.of(
+                                new DialogueIntent.Intent(
+                                        DialogueIntent.Kind.PLANNING,
+                                        DialogueIntent.Action.START_PLAN,
+                                        text)),
+                        List.of(new DialogueIntent.Fact("cities", "北京", "北京")),
+                        "已记录",
+                        "",
+                        null,
+                        "",
+                        "",
+                        "",
+                        List.of(input)));
+        var view = service.read(user, chat);
+        assertThat(view.messages().getLast().state()).isEqualTo("PAUSED");
+        assertThat(view.messages().getLast().error()).isEqualTo("DIALOGUE_RESOLVED_INPUT_INVALID");
+        assertThat(view.chat().taskId()).isNull();
+        assertThat(
+                        jdbc.queryForList(
+                                "SELECT code FROM problem_event WHERE user_id=?",
+                                String.class,
+                                user.id()))
+                .contains("DIALOGUE_RESOLVED_INPUT_INVALID");
+    }
+
     /** 模型、引用与需求预检固定码实际写入输入和问题事件；不保留底层合成错误正文。 */
     @Test
     void diagnosticCodesPersistWithoutExceptionBody() {
