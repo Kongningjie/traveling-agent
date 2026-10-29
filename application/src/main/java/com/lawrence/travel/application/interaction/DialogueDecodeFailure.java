@@ -12,7 +12,7 @@ public final class DialogueDecodeFailure extends RuntimeException {
         ENUM,
         /** UUID转换失败。 */
         UUID,
-        /** 领域构造器拒绝；路径只定位到对象，不能猜具体不变量。 */
+        /** 领域构造器拒绝；自有原因枚举可细化字段，否则只定位到对象。 */
         CONSTRAINT,
         /** 无法可靠分类，不输出原始异常。 */
         UNKNOWN

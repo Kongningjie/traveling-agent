@@ -121,7 +121,12 @@ class DialogueIntentContractTest {
                         "\"facts\":[]",
                         "无事实时facts必须为[]，不能为{}",
                         "直接返回下列完整业务JSON对象，不添加answer外层",
-                        "城市名称沿用用户原文");
+                        "城市名称沿用用户原文",
+                        "每项field/value/quote必须是非空字符串",
+                        "无法确定规范值时省略该fact",
+                        "只输出fixedStatus=NONE，不输出空fixedArrangements",
+                        "其他字段不输出operation")
+                .doesNotContain("所有字符串必填，未知用空串");
         org.mockito.Mockito.verify(invocation).close();
     }
 

@@ -142,14 +142,60 @@ public final class DialogueIntent {
         /** 有界字段，详细旅行规则仍由 RequirementFields 校验。 */
         public Fact {
             operation = operation == null ? RequirementFields.PreferenceOperation.ADD : operation;
-            if (field == null
-                    || value == null
-                    || value.isBlank()
-                    || value.length() > 500
-                    || quote == null
-                    || quote.isBlank()
-                    || operation == RequirementFields.PreferenceOperation.REPLACE
-                            && !RequirementFields.isPreference(field)) invalid();
+            if (field == null) {
+                throw new FactViolation(FactProblem.FIELD_MISSING);
+            }
+            if (value == null || value.isBlank()) {
+                throw new FactViolation(FactProblem.VALUE_EMPTY);
+            }
+            if (value.length() > 500) {
+                throw new FactViolation(FactProblem.VALUE_TOO_LONG);
+            }
+            if (quote == null || quote.isBlank()) {
+                throw new FactViolation(FactProblem.QUOTE_EMPTY);
+            }
+            if (operation == RequirementFields.PreferenceOperation.REPLACE
+                    && !RequirementFields.isPreference(field)) {
+                throw new FactViolation(FactProblem.REPLACE_NON_PREFERENCE);
+            }
+        }
+    }
+
+    /** 事实构造失败的固定原因，不保存模型值或原文。 */
+    public enum FactProblem {
+        /** 字段缺失。 */
+        FIELD_MISSING,
+        /** 规范值缺失或空白。 */
+        VALUE_EMPTY,
+        /** 规范值超过既有500字符限制。 */
+        VALUE_TOO_LONG,
+        /** 连续原文依据缺失或空白。 */
+        QUOTE_EMPTY,
+        /** 非偏好字段不能使用偏好的整体替换操作。 */
+        REPLACE_NON_PREFERENCE
+    }
+
+    /** 仅携带固定枚举的事实约束异常；保持原IllegalArgumentException契约和消息。 */
+    public static final class FactViolation extends IllegalArgumentException {
+        private final FactProblem problem;
+
+        /**
+         * 标记触发的既有事实规则，不携带输入、原因链或字段值。
+         *
+         * @param problem 固定原因
+         */
+        public FactViolation(FactProblem problem) {
+            super("DIALOGUE_INTERPRETATION_INVALID");
+            this.problem = java.util.Objects.requireNonNull(problem);
+        }
+
+        /**
+         * 返回事实构造失败的固定原因。
+         *
+         * @return 无原始值的原因枚举
+         */
+        public FactProblem problem() {
+            return problem;
         }
     }
 

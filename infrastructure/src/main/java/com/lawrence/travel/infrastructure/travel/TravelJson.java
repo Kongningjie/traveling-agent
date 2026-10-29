@@ -4,6 +4,7 @@ import com.lawrence.travel.application.travel.TravelStorageFailure;
 import com.lawrence.travel.application.interaction.DialogueDecodeFailure;
 import com.lawrence.travel.application.interaction.DialogueDecodeFailure.Kind;
 import com.lawrence.travel.application.interaction.DialogueDecodeFailure.Field;
+import com.lawrence.travel.domain.interaction.DialogueIntent.FactViolation;
 import com.lawrence.travel.domain.itinerary.ItineraryVersion;
 import com.lawrence.travel.domain.travel.TravelTask;
 import java.nio.charset.StandardCharsets;
@@ -71,7 +72,7 @@ public final class TravelJson {
     }
 
     /**
-     * 将外层answer内的业务JSON解码为DialogueIntent.Result，并生成可脱敏定位的协议错误。
+     * 将模型业务JSON解码为DialogueIntent.Result，并生成可脱敏定位的协议错误。
      *
      * @param text 不可信模型业务JSON
      * @return 严格领域结果，不修复或容忍非法结构
@@ -87,7 +88,7 @@ public final class TravelJson {
             if (result == null) throw new DialogueDecodeFailure(Kind.SHAPE, Field.ROOT);
             return result;
         } catch (tools.jackson.core.JacksonException failure) {
-            // 不读取message、source、非法值或cause；Jackson路径只用于匹配编译期字段白名单。
+            // 只读取路径和受控领域原因枚举，不保存message、source、非法值或原因链。
             var kind = Kind.UNKNOWN;
             if (failure instanceof tools.jackson.core.exc.StreamReadException) kind = Kind.SYNTAX;
             else if (failure instanceof tools.jackson.databind.exc.InvalidFormatException format
@@ -99,7 +100,23 @@ public final class TravelJson {
                 kind = Kind.CONSTRAINT;
             else if (failure instanceof tools.jackson.databind.exc.MismatchedInputException)
                 kind = Kind.SHAPE;
-            throw new DialogueDecodeFailure(kind, dialogueField(failure));
+            Field field = dialogueField(failure);
+            if (kind == Kind.CONSTRAINT && field == Field.FACTS) {
+                Throwable cause = failure;
+                for (int depth = 0; cause != null && depth < 8; depth++, cause = cause.getCause()) {
+                    if (cause instanceof FactViolation violation) {
+                        field =
+                                switch (violation.problem()) {
+                                    case FIELD_MISSING -> Field.FACT_FIELD;
+                                    case VALUE_EMPTY, VALUE_TOO_LONG -> Field.FACT_VALUE;
+                                    case QUOTE_EMPTY -> Field.FACT_QUOTE;
+                                    case REPLACE_NON_PREFERENCE -> Field.FACT_OPERATION;
+                                };
+                        break;
+                    }
+                }
+            }
+            throw new DialogueDecodeFailure(kind, field);
         }
     }
 

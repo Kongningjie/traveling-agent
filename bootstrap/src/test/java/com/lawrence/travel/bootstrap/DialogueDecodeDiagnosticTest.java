@@ -44,7 +44,7 @@ class DialogueDecodeDiagnosticTest {
         rejects(json.encode(value), Kind.UUID, Field.RESOLVED_INPUTS);
     }
 
-    /** 非软偏好使用REPLACE仍拒绝，仅定位构造对象，不猜测具体失败字段或放宽领域限制。 */
+    /** 非软偏好使用REPLACE仍拒绝；自有原因枚举可以定位字段，其他构造器错误保持对象级定位。 */
     @Test
     void constructorConstraintsRemainStrict() {
         var value = valid();
@@ -60,12 +60,78 @@ class DialogueDecodeDiagnosticTest {
                                 "修改",
                                 "operation",
                                 "REPLACE")));
-        rejects(json.encode(value), Kind.CONSTRAINT, Field.FACTS);
+        rejects(json.encode(value), Kind.CONSTRAINT, Field.FACT_OPERATION);
         value = valid();
         value.put(
                 "intents",
                 List.of(Map.of("kind", "CONVERSATION", "action", "SUPPLEMENT", "quote", "修改")));
         rejects(json.encode(value), Kind.CONSTRAINT, Field.INTENTS);
+    }
+
+    /** 空值、缺失字段和超长值仍拒绝，只返回固定字段身份，不返回事实值或原文。 */
+    @Test
+    void factConstraintsHaveSafeFieldDiagnostics() {
+        for (String key : List.of("field", "value", "quote")) {
+            Field expected =
+                    switch (key) {
+                        case "field" -> Field.FACT_FIELD;
+                        case "value" -> Field.FACT_VALUE;
+                        default -> Field.FACT_QUOTE;
+                    };
+            var fact =
+                    new LinkedHashMap<String, Object>(
+                            Map.of(
+                                    "field",
+                                    "pace",
+                                    "value",
+                                    "SYNTHETIC_PRIVATE_VALUE",
+                                    "quote",
+                                    "修改"));
+            fact.remove(key);
+            var value = valid();
+            value.put("facts", List.of(fact));
+            rejects(json.encode(value), Kind.CONSTRAINT, expected);
+            if (!key.equals("field")) {
+                fact.put(key, "  ");
+                rejects(json.encode(value), Kind.CONSTRAINT, expected);
+            }
+        }
+        var value = valid();
+        value.put(
+                "facts", List.of(Map.of("field", "pace", "value", "x".repeat(501), "quote", "修改")));
+        rejects(json.encode(value), Kind.CONSTRAINT, Field.FACT_VALUE);
+    }
+
+    /** 合法的偏好整体替换和非偏好缺省ADD仍可编解码，不把诊断改动变成放宽校验。 */
+    @Test
+    void validFactOperationsStillDecode() {
+        var value = valid();
+        value.put(
+                "facts",
+                List.of(
+                        Map.of(
+                                "field",
+                                "pace",
+                                "value",
+                                "慢游",
+                                "quote",
+                                "修改",
+                                "operation",
+                                "REPLACE")));
+        assertThat(
+                        codec.decode(json.encode(value), DialogueIntent.Result.class)
+                                .facts()
+                                .getFirst()
+                                .operation()
+                                .name())
+                .isEqualTo("REPLACE");
+        assertThatThrownBy(() -> new DialogueIntent.Fact("pace", "", "修改"))
+                .isInstanceOf(DialogueIntent.FactViolation.class)
+                .hasMessage("DIALOGUE_INTERPRETATION_INVALID")
+                .satisfies(
+                        failure ->
+                                assertThat(((DialogueIntent.FactViolation) failure).problem())
+                                        .isEqualTo(DialogueIntent.FactProblem.VALUE_EMPTY));
     }
 
     /** 语法、重复键、尾随对象和空根均不自动修复或截断后接受。 */
