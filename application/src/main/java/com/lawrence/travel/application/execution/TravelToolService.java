@@ -19,7 +19,6 @@ public final class TravelToolService {
     private final ToolEvidenceJournal journal;
     private final BudgetLedger ledger;
     private final RunLimits limits;
-    private final Map<String, Grant> grants;
     private final boolean enabled;
     private final Clock clock;
     private final com.lawrence.travel.application.safety.SafetyGate safety;
@@ -27,11 +26,12 @@ public final class TravelToolService {
 
     /**
      * 绑定工具与持久化应用端口，默认开关由装配提供。
+     *
      * @param tools 供应商适配
-     * @param journal 免费预占和证据仓储
+     * @param journal 调用记录和证据仓储
      * @param ledger 原运行预算
      * @param limits 原运行限制
-     * @param grants 已核实服务组资源
+     * @param grants 兼容旧配置的服务组记录，不再参与准入
      * @param enabled 是否允许真实调用
      * @param clock 时间源
      */
@@ -59,7 +59,7 @@ public final class TravelToolService {
      * @param journal 证据
      * @param ledger 计量
      * @param limits 运行上限
-     * @param grants 免费保护
+     * @param grants 兼容旧配置，不执行免费额度限制
      * @param enabled 当前授权
      * @param clock 时间
      * @param safety 共用文本边界，覆盖直接调查和Agent工具
@@ -90,7 +90,7 @@ public final class TravelToolService {
      * @param journal 证据
      * @param ledger 原预算
      * @param limits 上限
-     * @param grants 免费保护
+     * @param grants 兼容旧配置，不执行免费额度限制
      * @param enabled 当前授权
      * @param clock 时钟
      * @param safety 安全
@@ -112,13 +112,13 @@ public final class TravelToolService {
         this.journal = journal;
         this.ledger = ledger;
         this.limits = limits;
-        this.grants = Map.copyOf(grants);
         this.enabled = enabled;
         this.clock = clock;
     }
 
     /**
      * 调用前提交两份保守预占，完成后保存证据；中途失败不自动退回次数或重试。
+     *
      * @param runId 已建立的原运行
      * @param operation 白名单操作
      * @param arguments 业务参数
@@ -146,21 +146,8 @@ public final class TravelToolService {
                             case WEATHER -> "amap-weather";
                             case SEARCH, EXTRACT -> "tavily";
                         };
-                Grant grant = grants.get(group);
-                if (grant == null
-                        || !grant.freeOnlyConfirmed()
-                        || clock.instant().isBefore(grant.verifiedAt())
-                        || !clock.instant().isBefore(grant.validUntil())) {
-                    throw new IllegalStateException("TOOL_QUOTA_UNVERIFIED");
-                }
-                // 免费资源先预占；若运行预算随后失败，资源记录仍保守保留，不能为继续调用删记录。
-                UUID id =
-                        journal.reserve(
-                                runId,
-                                group,
-                                grant.verifiedAt(),
-                                grant.validUntil(),
-                                grant.allowance());
+                // 先提交调用记录；执行次数与耗时仍由原运行预算约束。
+                UUID id = journal.reserve(runId, group);
                 long started = System.nanoTime();
                 BudgetLedger.Reservation meter = null;
                 try {
@@ -202,7 +189,8 @@ public final class TravelToolService {
     }
 
     /**
-     * 已确认免费资源快照；不是付费授权，不自动跨计费周期续期。
+     * 兼容旧配置的历史免费资源记录；当前调用链不再读取这些字段作准入判断。
+     *
      * @param verifiedAt 核实时间
      * @param validUntil 不晚于重置时间的保守截止
      * @param allowance 可预占次数或 credits

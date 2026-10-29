@@ -269,7 +269,7 @@ class Dev35HttpAcceptanceTest {
      */
     @Test
     void runsLockedConversationCasesOverHttp() throws Exception {
-        assertThat(properties.models().get("coordinator")).isEqualTo("qwen3.8-27b");
+        assertThat(properties.models().get("coordinator")).isEqualTo("qwen3.8-flash");
         if (!real())
             org.mockito.Mockito.doAnswer(invocation -> localReply(invocation.getArgument(0)))
                     .when(interpreter)
@@ -411,6 +411,7 @@ class Dev35HttpAcceptanceTest {
 
     /**
      * 对只读观察器注入第三轮偏好丢失负例，不更新不可变业务快照，不能只因最终正确掩盖中途丢失。
+     *
      * @param judge 同库只读裁判
      * @param c 本地四轮完成证据
      */
@@ -502,6 +503,7 @@ class Dev35HttpAcceptanceTest {
 
     /**
      * 本地固定解释仅验证生产HTTP、Worker和裁判接线；不得当真实模型成绩。
+     *
      * @param c 实际领取的合成消息
      * @return 有真实原文引用的固定业务协议
      */

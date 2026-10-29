@@ -20,7 +20,7 @@ import org.springframework.test.context.ActiveProfiles;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** 真实 PostgreSQL 验证跨线程配额、未知阻断及 JSON 原文哈希持久化，不调用供应商。 */
+/** 真实 PostgreSQL 验证并发调用记录、未知保留及 JSON 原文哈希持久化，不调用供应商。 */
 @EnabledIfEnvironmentVariable(named = "TRAVEL_INTEGRATION_TESTS", matches = "true")
 @ActiveProfiles("local")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -38,11 +38,10 @@ class TravelToolIntegrationTest {
         jdbc.update("DELETE FROM execution_budget WHERE run_id=?", runId);
     }
 
-    /** 并发争抢最后一单位时只允许一个预占，结果不会因服务重建而丢失。 */
+    /** 并发调用均保存独立记录，不再受服务组免费配额或在途记录限制。 */
     @Test
-    void concurrentLastUnitHasOneWinner() throws Exception {
+    void concurrentCallsAllKeepSeparateRecords() throws Exception {
         ledger.create(runId);
-        Instant verified = Instant.now().minusSeconds(5);
         String group = "test-" + runId;
         try (var threads = Executors.newFixedThreadPool(6)) {
             List<Future<Boolean>> results = new ArrayList<>();
@@ -51,12 +50,7 @@ class TravelToolIntegrationTest {
                         threads.submit(
                                 () -> {
                                     try {
-                                        journal.reserve(
-                                                runId,
-                                                group,
-                                                verified,
-                                                verified.plusSeconds(60),
-                                                1);
+                                        journal.reserve(runId, group);
                                         return true;
                                     } catch (IllegalStateException expected) {
                                         return false;
@@ -64,23 +58,22 @@ class TravelToolIntegrationTest {
                                 }));
             int winners = 0;
             for (var result : results) if (result.get()) winners++;
-            assertThat(winners).isEqualTo(1);
+            assertThat(winners).isEqualTo(12);
             assertThat(
                             jdbc.queryForObject(
                                     "SELECT count(*) FROM tool_evidence WHERE run_id=?",
                                     Integer.class,
                                     runId))
-                    .isEqualTo(1);
+                    .isEqualTo(12);
         }
     }
 
-    /** JSON 与哈希保存后重复失败回调不能覆盖成功；未知结果仍需重新核实。 */
+    /** JSON 与哈希保存后重复失败回调不能覆盖成功；未知结果保留记录但不阻断后续调用。 */
     @Test
-    void savesEvidenceAndBlocksUnknownUsage() {
+    void savesEvidenceAndAllowsCallsAfterUnknownUsage() {
         ledger.create(runId);
-        Instant verified = Instant.now().minusSeconds(5);
         String group = "test-" + runId;
-        UUID first = journal.reserve(runId, group, verified, verified.plusSeconds(60), 5);
+        UUID first = journal.reserve(runId, group);
         journal.finish(
                 first,
                 new TravelToolPort.Evidence(
@@ -98,11 +91,9 @@ class TravelToolIntegrationTest {
                                 Integer.class,
                                 first))
                 .isEqualTo(64);
-        UUID second = journal.reserve(runId, group, verified, verified.plusSeconds(60), 5);
+        UUID second = journal.reserve(runId, group);
         journal.finish(second, null);
-        assertThatThrownBy(
-                        () -> journal.reserve(runId, group, verified, verified.plusSeconds(60), 5))
-                .hasMessage("TOOL_USAGE_UNKNOWN");
+        assertThat(journal.reserve(runId, group)).isNotNull();
     }
 
     /** 外层业务事务不能让未提交的预占提前获得网络发送资格。 */
@@ -112,14 +103,7 @@ class TravelToolIntegrationTest {
         var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
         tx.executeWithoutResult(
                 status ->
-                        assertThatThrownBy(
-                                        () ->
-                                                journal.reserve(
-                                                        runId,
-                                                        "test-" + runId,
-                                                        Instant.now().minusSeconds(1),
-                                                        Instant.now().plusSeconds(60),
-                                                        5))
+                        assertThatThrownBy(() -> journal.reserve(runId, "test-" + runId))
                                 .hasMessage("TOOL_AMBIENT_TRANSACTION"));
         assertThat(
                         jdbc.queryForObject(

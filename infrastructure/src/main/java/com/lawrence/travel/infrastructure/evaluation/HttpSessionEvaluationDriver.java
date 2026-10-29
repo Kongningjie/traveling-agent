@@ -159,6 +159,8 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
         Map<String, Object> lastBody = null;
         boolean structuredDocumentBound = false;
         var trace = new ArrayList<String>();
+        var acceptedVersions = new ArrayList<String>();
+        var acceptedSnapshots = new ArrayList<Map<?, ?>>();
         int completed = 0;
         var deletedMetrics = new java.util.HashMap<String, Long>();
         try {
@@ -268,6 +270,11 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                                 Map.of("action", "CONFIRM"),
                                 200);
                     }
+                    case "ACCEPT_CANDIDATE" -> {
+                        var accepted = browser.acceptCandidate(chat, acceptedVersions);
+                        acceptedVersions.add((String) accepted.get("snapshotId"));
+                        acceptedSnapshots.add((Map<?, ?>) accepted.get("snapshot"));
+                    }
                     case "STOP" -> {
                         var view = browser.get("/chats/" + chat, 200);
                         String task = (String) ((Map<?, ?>) view.get("chat")).get("taskId");
@@ -301,6 +308,10 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             var state = new java.util.HashMap<>(observed.state());
             state.putAll(isolation);
             state.put("httpStructuredDocumentBound", structuredDocumentBound);
+            if (!acceptedVersions.isEmpty()) {
+                state.put("httpAcceptedVersions", List.copyOf(acceptedVersions));
+                state.put("httpAcceptedSnapshots", List.copyOf(acceptedSnapshots));
+            }
             if (auditIsolation
                     && List.of("P07", "P19", "R02", "R03").contains(input.id())
                     && document != null
@@ -441,6 +452,7 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                                     "DELETE_DOCUMENT",
                                     "DELETE_CHAT",
                                     "CONFIRM_OPERATION",
+                                    "ACCEPT_CANDIDATE",
                                     "STOP",
                                     "RESTART")
                             .contains(turn.action()))
@@ -465,7 +477,12 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
             }
             if (List.of("WAIT_DOCUMENT", "READ_AS_OTHER", "DELETE_DOCUMENT").contains(turn.action())
                     && !document) throw new IllegalArgumentException("SESSION_DOCUMENT_MISSING");
-            if (List.of("STOP", "STOP_CHAT", "REPLAY_MESSAGE", "CONFIRM_OPERATION")
+            if (List.of(
+                                    "STOP",
+                                    "STOP_CHAT",
+                                    "REPLAY_MESSAGE",
+                                    "CONFIRM_OPERATION",
+                                    "ACCEPT_CANDIDATE")
                             .contains(turn.action())
                     && !input) throw new IllegalArgumentException("SESSION_INPUT_MISSING");
         }
@@ -677,6 +694,51 @@ public final class HttpSessionEvaluationDriver implements SessionEvaluationExecu
                 Thread.sleep(100);
             } while (System.nanoTime() < until);
             throw new IllegalStateException("SESSION_TASK_TIMEOUT");
+        }
+
+        /**
+         * 通过真实HTTP显式接受当前候选，同时检查生成候选没有提前切换生效版本。
+         *
+         * @param chat 本批聊天
+         * @param acceptedVersions 本脚本之前已接受的版本；首次必须尚无生效版本
+         * @return 已接受的版本身份和候选快照
+         * @throws java.io.IOException 本机HTTP失败
+         * @throws InterruptedException 等待中断
+         */
+        private Map<String, Object> acceptCandidate(UUID chat, List<String> acceptedVersions)
+                throws java.io.IOException, InterruptedException {
+            var conversation = get("/chats/" + chat, 200);
+            Object task = ((Map<?, ?>) conversation.get("chat")).get("taskId");
+            if (task == null) throw new IllegalStateException("SESSION_TASK_MISSING");
+            var view = get("/tasks/" + task + "/view", 200);
+            Object previous = acceptedVersions.isEmpty() ? null : acceptedVersions.getLast();
+            if (!java.util.Objects.equals(previous, view.get("currentVersionId")))
+                throw new IllegalStateException("SESSION_VERSION_CHANGED_WITHOUT_ACCEPTANCE");
+            var candidateView = get("/tasks/" + task + "/candidate", 200);
+            if (!Boolean.TRUE.equals(candidateView.get("acceptable")))
+                throw new IllegalStateException("SESSION_CANDIDATE_NOT_ACCEPTABLE");
+            var candidate = (Map<?, ?>) candidateView.get("candidate");
+            var version = (Map<?, ?>) candidate.get("version");
+            if (!java.util.Objects.equals(previous, version.get("baseVersionId")))
+                throw new IllegalStateException("SESSION_CANDIDATE_BASE_CHANGED");
+            var body = new java.util.HashMap<String, Object>();
+            body.put("requestId", UUID.randomUUID());
+            body.put("candidateId", candidate.get("candidateId"));
+            body.put("expectedCurrentVersionId", previous);
+            body.put("constraintRevision", view.get("constraintRevision"));
+            body.put("generation", view.get("generation"));
+            body.put("snapshotHash", version.get("payloadHash"));
+            var receipt = post("/tasks/" + task + "/accept", body, 200);
+            Object snapshot = version.get("snapshotId");
+            if (!"ACCEPTED".equals(receipt.get("status"))
+                    || !java.util.Objects.equals(snapshot, receipt.get("snapshotId"))
+                    || !java.util.Objects.equals(
+                            snapshot, get("/tasks/" + task + "/view", 200).get("currentVersionId")))
+                throw new IllegalStateException("SESSION_ACCEPTANCE_NOT_COMMITTED");
+            // 同一接受请求重放不能创建第二条接受事实。
+            if (!receipt.equals(post("/tasks/" + task + "/accept", body, 200)))
+                throw new IllegalStateException("SESSION_ACCEPTANCE_NOT_IDEMPOTENT");
+            return Map.of("snapshotId", snapshot, "snapshot", candidate.get("snapshot"));
         }
 
         /**

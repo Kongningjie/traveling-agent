@@ -9,9 +9,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * 执行控制配置，仅接收非凭证信息；真实模型总开关默认关闭。
+ *
  * @param externalCallsEnabled 真实调用总开关
  * @param models 角色到精确型号的白名单
- * @param quotaEvidence 操作者核实的本地快照，缺失时拒绝调用
+ * @param quotaEvidence 兼容旧配置的历史快照，不再参与调用准入
  * @param limits 已确认执行上限
  */
 @ConfigurationProperties("travel")
@@ -29,6 +30,7 @@ public record ExecutionControlProperties(
 
     /**
      * 保留冻结配置项；活跃运行与调查分支调度在相应阶段实现。
+     *
      * @param activeRuns 全局活跃运行上限
      * @param modelConcurrency 实际模型在途上限
      * @param researchConcurrencyPerRun 每运行调查并发上限

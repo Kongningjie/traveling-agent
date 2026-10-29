@@ -441,6 +441,7 @@ class Dev35ModelProbeTest {
 
     /**
      * 只推进本例UNDERSTAND；共享库中已有进程可能先完成该阶段，必须接受已提交事实，不能重复执行。
+     *
      * @param user 合成用户
      * @param task 当前私有旅行
      * @return 五秒内该阶段是否已提交；不将收件完成或运行领取等同于合并完成
@@ -641,7 +642,7 @@ class Dev35ModelProbeTest {
     }
 
     /**
-     * 只读取现有快照及PG计量，确认拒绝分类；不创建预算、不调用供应商、不刷新核实时间。
+     * 只检查角色型号配置；免费额度检查已取消，不创建预算或调用供应商。
      * @throws Exception 本地结构化诊断报告无法写入
      */
     @Test
@@ -653,34 +654,10 @@ class Dev35ModelProbeTest {
             row.put("role", role);
             row.put("model", model);
             row.put("status", "LOCAL_DIAGNOSTIC");
-            var quota = properties.quotaEvidence().get(model);
-            String reason = "QUOTA_SNAPSHOT_MISSING";
-            if (quota != null) {
-                try {
-                    quota.requireUsable(
-                            model, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME", 128, Instant.now());
-                    boolean uncertain =
-                            ledger.hasUncertainUsage(
-                                    new BudgetLedger.Target(
-                                            model, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME"),
-                                    quota.verifiedAt(),
-                                    Instant.now());
-                    var target =
-                            new BudgetLedger.Target(
-                                    model, "cn-beijing", "DASHSCOPE_NATIVE_REALTIME");
-                    if (ledger.hasUsageOverrun(target, quota.verifiedAt()))
-                        reason = "KNOWN_USAGE_OVERRUN";
-                    else if (ledger.tokensSince(target, quota.verifiedAt())
-                            > quota.remainingTokens() - 128) reason = "GATE_QUOTA_INSUFFICIENT";
-                    else
-                        reason =
-                                uncertain
-                                        ? "LOCAL_QUOTA_CHECK_OK_WITH_UNKNOWN_RESERVATIONS"
-                                        : "LOCAL_QUOTA_CHECK_OK";
-                } catch (CallRejectedException rejected) {
-                    reason = "GATE_" + rejected.reason().name();
-                }
-            }
+            String reason =
+                    model == null || model.isBlank()
+                            ? "MODEL_NOT_CONFIGURED"
+                            : "MODEL_CONFIGURED_FREE_QUOTA_CHECK_DISABLED";
             row.put("reason", reason);
             row.put("requests", 0);
             rows.add(row);
@@ -705,14 +682,14 @@ class Dev35ModelProbeTest {
     }
 
     /**
-     * 每角色最多一次SDK文本流；既有UNKNOWN或免费门禁拒绝不删除、不重新核实。报告保留所有真实计量。
+     * 每角色最多一次SDK文本流；不自动重试，报告保留所有真实计量。
      * @throws Exception 仅本地结构化报告无法写入；不输出供应商原文或认证数据
      */
     @Test
-    void probesThreeExactModelsWithNoAutomaticRetry() throws Exception {
+    void probesConfiguredRolesWithNoAutomaticRetry() throws Exception {
         assertThat(properties.models())
-                .containsEntry("coordinator", "qwen3.8-27b")
-                .containsEntry("research", "qwen3.7-flash-2026-07-15")
+                .containsEntry("coordinator", "qwen3.8-flash")
+                .containsEntry("research", "qwen3.8-flash")
                 .containsEntry("reviewer", "qwen3.8-max-0902");
         var rows = new ArrayList<Map<String, Object>>();
         boolean stop = false;

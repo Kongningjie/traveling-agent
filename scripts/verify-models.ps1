@@ -4,7 +4,7 @@
 .DESCRIPTION
     从根 .env 临时加载允许列表中的简单连接配置，不执行文件内容或打印凭证。
     启动本项目中间件，显式运行Harness 模型测试；结束后恢复调用进程环境。
-    会调用真实模型并消耗已确认免费额度；无有效快照即拒绝。不删除真实计量记录。
+    会调用真实模型，按供应商账号配置计费；不再检查免费额度快照。不删除真实计量记录。
 .EXAMPLE
     .\scripts\verify-models.ps1 -Minimal
     仅在当前范围得到授权后验证一次调查模型，不运行完整 Harness／取消实验。
@@ -48,7 +48,7 @@ try {
     docker compose up -d --wait postgres redis
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL / Redis 启动失败。' }
     & (Join-Path $projectRoot 'mvnw.cmd') --batch-mode --no-transfer-progress `
-        $selectedTest ('-Dspring.config.import=optional:file:' + ((Join-Path $projectRoot 'config/free-quota.local.yml').Replace('\','/'))) '-Dsurefire.failIfNoSpecifiedTests=false' test
+        $selectedTest '-Dsurefire.failIfNoSpecifiedTests=false' test
     if ($LASTEXITCODE -ne 0) { throw '真实模型验证失败，请查看脱敏错误分类；不要自动重试或替换型号。' }
 } finally {
     Set-Location -LiteralPath $originalLocation

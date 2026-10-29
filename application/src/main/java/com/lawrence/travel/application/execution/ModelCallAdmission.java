@@ -14,12 +14,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 发送前检查型号、免费额度、预算和并发，并预占请求额度。
+ * 发送前检查型号、执行预算和并发，并预占请求额度。
  */
 public final class ModelCallAdmission {
     private final boolean enabled;
     private final Map<String, String> models;
-    private final Map<String, FreeQuotaEvidence> evidence;
     private final RunLimits limits;
     private final BudgetLedger ledger;
     private final ModelRequestSlots slots;
@@ -27,14 +26,15 @@ public final class ModelCallAdmission {
     private final java.util.Set<BudgetLedger.Target> unreliableTargets = new java.util.HashSet<>();
 
     /**
-     * 绑定保守准入依赖，不允许根据额度推测或自动切换型号。
+     * 绑定执行准入依赖，不自动切换型号。
+     *
      * @param enabled 真实外部调用总开关
      * @param models 角色到精确型号的白名单
-     * @param evidence 精确型号到已核实快照的映射
+     * @param evidence 兼容旧调用的历史快照，已不参与准入
      * @param limits 原运行预算限制
      * @param ledger 持久化计量仓储
      * @param slots 实际在途并发槽
-     * @param clock 用于校验快照及记账的时钟
+     * @param clock 预算计时及记账时钟
      */
     public ModelCallAdmission(
             boolean enabled,
@@ -46,7 +46,6 @@ public final class ModelCallAdmission {
             Clock clock) {
         this.enabled = enabled;
         this.models = Map.copyOf(models);
-        this.evidence = Map.copyOf(evidence);
         this.limits = java.util.Objects.requireNonNull(limits);
         this.ledger = java.util.Objects.requireNonNull(ledger);
         this.slots = java.util.Objects.requireNonNull(slots);
@@ -54,42 +53,37 @@ public final class ModelCallAdmission {
     }
 
     /**
-     * 检查免费保护并持久化预占，之后才允许适配器发送一个实际请求。
+     * 检查执行预算并持久化预占，之后才允许适配器发送一个实际请求。
+     *
      * @param runId 已建立预算的原运行标识
      * @param role 已配置角色，不接受自动回退型号
      * @param region 实际 SDK 接入地域
-     * @param api 实际接口类型，不能用实时额度抵扣 Batch 等产品
+     * @param api 实际接口类型，写入计量记录
      * @param tokenUpperBound 保守输入加最大输出 Token 上界
      * @return 实际请求许可；必须在请求真正结束后结束计量并释放
-     * @throws CallRejectedException 不满足准入、预算或并发限制
+     * @throws CallRejectedException 总开关关闭、型号未配置、预算或并发受限
      */
     public synchronized Permit begin(
             UUID runId, String role, String region, String api, long tokenUpperBound) {
         if (!enabled)
             throw new CallRejectedException(CallRejectedException.Reason.EXTERNAL_DISABLED);
         String model = models.get(role);
-        if (model == null)
+        if (model == null || model.isBlank())
             throw new CallRejectedException(CallRejectedException.Reason.MODEL_NOT_APPROVED);
-        FreeQuotaEvidence quota = evidence.get(model);
-        if (quota == null)
-            throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
+        if (tokenUpperBound <= 0
+                || region == null
+                || region.isBlank()
+                || api == null
+                || api.isBlank()) throw new IllegalArgumentException("MODEL_REQUEST_INVALID");
         var now = clock.instant();
-        quota.requireUsable(model, region, api, tokenUpperBound, now);
         var target = new BudgetLedger.Target(model, region, api);
-        if (unreliableTargets.contains(target)
-                || ledger.hasUsageOverrun(target, quota.verifiedAt())) {
-            throw new CallRejectedException(CallRejectedException.Reason.QUOTA_UNVERIFIED);
-        }
-        // 用户批准：UNKNOWN和重启遗留RESERVED保留原预占上限，计入下面的余额扣减， 不再因历史状态单独封禁整个型号；已知超上界及账本写失败仍须阻断。
-        long accounted = ledger.tokensSince(target, quota.verifiedAt());
-        if (accounted > quota.remainingTokens() - tokenUpperBound) {
-            throw new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT);
-        }
+        if (unreliableTargets.contains(target))
+            throw new CallRejectedException(CallRejectedException.Reason.LEDGER_UNAVAILABLE);
         var lease = slots.tryAcquire();
         if (lease == null)
             throw new CallRejectedException(CallRejectedException.Reason.MODEL_CONCURRENCY_FULL);
         try {
-            // 单实例的短临界区仅串行“检查快照 + 预占”，真实网络请求不持此锁。
+            // 单实例的短临界区仅串行“检查执行资格 + 预占”，真实网络请求不持此锁。
             var reservation =
                     ledger.reserve(runId, CallKind.MODEL, limits, target, tokenUpperBound, now);
             var effective = ledger.limitsFor(runId, limits);
@@ -115,6 +109,7 @@ public final class ModelCallAdmission {
 
         /**
          * 保存已经提交的预占与并发资源。
+         *
          * @param reservation 持久化预占
          * @param target 已核实并被预占的精确请求范围
          * @param lease 在途槽
@@ -155,7 +150,7 @@ public final class ModelCallAdmission {
         public void complete(TokenUsage usage) {
             if (!finished.compareAndSet(false, true)) return;
             try {
-                // 与准入共享短临界区；UNKNOWN继续占用预占上限，不退还次数或额度。
+                // 与准入共享短临界区；UNKNOWN保留未知记录，不退还已发起的调用次数。
                 synchronized (ModelCallAdmission.this) {
                     try {
                         ledger.finish(

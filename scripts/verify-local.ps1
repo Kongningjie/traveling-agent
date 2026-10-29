@@ -10,7 +10,7 @@
 #>
 param(
     # 可以仅复测账号或旅行存储；默认保留本地基础设施统一验收入口。
-    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit', 'PhaseTwo', 'Migration', 'Budget', 'Langfuse', 'LangfuseRetention', 'LangfuseAccess', 'LangfuseScoring', 'LangfusePublication')]
+    [ValidateSet('All', 'Identity', 'Travel', 'Engine', 'Candidate', 'Event', 'M1', 'Negotiation', 'Tool', 'Research', 'Planning', 'Workflow', 'Preference', 'Context', 'Artifact', 'Fault', 'Evaluation', 'Dialogue', 'Job', 'Session', 'Document', 'Source', 'Strategy', 'Trace', 'Advice', 'AdviceCommit', 'Support', 'SupportCommit', 'Lifecycle', 'LifecycleCommit', 'PhaseTwo', 'Migration', 'Budget', 'Langfuse', 'LangfuseRetention', 'LangfuseAccess', 'LangfuseScoring', 'LangfusePublication')]
     [string]$Scope = 'All',
     # 在单一作用域中仅复测受影响方法，多个方法以 + 连接；不执行任意命令。
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*(\+[A-Za-z][A-Za-z0-9_]*)*$')]
@@ -95,6 +95,7 @@ try {
         elseif ($Scope -eq 'Candidate') { '-Dtest=CandidateAcceptanceIntegrationTest' }
         elseif ($Scope -eq 'Event') { '-Dtest=RunEventIntegrationTest' }
         elseif ($Scope -eq 'Negotiation') { '-Dtest=NegotiationIntegrationTest' }
+        elseif ($Scope -eq 'Tool') { '-Dtest=TravelToolIntegrationTest,TravelToolContractTest' }
         elseif ($Scope -eq 'Research') { '-Dtest=ResearchIntegrationTest' }
         elseif ($Scope -eq 'Planning') { '-Dtest=PlanningIntegrationTest' }
         elseif ($Scope -eq 'M1') { '-Dtest=IdentityIntegrationTest,TravelStorageIntegrationTest,ExecutionEngineIntegrationTest,CandidateAcceptanceIntegrationTest,RunEventIntegrationTest' }

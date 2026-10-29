@@ -25,8 +25,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 public class TravelToolsConfiguration {
     /**
      * 不含密钥的工具配置，缺失时默认关闭。
+     *
      * @param enabled 外部工具开关
-     * @param grants 已确认服务组资源
+     * @param grants 兼容旧配置的历史记录，不参与准入
      * @param evidenceHosts 已筛选原文域名
      */
     @ConfigurationProperties("travel.tools")
@@ -43,6 +44,7 @@ public class TravelToolsConfiguration {
 
     /**
      * 提供只在调用时读取凭证的适配器。
+     *
      * @param environment 本机环境，不序列化其内容
      * @param properties 域名白名单
      * @return 工具端口
@@ -57,9 +59,10 @@ public class TravelToolsConfiguration {
 
     /**
      * 绑定证据权威仓储。
+     *
      * @param mapper 已被同包 MapperScan 扫描的 SQL
      * @param manager 数据库事务管理器
-     * @return 工具配额及证据仓储
+     * @return 工具调用及证据仓储
      */
     @Bean
     ToolEvidenceJournal toolEvidenceJournal(
@@ -68,7 +71,8 @@ public class TravelToolsConfiguration {
     }
 
     /**
-     * 装配原运行预算与工具服务组保护。
+     * 装配原运行预算与工具调用记录。
+     *
      * @param tools 供应商工具
      * @param journal 证据仓储
      * @param ledger 原运行计量

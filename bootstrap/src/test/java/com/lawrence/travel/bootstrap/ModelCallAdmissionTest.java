@@ -33,6 +33,51 @@ import static org.mockito.Mockito.when;
 
 /** 通过替身仓储和真实并发槽验证准入编排，不构建 SDK，不访问供应商。 */
 class ModelCallAdmissionTest {
+    /** 删除免费快照校验后，空白型号仍必须在计量及请求前拒绝。 */
+    @Test
+    void blankConfiguredModelIsRejected() {
+        var admission =
+                new ModelCallAdmission(
+                        true,
+                        Map.of("planner", " "),
+                        Map.of(),
+                        limits,
+                        ledger,
+                        slots,
+                        Clock.fixed(now, ZoneOffset.UTC));
+        assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
+                .hasMessage("MODEL_NOT_APPROVED");
+        verifyNoInteractions(ledger);
+    }
+
+    /** 过期、零余额且没有免费停用确认的历史快照不再阻断配置型号。 */
+    @Test
+    void expiredZeroQuotaDoesNotBlockCalls() {
+        reserveSuccessfully();
+        var old =
+                new FreeQuotaEvidence(
+                        "test-model",
+                        "old-region",
+                        "OLD_API",
+                        0,
+                        now.minusSeconds(120),
+                        now.minusSeconds(60),
+                        now.minusSeconds(1),
+                        false);
+        var admission =
+                new ModelCallAdmission(
+                        true,
+                        Map.of("planner", "test-model"),
+                        Map.of("test-model", old),
+                        limits,
+                        ledger,
+                        slots,
+                        Clock.fixed(now, ZoneOffset.UTC));
+        try (var permit = admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10)) {
+            assertThat(permit.target().modelId()).isEqualTo("test-model");
+        }
+    }
+
     private final Instant now = Instant.parse("2026-10-15T10:00:00Z");
     private final RunLimits limits =
             new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
@@ -57,17 +102,19 @@ class ModelCallAdmissionTest {
         verifyNoInteractions(ledger);
     }
 
-    /** 验证未核实接入范围在申请并发槽和计数前拒绝。 */
+    /** 接口范围只用于记录，不再与历史免费快照绑定。 */
     @Test
-    void wrongApiDoesNotReserveCalls() {
-        assertThatThrownBy(() -> gate(true).begin(runId, "planner", "cn-beijing", "BATCH", 10))
-                .hasMessage("QUOTA_UNVERIFIED");
-        verifyNoInteractions(ledger);
+    void apiIsRecordedWithoutFreeQuotaBinding() {
+        reserveSuccessfully();
+        try (var permit = gate(true).begin(runId, "planner", "cn-beijing", "BATCH", 10)) {
+            assertThat(permit.target().api()).isEqualTo("BATCH");
+        }
     }
 
-    /** 验证即使全局开关打开，缺少额度快照的已配置型号也不能放行。 */
+    /** 已配置型号不再需要免费额度快照。 */
     @Test
-    void enabledConfigurationWithoutQuotaEvidenceStillFailsClosed() {
+    void configuredModelWorksWithoutQuotaEvidence() {
+        reserveSuccessfully();
         var admission =
                 new ModelCallAdmission(
                         true,
@@ -77,20 +124,23 @@ class ModelCallAdmissionTest {
                         ledger,
                         slots,
                         Clock.fixed(now, ZoneOffset.UTC));
-        assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
-                .hasMessage("QUOTA_UNVERIFIED");
-        verifyNoInteractions(ledger);
+        try (var permit = admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10)) {
+            assertThat(permit.target().modelId()).isEqualTo("test-model");
+        }
     }
 
-    /** 验证本项目未决用量也会扣减快照余额，不只检查原始控制台数字。 */
+    /** 历史免费余额和预占Token不再阻断新调用，运行预算仍在仓储预占。 */
     @Test
-    void accountsForPreviouslyReservedTokens() {
-        when(ledger.tokensSince(any(), any())).thenReturn(95L);
-        assertThatThrownBy(() -> gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10))
-                .hasMessage("QUOTA_INSUFFICIENT");
+    void historicalFreeBalanceDoesNotBlockCalls() {
+        when(ledger.tokensSince(any(), any())).thenReturn(Long.MAX_VALUE);
+        reserveSuccessfully();
+        try (var permit = gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10)) {
+            assertThat(permit.target().modelId()).isEqualTo("test-model");
+        }
+        verify(ledger, org.mockito.Mockito.never()).tokensSince(any(), any());
     }
 
-    /** 验证历史UNKNOWN在余额足够时按上限扣算，所有已配置角色均可显式继续。 */
+    /** 验证历史UNKNOWN不阻断已配置角色，未知计量记录保持原样。 */
     @Test
     void uncertainUsageIsChargedWithoutBlockingConfiguredRoles() {
         when(ledger.hasUncertainUsage(any(), any(), any())).thenReturn(true);
@@ -130,15 +180,18 @@ class ModelCallAdmissionTest {
                 assertThat(permit.target().modelId()).isEqualTo("test-model");
             }
         }
-        verify(ledger, times(4)).tokensSince(any(), any());
+        verify(ledger, org.mockito.Mockito.never()).tokensSince(any(), any());
     }
 
-    /** 已知实际超出预占上限仍表示估算失真，不能与UNKNOWN按上限扣算混淆。 */
+    /** 历史用量偏差只保留计量，不再作为免费准入门禁。 */
     @Test
-    void knownUsageOverrunStillBlocksCalls() {
+    void historicalUsageOverrunDoesNotBlockCalls() {
         when(ledger.hasUsageOverrun(any(), any())).thenReturn(true);
-        assertThatThrownBy(() -> gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10))
-                .hasMessage("QUOTA_UNVERIFIED");
+        reserveSuccessfully();
+        try (var permit = gate(true).begin(runId, "planner", "cn-beijing", "REALTIME", 10)) {
+            assertThat(permit.target().modelId()).isEqualTo("test-model");
+        }
+        verify(ledger, org.mockito.Mockito.never()).hasUsageOverrun(any(), any());
     }
 
     /** 验证在途上限、父请求结束后子请求可接入、结束回调幂等且不凭空扩容。 */
@@ -195,7 +248,7 @@ class ModelCallAdmissionTest {
         var permit = admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10);
         assertThatThrownBy(permit::close).hasMessage("Meter unavailable");
         assertThatThrownBy(() -> admission.begin(runId, "planner", "cn-beijing", "REALTIME", 10))
-                .hasMessage("QUOTA_UNVERIFIED");
+                .hasMessage("LEDGER_UNAVAILABLE");
         var leases =
                 new java.util.ArrayList<
                         com.lawrence.travel.application.port.ModelRequestSlots.Lease>();
@@ -213,6 +266,7 @@ class ModelCallAdmissionTest {
 
     /**
      * 创建固定时间的离线准入服务。
+     *
      * @param enabled 是否模拟开启真实调用总开关
      * @return 只有 planner 测试角色的门禁
      */

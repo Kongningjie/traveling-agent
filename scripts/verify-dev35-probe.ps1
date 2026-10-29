@@ -6,8 +6,8 @@
     只加载数据库／Redis／DashScope允许项，不打印配置或凭据；不启动Worker，不调用真实旅行工具。
     文本模式三型号各一次；Harness模式每型号最多六次共十八次；应用场景两轮每轮最多四次共八次。
     只保存最小结构化报告；失败即停止剩余批次。应用场景短暂停止并恢复本机backend，不清空卷。
-    不修改.env、免费快照、业务容器开关或原有UNKNOWN；结束还原当前进程环境。
-    DiagnosticsOnly仅查询本机快照与账本，不调用供应商，也不需要Authorized或模型Key。
+    不修改.env、业务容器开关或原有UNKNOWN；结束还原当前进程环境。
+    DiagnosticsOnly仅检查本机角色配置，不调用供应商，也不需要Authorized或模型Key。
 #>
 param([switch]$Authorized, [switch]$DiagnosticsOnly, [switch]$Harness, [switch]$Conversation,
     [ValidateSet('P01','P02')][string]$CaseId = 'P01', [string]$InspectReport)
@@ -42,17 +42,14 @@ try {
     }
     # Surefire以模块为工作目录；必须使用现有权威删除清单，不能新建空清单绕过恢复保护。
     $env:TRAVEL_DELETION_ROOT = Join-Path $root '.runtime/lifecycle'
-    $quotaFile = Join-Path $root 'config/free-quota.local.yml'
-    if (-not (Test-Path -LiteralPath $quotaFile -PathType Leaf)) { throw 'DEV35_QUOTA_FILE_MISSING' }
-    # 与删除清单相同，读取原快照的绝对路径；不改余额、核实时间或UNKNOWN历史。
     if ($Conversation) {
         $backendWasRunning = -not [string]::IsNullOrWhiteSpace((& docker compose ps --status running -q backend) -join '')
         if ($LASTEXITCODE -ne 0) { throw 'BACKEND_STATE_CHECK_FAILED' }
         if ($backendWasRunning) { & docker compose stop backend 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'BACKEND_ISOLATION_FAILED' } }
     }
-    $method = if ($DiagnosticsOnly) { 'recordsLocalBlockersWithoutVendorRequests' } elseif ($Harness) { 'verifiesHarnessToolsAndStructuredOutput' } elseif ($Conversation) { 'verifiesConversationCaseWithOwnedState' } else { 'probesThreeExactModelsWithNoAutomaticRetry' }
+    $method = if ($DiagnosticsOnly) { 'recordsLocalBlockersWithoutVendorRequests' } elseif ($Harness) { 'verifiesHarnessToolsAndStructuredOutput' } elseif ($Conversation) { 'verifiesConversationCaseWithOwnedState' } else { 'probesConfiguredRolesWithNoAutomaticRetry' }
     if ($InspectReport) { $method = 'inspectsPersistedRequirementsWithoutVendorRequests' }
-    & ./mvnw.cmd --batch-mode --no-transfer-progress -pl bootstrap -am ( '-Dtest=Dev35ModelProbeTest#' + $method ) ('-Dspring.config.import=file:' + $quotaFile.Replace('\','/')) '-Dsurefire.failIfNoSpecifiedTests=false' test 2>&1 | Select-String '^DEV35_|^\[INFO\] (Tests run:|BUILD SUCCESS|BUILD FAILURE)'
+    & ./mvnw.cmd --batch-mode --no-transfer-progress -pl bootstrap -am ( '-Dtest=Dev35ModelProbeTest#' + $method ) '-Dsurefire.failIfNoSpecifiedTests=false' test 2>&1 | Select-String '^DEV35_|^\[INFO\] (Tests run:|BUILD SUCCESS|BUILD FAILURE)'
     $testExit = $LASTEXITCODE
     # 测试中止后也处理AfterEach写出的失败证据；不能先throw丢掉计量及版本指纹。
     if ($testExit -ne 0 -and -not (Test-Path -LiteralPath $report)) { throw 'DEV35_PROBE_HARNESS_FAILED_WITHOUT_REPORT' }

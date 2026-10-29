@@ -7,6 +7,7 @@ import com.lawrence.travel.application.port.TravelToolPort;
 import com.lawrence.travel.domain.execution.control.RunLimits;
 import com.lawrence.travel.infrastructure.tools.TravelHttpTools;
 import java.time.Clock;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -24,6 +25,40 @@ import static org.mockito.Mockito.when;
 
 /** 无网络验证工具免费门禁、原文域名权限及按实际预报日期匹配。 */
 class TravelToolContractTest {
+    /** 缺少或过期的免费快照不影响调用；成功证据与执行计量仍保存。 */
+    @Test
+    void callsWithoutFreeQuotaEvidence() {
+        var tools = mock(TravelToolPort.class);
+        var journal = mock(ToolEvidenceJournal.class);
+        var ledger = mock(BudgetLedger.class);
+        var call = UUID.randomUUID();
+        when(journal.reserve(any(), any())).thenReturn(call);
+        when(ledger.reserve(any(), any(), any(), any(), anyLong(), any()))
+                .thenReturn(new BudgetLedger.Reservation(UUID.randomUUID(), null));
+        var evidence =
+                new TravelToolPort.Evidence(
+                        URI.create("https://example.invalid/evidence"),
+                        Instant.now(),
+                        "{\"status\":\"AVAILABLE\"}");
+        when(tools.query(any(), any())).thenReturn(evidence);
+        var limits = new RunLimits(30, 60, 2, Duration.ofSeconds(180), Duration.ofMinutes(15));
+        var expired = new TravelToolService.Grant(Instant.EPOCH, Instant.EPOCH, 0, false);
+        for (Map<String, TravelToolService.Grant> grants :
+                List.of(Map.<String, TravelToolService.Grant>of(), Map.of("tavily", expired))) {
+            var service =
+                    new TravelToolService(
+                            tools, journal, ledger, limits, grants, true, Clock.systemUTC());
+            assertThat(
+                            service.query(
+                                    UUID.randomUUID(),
+                                    TravelToolPort.Operation.SEARCH,
+                                    Map.of("query", "旅行")))
+                    .isEqualTo(evidence);
+        }
+        org.mockito.Mockito.verify(tools, org.mockito.Mockito.times(2)).query(any(), any());
+        org.mockito.Mockito.verify(journal, org.mockito.Mockito.times(2)).finish(call, evidence);
+    }
+
     /** 直接应用调查路径也要在预占前拒绝危险参数，不能只保护Agent包装。 */
     @Test
     void unsafeToolInputNeverReservesOrCalls() {
@@ -56,7 +91,7 @@ class TravelToolContractTest {
         var journal = mock(ToolEvidenceJournal.class);
         var ledger = mock(BudgetLedger.class);
         UUID call = UUID.randomUUID(), meter = UUID.randomUUID();
-        when(journal.reserve(any(), any(), any(), any(), anyLong())).thenReturn(call);
+        when(journal.reserve(any(), any())).thenReturn(call);
         when(ledger.reserve(any(), any(), any(), any(), anyLong(), any()))
                 .thenReturn(new BudgetLedger.Reservation(meter, null));
         when(tools.query(any(), any()))
@@ -84,7 +119,7 @@ class TravelToolContractTest {
                                         TravelToolPort.Operation.SEARCH,
                                         Map.of("query", "风景")))
                 .isInstanceOf(com.lawrence.travel.application.safety.SafetyGate.Failure.class);
-        org.mockito.Mockito.verify(journal).reserve(any(), any(), any(), any(), anyLong());
+        org.mockito.Mockito.verify(journal).reserve(any(), any());
         org.mockito.Mockito.verify(journal).finish(call, null);
         org.mockito.Mockito.verifyNoMoreInteractions(journal);
         org.mockito.Mockito.verify(ledger)
@@ -138,9 +173,9 @@ class TravelToolContractTest {
                 .isTrue();
     }
 
-    /** 默认关闭或无额度证据均不能触碰仓储和真实传输。 */
+    /** 总开关关闭时不能触碰仓储和真实传输。 */
     @Test
-    void disabledAndUnverifiedCallsNeverReachProviders() {
+    void disabledCallsNeverReachProviders() {
         var tools = mock(TravelToolPort.class);
         var journal = mock(ToolEvidenceJournal.class);
         var ledger = mock(BudgetLedger.class);
@@ -155,27 +190,17 @@ class TravelToolContractTest {
                                         TravelToolPort.Operation.PLACE,
                                         Map.of()))
                 .hasMessage("TOOLS_DISABLED");
-        var unverified =
-                new TravelToolService(
-                        tools, journal, ledger, limits, Map.of(), true, Clock.systemUTC());
-        assertThatThrownBy(
-                        () ->
-                                unverified.query(
-                                        UUID.randomUUID(),
-                                        TravelToolPort.Operation.SEARCH,
-                                        Map.of()))
-                .hasMessage("TOOL_QUOTA_UNVERIFIED");
         verifyNoInteractions(tools, journal, ledger);
     }
 
-    /** 已耗尽服务组配额时，不申请运行预算或发送网络请求。 */
+    /** 调用记录写入失败时，不申请运行预算或发送网络请求。 */
     @Test
-    void exhaustedProviderQuotaStopsBeforeSending() {
+    void journalFailureStopsBeforeSending() {
         var tools = mock(TravelToolPort.class);
         var journal = mock(ToolEvidenceJournal.class);
         var ledger = mock(BudgetLedger.class);
-        when(journal.reserve(any(), any(), any(), any(), anyLong()))
-                .thenThrow(new IllegalStateException("TOOL_QUOTA_EXHAUSTED"));
+        when(journal.reserve(any(), any()))
+                .thenThrow(new IllegalStateException("TOOL_JOURNAL_UNAVAILABLE"));
         var grant =
                 new TravelToolService.Grant(
                         Instant.now().minusSeconds(10), Instant.now().plusSeconds(60), 1, true);
@@ -194,7 +219,7 @@ class TravelToolContractTest {
                                         UUID.randomUUID(),
                                         TravelToolPort.Operation.SEARCH,
                                         Map.of()))
-                .hasMessage("TOOL_QUOTA_EXHAUSTED");
+                .hasMessage("TOOL_JOURNAL_UNAVAILABLE");
         verifyNoInteractions(tools, ledger);
     }
 }
