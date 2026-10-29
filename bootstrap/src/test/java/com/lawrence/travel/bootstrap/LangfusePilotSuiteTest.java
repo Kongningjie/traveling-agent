@@ -11,6 +11,30 @@ import org.junit.jupiter.api.Test;
 
 /** 只读既有合成classpath资源，不上传数据集或运行评测。 */
 class LangfusePilotSuiteTest {
+    /**
+     * 为本地接入导出已校验的五例合成材料；路径只允许位于项目运行目录。
+     *
+     * @throws java.io.IOException 运行目录不可写
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(
+            named = "TRAVEL_LANGFUSE_PILOT_EXPORT",
+            matches = ".+")
+    void exportsLockedSyntheticSuite() throws java.io.IOException {
+        var root = java.nio.file.Path.of("..").toAbsolutePath().normalize();
+        var target =
+                java.nio.file.Path.of(System.getenv("TRAVEL_LANGFUSE_PILOT_EXPORT"))
+                        .toAbsolutePath()
+                        .normalize();
+        assertTrue(target.startsWith(root.resolve(".runtime/evaluations")));
+        assertTrue(target.getFileName().toString().equals("suite.json"));
+        var suite = new LangfusePilotSuite(LangfusePilotSuiteTest::resource).load();
+        java.nio.file.Files.createDirectories(target.getParent());
+        java.nio.file.Files.writeString(
+                target, new com.lawrence.travel.infrastructure.travel.TravelJson().encode(suite));
+        assertEquals(5, suite.cases().size());
+    }
+
     /** 五例选择及判据指纹稳定，输入与Oracle分离，原封存数据不改。 */
     @Test
     void loadsFiveExistingCasesWithStableFingerprint() {

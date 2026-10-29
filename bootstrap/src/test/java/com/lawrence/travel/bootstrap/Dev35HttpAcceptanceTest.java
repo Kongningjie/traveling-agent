@@ -641,6 +641,10 @@ class Dev35HttpAcceptanceTest {
                             c.outcome(),
                             "turns",
                             c.turns(),
+                            "spans",
+                            jdbc.queryForList(
+                                    "SELECT id::text AS id,parent_id::text AS parent,kind,state,(extract(epoch FROM started_at)*1000)::bigint AS started,(extract(epoch FROM ended_at)*1000)::bigint AS ended FROM execution_trace_span WHERE user_id=? ORDER BY started_at,id LIMIT 101",
+                                    c.userId()),
                             "messages",
                             jdbc.queryForList(
                                     "SELECT text,reply,state FROM dialogue_input WHERE user_id=? AND chat_id=? ORDER BY sequence",

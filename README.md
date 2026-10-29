@@ -320,11 +320,26 @@ DEV-0035装配时仍须绑定封存文件夹具、独立程序判定器、故障
 
 `EvaluationRunner.runModels`支持显式1～3次独立会话，暂停后不继续后续真实调用；`PhaseTwoQualityGate`核对冻结指纹、8留出×3、实际计量及24份人工证据，再判断至少22次语义达标及零重大违规。本地替身报告、未配置检查或缺少人工记录不能通过该门槛。只有本地工程证据已齐全；一期M4和二期完整真实质量仍待DEV-0035，不代表可以公开上线。
 
+### Langfuse本地轨迹与评分展示（当前入口）
+
+只接轨迹、耗时/用量、用例与运行关联、原生评分及后续Prompt对比，不再将完整清理治理/备份恢复作为本地展示前置。真实用户正文采集与生产导出保持关闭。
+
+```powershell
+./scripts/langfuse-pilot.ps1 -Action Open
+./scripts/langfuse-pilot.ps1 -Action Run
+./scripts/langfuse-pilot.ps1 -Action Inspect -ManifestPath ".runtime/evaluations/langfuse-pilot-<batchId>/manifest.json"
+```
+
+Open后访问 http://127.0.0.1:3100 ，认证信息仅在本机.env的LF_USER_EMAIL、LF_USER_PASSWORD查看。Run用已有隔离HTTP/Worker/PG测试执行P01/P02/R01/R02/R03，将实际父子节点、时间、合成对话和程序判据导入原生数据集/实验。原生trace页可查看材料和录入human.conditions/facts/clarification/usability及human.task_completed评分；未评分保持PENDING，回查只展示原始分数，不另建评分裁决系统。
+
+所有结果标记LOCAL_CONTRACT；本地替身没有真实模型Token消耗，REAL_MODEL/REAL_TOOL均NOT_RUN，不当作模型质量。未结束的WAITING_USER节点标注UNKNOWN并以开始事件展示，不伪造任务结束或耗时。Open/Close只切换网关；`-Action Close`返回原治理模式，不修改PG verified或删除标记。原治理专用验证命令在Close后运行。清理使用原生平台操作，不新增自动清理框架。
+
+下文保留早期分步交付的治理基础说明，其治理门槛不再阻塞上述本机合成展示。
 ### 独立本地 Langfuse（LF-1）
 
-执行 `./scripts/langfuse-local.ps1 -Action Up` 初始化本地随机认证并启动独立评测栈；入口为 `http://127.0.0.1:3100`。LF-3治理未完成时入口返回503，不开放平台数据。登录信息仅在本机 `.env` 的 `LF_USER_EMAIL`、`LF_USER_PASSWORD` 查看，不提交或发送。`-Action Status` 查看状态；旧的`Verify`/`VerifyMetadata`写入探针在入口未核验时拒绝执行，不绕过内部Web端口。
+执行 `./scripts/langfuse-local.ps1 -Action Up` 初始化本地随机认证并启动独立评测栈；入口为 `http://127.0.0.1:3100`。原治理模式在未核验时返回503；本机合成展示使用上方Open入口。登录信息仅在本机 `.env` 的 `LF_USER_EMAIL`、`LF_USER_PASSWORD` 查看，不提交或发送。`-Action Status` 查看状态；旧的`Verify`/`VerifyMetadata`写入探针在入口未核验时拒绝执行，不绕过内部Web端口。
 
-镜像按摘要固定，栈使用独立内部网络、数据库与卷，不复用旅行助手会话空间。当前只提供合成接线，未启用业务采集；元数据、评分、统一30天清理及 Prompt 对比分后续专项接入。项目保留期配置不等于物理清理能力已验收；清理验证前不导入业务或评测正文。Langfuse 不替代现有 PG 权威记录或冻结验收。
+镜像按摘要固定，栈使用独立内部网络、数据库与卷，不复用旅行助手会话空间。当前只提供合成接线，未启用业务采集；元数据、评分、统一30天清理及 Prompt 对比分后续专项接入。项目保留期配置不等于物理清理能力已验收；不导入真实用户业务正文；合成材料仅经上方显式本机入口导入。Langfuse 不替代现有 PG 权威记录或冻结验收。
 
 本镜像实测未将初始化的30天目标写入项目保留期；LF-3须实现并验证清理后才能启用业务采集，不能依靠这个参数宣称已完成自动删除。
 

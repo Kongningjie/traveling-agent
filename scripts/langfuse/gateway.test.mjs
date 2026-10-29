@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
 import test from "node:test";
-import { createGateway } from "./gateway.mjs";
+import { createGateway, accessAuthorizer } from "./gateway.mjs";
 
 /**
  * 在回环随机端口监听测试服务。
@@ -29,6 +29,19 @@ function close(server) {
 function yes() {
   return Promise.resolve({ allowed: true, notAfter: Date.now() + 1000 });
 }
+
+test("合成模式必须显式选择，未知模式拒绝，原治理策略不被改写", async () => {
+  let calls = 0;
+  const denied = async () => {
+    calls++;
+    return { allowed: false, notAfter: 0 };
+  };
+  assert.equal((await accessAuthorizer("governed", denied)()).allowed, false);
+  assert.equal((await accessAuthorizer("local-synthetic", denied)()).allowed, true);
+  assert.equal(calls, 1);
+  for (const value of ["", "production", undefined])
+    assert.throws(() => accessAuthorizer(value, denied), /MODE_INVALID/);
+});
 
 test("控制服务失败或资格过期时不访问上游", async () => {
   let calls = 0;

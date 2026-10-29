@@ -1,0 +1,5 @@
+# 仅供本机合成评测显式启用；不修改PG治理资格，不启用旅行助手生产导出。
+services:
+  gateway:
+    environment:
+      LF_ACCESS_MODE: local-synthetic

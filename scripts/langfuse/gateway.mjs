@@ -180,15 +180,29 @@ export function createGateway({ upstream, authorize }) {
 }
 
 /**
- * 容器入口只访问固定内部地址，不接收上游URL或命令行凭据。
- * @returns {void} 启动本机Compose内的受控入口
+ * 显式选择本机合成展示或原治理策略，不修改PG治理结论。
+ *
+ * @param {string} mode 固定模式名
+ * @param {Function} governed 原治理查询
+ * @returns {Function} 本次请求使用的策略，未知模式拒绝
  */
+export function accessAuthorizer(mode, governed) {
+  if (!["governed", "local-synthetic"].includes(mode))
+    throw new Error("LANGFUSE_ACCESS_MODE_INVALID");
+  if (typeof governed !== "function") throw new Error("LANGFUSE_ACCESS_MODE_INVALID");
+  return mode === "local-synthetic"
+    ? async () => ({ allowed: true, notAfter: Date.now() + 1000 })
+    : governed;
+}
+
+/** 启动固定内部上游；合成展示仍由原生平台认证，不修改PG治理结论。 */
 function main() {
+  const mode = process.env.LF_ACCESS_MODE ?? "governed";
   const token = process.env.LF_GATE_TOKEN;
   if (!/^[0-9a-f]{64}$/.test(token ?? "")) throw new Error("LANGFUSE_GATE_CONFIG_REQUIRED");
   const server = createGateway({
     upstream: "http://web:3000",
-    authorize: async () => {
+    authorize: accessAuthorizer(mode, async () => {
       const result = await fetch("http://host.docker.internal:8093/access", {
         headers: { "X-Evaluation-Gate": token },
         signal: AbortSignal.timeout(1500),
@@ -198,7 +212,7 @@ function main() {
         allowed: result.status === 204,
         notAfter: Number(result.headers.get("X-Access-Not-After")),
       };
-    },
+    }),
   });
   server.listen(3000, "0.0.0.0");
   process.once("SIGTERM", () => server.close(() => process.exit(0)));
