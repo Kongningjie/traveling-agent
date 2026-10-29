@@ -510,7 +510,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                 () -> {
                                     if (firstHarness.compareAndSet(true, false)) harness.close();
                                 },
-                                basis != null);
+                                basis != null,
+                                json);
                         if (invocation.result.isCompletedExceptionally())
                             roleSpan.fail(
                                     invocation.cancelled.get()
@@ -646,13 +647,15 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
          * @param factory 每轮隔离框架实例
          * @param cleanupUnused 取消发生在建轮前时释放预建资源
          * @param businessJson 应用声明的业务JSON模式，非上下文调用仍要求answer字符串
+         * @param json 严格业务编解码器，不额外开放工具或写入权限
          */
         private void execute(
                 Supplier<List<Msg>> prompt,
                 Supplier<List<Msg>> recovery,
                 Supplier<HarnessAgent> factory,
                 Runnable cleanupUnused,
-                boolean businessJson) {
+                boolean businessJson,
+                com.lawrence.travel.application.port.InteractionCodec json) {
             executionThread = Thread.currentThread();
             try (transport) {
                 String answer =
@@ -664,7 +667,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                 safety,
                                 cancelled::get,
                                 activeHarness::set,
-                                businessJson);
+                                businessJson,
+                                json);
                 if (!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
                 if (!cancelled.get()) {

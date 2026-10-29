@@ -1,10 +1,14 @@
 package com.lawrence.travel.agent.runtime;
 
+import com.lawrence.travel.application.port.InteractionCodec;
 import com.lawrence.travel.application.safety.SafetyGate;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.transport.HttpTransportException;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -97,6 +101,34 @@ public final class ControlledHarnessCall {
             BooleanSupplier cancelled,
             Consumer<HarnessAgent> active,
             boolean businessJson) {
+        return execute(
+                factory, normal, recovery, guard, safety, cancelled, active, businessJson, null);
+    }
+
+    /**
+     * 执行业务调用；显式提供严格编解码器时，完整JSON正文也可进入相同业务校验链。
+     *
+     * @param factory 每轮隔离实例
+     * @param normal 完整输入
+     * @param recovery 同预算上下文恢复
+     * @param guard 返回前版本检查
+     * @param safety 输出安全检查
+     * @param cancelled 取消标志
+     * @param active 实际框架句柄
+     * @param businessJson 应用声明的JSON业务模式
+     * @param json 严格对象解码器；为空时不接受无结构化元数据的消息
+     * @return 保留全部字段的业务JSON，后续仍须业务DTO校验
+     */
+    public static String execute(
+            Supplier<HarnessAgent> factory,
+            Supplier<List<Msg>> normal,
+            Supplier<List<Msg>> recovery,
+            Runnable guard,
+            SafetyGate safety,
+            BooleanSupplier cancelled,
+            Consumer<HarnessAgent> active,
+            boolean businessJson,
+            InteractionCodec json) {
         for (int attempt = 0; attempt < 2; attempt++) {
             if (cancelled.getAsBoolean()) throw new IllegalStateException("MODEL_CANCELLED");
             try (var harness = factory.get()) {
@@ -109,11 +141,11 @@ public final class ControlledHarnessCall {
                                 .call(
                                         messages,
                                         businessJson
-                                                ? java.util.Map.class
+                                                ? Map.class
                                                 : RestrictedHarnessFactory.StructuredReply.class)
                                 .block();
                 if (result == null) throw new OutputFailure(OutputProblem.MISSING);
-                String text = readResult(result, businessJson);
+                String text = readResult(result, businessJson, json, safety);
                 safety.require("OUTPUT", text);
                 guard.run();
                 return text;
@@ -129,17 +161,50 @@ public final class ControlledHarnessCall {
      *
      * @param result 框架最终消息
      * @param businessJson 应用指定的业务JSON模式
+     * @param json 严格编解码器，不从正文截取或修复JSON
+     * @param safety 原文及规范化结果的输出安全检查
      * @return 保留全部字段的产物；空答案及非法封装继续拒绝
      */
-    private static String readResult(Msg result, boolean businessJson) {
-        if (!result.hasStructuredData()) throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+    private static String readResult(
+            Msg result, boolean businessJson, InteractionCodec json, SafetyGate safety) {
+        if (!result.hasStructuredData()) {
+            // 仅业务模式接受完整的助手文本对象；工具调用、思考块等不当作最终业务结果。
+            if (!businessJson
+                    || json == null
+                    || result.getRole() != MsgRole.ASSISTANT
+                    || result.getContent().isEmpty()
+                    || result.getContent().stream()
+                            .anyMatch(block -> !(block instanceof TextBlock))) {
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+            }
+            String raw =
+                    new RestrictedHarnessFactory.StructuredReply(result.getTextContent()).answer();
+            safety.require("OUTPUT", raw);
+            Map<?, ?> data;
+            try {
+                data = json.decode(raw, Map.class);
+            } catch (RuntimeException invalid) {
+                // 不保存解析器异常，避免正文、非法值或动态路径进入诊断。
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+            }
+            if (data == null) throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+            return readBusinessObject(data);
+        }
         if (!businessJson)
             return result.getStructuredData(RestrictedHarnessFactory.StructuredReply.class)
                     .answer();
-        java.util.Map<?, ?> data = result.getStructuredData(java.util.Map.class);
+        return readBusinessObject(result.getStructuredData(Map.class));
+    }
+
+    /**
+     * 规范化完整业务对象，沿用原有封装检查，不丢弃旁字段。
+     *
+     * @param data 完整业务对象
+     * @return 仍待调用方校验的JSON或兼容answer正文
+     */
+    private static String readBusinessObject(Map<?, ?> data) {
         // generate_response的单层response封装不能混入业务字段后再被静默丢弃。
-        if (data.size() == 1 && data.get("response") instanceof java.util.Map<?, ?> nested)
-            data = nested;
+        if (data.size() == 1 && data.get("response") instanceof Map<?, ?> nested) data = nested;
         if (data.containsKey("answer")) {
             if (data.size() != 1 || !(data.get("answer") instanceof String answer))
                 throw new OutputFailure(OutputProblem.ENVELOPE);

@@ -20,6 +20,118 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 使用真实Harness delegate与本地Model，验证恢复、消息角色与安全展示边界。 */
 class ControlledHarnessCallTest {
+    /** 完整合法JSON正文可进入同一业务解码器，保留原字段，不靠框架元数据判定业务有效性。 */
+    @Test
+    void completeBusinessJsonTextUsesStrictApplicationCodec() {
+        var codec =
+                new com.lawrence.travel.infrastructure.interaction.InteractionJson(
+                        new com.lawrence.travel.infrastructure.travel.TravelJson());
+        var expected =
+                new com.lawrence.travel.domain.interaction.DialogueIntent.Result(
+                        List.of(
+                                new com.lawrence.travel.domain.interaction.DialogueIntent.Intent(
+                                        com.lawrence.travel.domain.interaction.DialogueIntent.Kind
+                                                .PLANNING,
+                                        com.lawrence.travel.domain.interaction.DialogueIntent.Action
+                                                .SUPPLEMENT,
+                                        "北京")),
+                        List.of(
+                                new com.lawrence.travel.domain.interaction.DialogueIntent.Fact(
+                                        "cities", "北京", "北京")),
+                        "已记录",
+                        "",
+                        null,
+                        "",
+                        "",
+                        "");
+        String result = plainFixture(codec.encode(expected), true, true);
+        assertThat(
+                        codec.decode(
+                                result,
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result.class))
+                .isEqualTo(expected);
+        assertThatThrownBy(() -> plainFixture(codec.encode(expected), false, true))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class);
+        assertThatThrownBy(() -> plainFixture(codec.encode(expected), true, false))
+                .isInstanceOf(ControlledHarnessCall.OutputFailure.class);
+    }
+
+    /** 只解析完整对象；重复键、尾随内容、代码围栏及空对象不能被截取或补写后接受。 */
+    @Test
+    void textFallbackDoesNotRepairMalformedOrAmbiguousJson() {
+        for (String text :
+                List.of(
+                        "{}",
+                        "null",
+                        "[]",
+                        "\"text\"",
+                        "说明{\"reply\":\"a\"}",
+                        "{\"reply\":\"a\"}尾随",
+                        "{\"reply\":\"a\"}{}",
+                        "```json\n{\"reply\":\"a\"}\n```",
+                        "{\"reply\":\"a\",\"reply\":\"b\"}")) {
+            assertThatThrownBy(() -> plainFixture(text, true, true))
+                    .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
+                    .hasMessage("MODEL_OUTPUT_INVALID");
+        }
+        assertThatThrownBy(
+                        () -> plainFixture("{\"reply\":\"<script>unsafe</script>\"}", true, true))
+                .isInstanceOf(SafetyGate.Failure.class);
+        var codec =
+                new com.lawrence.travel.infrastructure.interaction.InteractionJson(
+                        new com.lawrence.travel.infrastructure.travel.TravelJson());
+        String incomplete = plainFixture("{\"intents\":\"非法数组\"}", true, true);
+        assertThatThrownBy(
+                        () ->
+                                codec.decode(
+                                        incomplete,
+                                        com.lawrence.travel.domain.interaction.DialogueIntent.Result
+                                                .class))
+                .isInstanceOf(
+                        com.lawrence.travel.application.interaction.DialogueDecodeFailure.class);
+    }
+
+    /**
+     * 用真实Harness接收本地纯文本返回，校验成功后仍须通过原提交前检查。
+     *
+     * @param text 合成返回正文
+     * @param businessJson 应用是否声明JSON模式
+     * @param withCodec 是否显式提供严格编解码器
+     * @return 完整规范化产物；不发外部请求
+     */
+    private String plainFixture(String text, boolean businessJson, boolean withCodec) {
+        var model =
+                new HarnessProbeFixture.ProbeModel(
+                        (messages, n) -> HarnessProbeFixture.answer(text));
+        var checks = new AtomicInteger();
+        String result =
+                ControlledHarnessCall.execute(
+                        () ->
+                                RestrictedHarnessFactory.create(
+                                        model,
+                                        new Toolkit(),
+                                        root.resolve(java.util.UUID.randomUUID().toString()),
+                                        "coordinator",
+                                        businessJson),
+                        () -> List.of(message("本地合成输入", MsgRole.USER)),
+                        () -> {
+                            throw new AssertionError("NO_RETRY");
+                        },
+                        checks::incrementAndGet,
+                        SafetyGate.local(),
+                        () -> false,
+                        agent -> {},
+                        businessJson,
+                        withCodec
+                                ? new com.lawrence.travel.infrastructure.interaction
+                                        .InteractionJson(
+                                        new com.lawrence.travel.infrastructure.travel.TravelJson())
+                                : null);
+        assertThat(checks).hasValue(1);
+        assertThat(model.requests).hasSize(1);
+        return result;
+    }
+
     /** 框架返回普通文本时不自动提取JSON，固定错误码指出缺少结构化数据。 */
     @Test
     void unstructuredReplyIsRejectedWithoutReadingItsBodyIntoDiagnostics() {
