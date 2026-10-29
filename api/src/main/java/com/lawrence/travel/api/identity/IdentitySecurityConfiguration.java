@@ -177,7 +177,8 @@ public class IdentitySecurityConfiguration {
                                                 "/api/v1/tasks",
                                                 "/api/v1/tasks/*/versions",
                                                 "/api/v1/tasks/*/versions/*",
-                                                "/api/v1/tasks/*/version-diff")
+                                                "/api/v1/tasks/*/version-diff",
+                                                "/api/v1/evaluations/*/review")
                                         .authenticated()
                                         .requestMatchers(
                                                 org.springframework.http.HttpMethod.POST,
@@ -187,7 +188,8 @@ public class IdentitySecurityConfiguration {
                                                 "/api/v1/tasks/*/accept",
                                                 "/api/v1/tasks/*/candidate/revalidate",
                                                 "/api/v1/tasks/*/versions/*/restore",
-                                                "/api/v1/tasks/*/runs/*/cancel")
+                                                "/api/v1/tasks/*/runs/*/cancel",
+                                                "/api/v1/evaluations/*/review")
                                         .authenticated()
                                         .requestMatchers(
                                                 "/api/v1/preferences", "/api/v1/preferences/**")
