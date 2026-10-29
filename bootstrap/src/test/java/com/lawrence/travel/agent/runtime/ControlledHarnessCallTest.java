@@ -20,6 +20,146 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 使用真实Harness delegate与本地Model，验证恢复、消息角色与安全展示边界。 */
 class ControlledHarnessCallTest {
+    /** 复现缺少answer的业务对象在旧封装中失败；业务模式保留原字段并交给严格业务解码。 */
+    @Test
+    void directBusinessJsonKeepsFactsAndRequiresExplicitMode() {
+        var data =
+                new java.util.LinkedHashMap<String, Object>(
+                        Map.of(
+                                "intents",
+                                List.of(
+                                        Map.of(
+                                                "kind",
+                                                "PLANNING",
+                                                "action",
+                                                "START_PLAN",
+                                                "quote",
+                                                "开始规划北京旅行")),
+                                "facts",
+                                List.of(Map.of("field", "cities", "value", "北京", "quote", "北京")),
+                                "reply",
+                                "已记录北京",
+                                "clarification",
+                                "",
+                                "category",
+                                "",
+                                "value",
+                                "",
+                                "city",
+                                "",
+                                "resolvedInputs",
+                                List.of(),
+                                "advice",
+                                List.of()));
+        data.put("targetId", null);
+        assertThatThrownBy(() -> businessFixture(data, false))
+                .hasStackTraceContaining("RestrictedHarnessFactory$StructuredReply");
+        String result = businessFixture(data, true);
+        var decoded =
+                new com.lawrence.travel.infrastructure.interaction.InteractionJson(
+                                new com.lawrence.travel.infrastructure.travel.TravelJson())
+                        .decode(
+                                result,
+                                com.lawrence.travel.domain.interaction.DialogueIntent.Result.class);
+        assertThat(decoded.facts().getFirst().value()).isEqualTo("北京");
+        assertThat(decoded.intents().getFirst().action())
+                .isEqualTo(com.lawrence.travel.domain.interaction.DialogueIntent.Action.START_PLAN);
+        assertThat(decoded.reply()).isEqualTo("已记录北京");
+    }
+
+    /** 只识别完整的单层response封装，不把answer对象、空答案或空对象当成功。 */
+    @Test
+    void businessModeRejectsEmptyAndMalformedEnvelopes() {
+        assertThat(businessFixture(Map.of("response", Map.of("answer", "合法封装")), true))
+                .isEqualTo("合法封装");
+        for (Map<String, Object> data :
+                List.of(
+                        Map.<String, Object>of(),
+                        Map.<String, Object>of("answer", ""),
+                        Map.<String, Object>of("answer", Map.of("reply", "不能伪装字符串")),
+                        Map.<String, Object>of("answer", "{}", "facts", List.of("不能丢弃的字段")))) {
+            assertThatThrownBy(() -> businessFixture(data, true))
+                    .hasMessageContaining("MODEL_OUTPUT_INVALID");
+        }
+    }
+
+    /** 原业务类型校验和输出安全检查仍然生效，适配不修补非法业务字段。 */
+    @Test
+    void directJsonStillRequiresBusinessAndSafetyValidation() {
+        String wrong = businessFixture(Map.of("intents", "不是数组"), true);
+        assertThatThrownBy(
+                        () ->
+                                new com.lawrence.travel.infrastructure.interaction.InteractionJson(
+                                                new com.lawrence.travel.infrastructure.travel
+                                                        .TravelJson())
+                                        .decode(
+                                                wrong,
+                                                com.lawrence.travel.domain.interaction
+                                                        .DialogueIntent.Result.class))
+                .isInstanceOf(
+                        com.lawrence.travel.application.interaction.DialogueDecodeFailure.class);
+        assertThatThrownBy(() -> businessFixture(Map.of("reply", "<script>unsafe</script>"), true))
+                .isInstanceOf(SafetyGate.Failure.class);
+    }
+
+    /**
+     * 通过真实Harness和本地Model返回指定结构，不发网络；成功产物只消费一次请求。
+     *
+     * @param data 模拟的最终结构化对象
+     * @param businessJson 是否由应用启用业务JSON适配
+     * @return 安全检查后的原产物
+     */
+    private String businessFixture(Map<String, Object> data, boolean businessJson) {
+        var model =
+                new HarnessProbeFixture.ProbeModel(
+                        (messages, n) ->
+                                Flux.just(
+                                        ChatResponse.builder()
+                                                .id("local-json")
+                                                .content(
+                                                        List.of(
+                                                                ToolUseBlock.builder()
+                                                                        .id("json-reply")
+                                                                        .name("generate_response")
+                                                                        .input(
+                                                                                Map.of(
+                                                                                        "response",
+                                                                                        data))
+                                                                        .content(
+                                                                                new com.lawrence
+                                                                                                .travel
+                                                                                                .infrastructure
+                                                                                                .travel
+                                                                                                .TravelJson()
+                                                                                        .encode(
+                                                                                                Map
+                                                                                                        .of(
+                                                                                                                "response",
+                                                                                                                data)))
+                                                                        .build()))
+                                                .build()));
+        String result =
+                ControlledHarnessCall.execute(
+                        () ->
+                                RestrictedHarnessFactory.create(
+                                        model,
+                                        new Toolkit(),
+                                        root.resolve(java.util.UUID.randomUUID().toString()),
+                                        "coordinator",
+                                        businessJson),
+                        () -> List.of(message("返回本地合成业务结果", MsgRole.USER)),
+                        () -> {
+                            throw new AssertionError("LOCAL_JSON_MUST_NOT_RETRY");
+                        },
+                        () -> {},
+                        SafetyGate.local(),
+                        () -> false,
+                        agent -> {},
+                        businessJson);
+        assertThat(model.requests).hasSize(1);
+        return result;
+    }
+
     /** 仅旧历史带可卸载标记；本轮权威区完整保留，审核单条上下文也不能被当成历史。 */
     @Test
     void sessionMappingNeverMarksCurrentAuthorityAsOptional() {

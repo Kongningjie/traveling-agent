@@ -367,7 +367,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                         workspaceRoot
                                 .resolve(runId.toString())
                                 .resolve(UUID.randomUUID().toString()),
-                        role);
+                        role,
+                        basis != null);
         var invocation = new ActiveInvocation(harness, transport, safety);
         var firstHarness = new AtomicBoolean(true);
         Supplier<HarnessAgent> factory =
@@ -380,7 +381,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                         workspaceRoot
                                                 .resolve(runId.toString())
                                                 .resolve(UUID.randomUUID().toString()),
-                                        role);
+                                        role,
+                                        basis != null);
         var correlation = com.lawrence.travel.application.execution.ExecutionCorrelation.current();
         var parent = com.lawrence.travel.application.execution.ExecutionCorrelation.parentSpan();
         var traceParent =
@@ -418,7 +420,9 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                                     "role",
                                                     role,
                                                     "schema",
-                                                    "structured-reply-v1"))) {
+                                                    basis == null
+                                                            ? "structured-reply-v1"
+                                                            : "business-json-v1"))) {
                         transport.traceParent(
                                 com.lawrence.travel.application.execution.ExecutionCorrelation
                                         .traceParent());
@@ -505,7 +509,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                 factory,
                                 () -> {
                                     if (firstHarness.compareAndSet(true, false)) harness.close();
-                                });
+                                },
+                                basis != null);
                         if (invocation.result.isCompletedExceptionally())
                             roleSpan.fail(
                                     invocation.cancelled.get()
@@ -637,12 +642,14 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
          * @param recovery 同预算唯一超限恢复
          * @param factory 每轮隔离框架实例
          * @param cleanupUnused 取消发生在建轮前时释放预建资源
+         * @param businessJson 应用声明的业务JSON模式，非上下文调用仍要求answer字符串
          */
         private void execute(
                 Supplier<List<Msg>> prompt,
                 Supplier<List<Msg>> recovery,
                 Supplier<HarnessAgent> factory,
-                Runnable cleanupUnused) {
+                Runnable cleanupUnused,
+                boolean businessJson) {
             executionThread = Thread.currentThread();
             try (transport) {
                 String answer =
@@ -653,7 +660,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
                                 transport::checkContext,
                                 safety,
                                 cancelled::get,
-                                activeHarness::set);
+                                activeHarness::set,
+                                businessJson);
                 if (!cancelled.get()) result.complete(answer);
             } catch (RuntimeException failure) {
                 if (!cancelled.get()) {

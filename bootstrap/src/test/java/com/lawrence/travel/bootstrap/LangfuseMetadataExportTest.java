@@ -38,6 +38,25 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /** 本地替身验证白名单、父子关联、计量未知、碰撞和故障隔离，不调用外部服务。 */
 class LangfuseMetadataExportTest {
+    /** 新业务JSON版本和旧文本版本均可导出，避免模式调整后轨迹被白名单丢弃。 */
+    @Test
+    void exportsBusinessJsonAndLegacySchemaVersions() throws Exception {
+        try (var fixture = new Fixture(16)) {
+            fixture.rows =
+                    List.of(
+                            fact(null, "COORDINATE", "COMPLETED", null, null),
+                            fact(null, "COORDINATE", "COMPLETED", null, null, "business-json-v1"));
+            fixture.export.pollOnce();
+            await(() -> fixture.export.counters().accepted() == 2);
+            String versions =
+                    fixture.sink.spans.stream()
+                            .map(s -> s.getAttributes().toString())
+                            .collect(java.util.stream.Collectors.joining());
+            assertTrue(versions.contains("business-json-v1"));
+            assertTrue(versions.contains("structured-reply-v1"));
+        }
+    }
+
     /**
      * 每个模型请求独立成节点；UNKNOWN不写零Token，取消不变失败，原身份不进入属性。
      *
@@ -324,6 +343,27 @@ class LangfuseMetadataExportTest {
             String state,
             String model,
             String meter) {
+        return fact(parent, kind, state, model, meter, "structured-reply-v1");
+    }
+
+    /**
+     * 构造指定输出版本的合成事实，不能携带业务正文。
+     *
+     * @param parent 父节点，可空
+     * @param kind 节点类型
+     * @param state 状态
+     * @param model 型号，可空
+     * @param meter 计量状态，可空
+     * @param schema 明确的输出模式版本
+     * @return 本地导出测试事实
+     */
+    private static LangfuseMetadataMapper.Fact fact(
+            LangfuseMetadataMapper.Fact parent,
+            String kind,
+            String state,
+            String model,
+            String meter,
+            String schema) {
         var start = Instant.now();
         boolean known = "COMPLETED".equals(meter);
         return new LangfuseMetadataMapper.Fact(
@@ -336,7 +376,7 @@ class LangfuseMetadataExportTest {
                 start,
                 start.plusMillis(10),
                 "coordinator",
-                "structured-reply-v1",
+                schema,
                 model,
                 meter,
                 model == null ? null : 100L,

@@ -81,7 +81,11 @@ public final class LangfuseMetadataExport implements AutoCloseable {
     private static final Set<String> MODELS =
             Set.of("qwen3.8-27b", "qwen3.7-flash-2026-07-15", "qwen3.8-max-0902", "qwen3.8-flash");
     private static final Set<String> SCHEMAS =
-            Set.of("structured-reply-v1", "session-context-v1", "conversation-digest-v1");
+            Set.of(
+                    "structured-reply-v1",
+                    "business-json-v1",
+                    "session-context-v1",
+                    "conversation-digest-v1");
     private final LangfuseMetadataMapper mapper;
     private final UUID user;
     private final Instant since;

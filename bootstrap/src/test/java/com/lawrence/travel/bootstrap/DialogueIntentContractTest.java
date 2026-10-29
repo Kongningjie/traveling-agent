@@ -120,7 +120,7 @@ class DialogueIntentContractTest {
                         "x".repeat(10000),
                         "\"facts\":[]",
                         "无事实时facts必须为[]，不能为{}",
-                        "不是替代框架外层结构",
+                        "直接返回下列完整业务JSON对象，不添加answer外层",
                         "城市名称沿用用户原文");
         org.mockito.Mockito.verify(invocation).close();
     }
