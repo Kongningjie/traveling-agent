@@ -218,6 +218,13 @@ class ControlledHarnessCallTest {
                         agent -> {},
                         businessJson);
         assertThat(model.requests).hasSize(1);
+        if (businessJson) {
+            assertThat(HarnessProbeFixture.text(model.requests.getFirst()))
+                    .contains("必须调用该工具", "完整业务对象放入response参数", "不能只在回复正文中输出JSON");
+            assertThat(model.schemas.getFirst())
+                    .anySatisfy(
+                            schema -> assertThat(schema.getName()).isEqualTo("generate_response"));
+        }
         return result;
     }
 

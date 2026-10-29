@@ -129,6 +129,7 @@ class DialogueIntentContractTest {
                 .contains(
                         "resolvedInputs只能选取本次context.unresolved[].id",
                         "unresolved为空或没有解决其中诉求时必须返回[]")
+                .contains("提供generate_response时用其response参数提交业务对象")
                 .doesNotContain("所有字符串必填，未知用空串");
         org.mockito.Mockito.verify(invocation).close();
     }
