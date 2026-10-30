@@ -37,7 +37,7 @@ final class ExtractedPageText {
             }
             var normalized = new LinkedHashMap<Object, Object>(page);
             normalized.put("raw_content", text);
-            normalized.put("raw_content_transform", "ACTIVE_MARKDOWN_TARGETS_REMOVED_V1");
+            normalized.put("raw_content_transform", "ACTIVE_MARKDOWN_TARGETS_REMOVED_V2");
             normalized.put("raw_content_original_hash", EvidencePolicy.hash(original));
             pages.add(normalized);
             changed = true;
@@ -49,38 +49,37 @@ final class ExtractedPageText {
     }
 
     /**
-     * 识别普通行内链接，仅移除活动目标并保留标签；复杂或不完整语法原样保留，交给后续检查拒绝。
+     * 识别行内链接和嵌套标签，仅移除活动目标；过深或不完整语法原样保留，交给后续检查拒绝。
      *
      * @param text 网页提取文本，不包含用户会话
      * @return 可见文字和未修改的其他内容，不代表安全检查已通过
      */
     static String visibleText(String text) {
         var output = new StringBuilder(text.length());
-        int labelStart = -1, outputStart = -1;
+        var labels = new java.util.ArrayDeque<Integer>();
         for (int i = 0; i < text.length(); i++) {
             char current = text.charAt(i);
             if (current == '\\' && i + 1 < text.length()) {
                 output.append(current).append(text.charAt(++i));
                 continue;
             }
-            if (current == '\n' || current == '\r') labelStart = -1;
             if (current == '[') {
-                labelStart = i;
-                outputStart = output.length();
-            } else if (current == ']' && labelStart >= 0) {
-                if (i + 1 < text.length()
-                        && text.charAt(i + 1) == '('
-                        && ACTIVE_TARGET.matcher(text).region(i + 2, text.length()).lookingAt()) {
+                if (labels.size() >= 32) return text;
+                labels.push(output.length());
+            } else if (current == ']' && !labels.isEmpty()) {
+                int outputStart = labels.pop();
+                if (i + 1 < text.length() && text.charAt(i + 1) == '(') {
                     int end = targetEnd(text, i + 1);
                     if (end < 0) {
                         output.append(text, i, text.length());
                         break;
                     }
-                    output.setLength(outputStart);
-                    output.append(text, labelStart + 1, i);
+                    if (ACTIVE_TARGET.matcher(text).region(i + 2, text.length()).lookingAt()) {
+                        // 内层目标可能已经移除；只删当前左括号，不从原文恢复已清理内容。
+                        output.deleteCharAt(outputStart);
+                    } else output.append(text, i, end + 1);
                     i = end;
                 } else output.append(current);
-                labelStart = -1;
                 continue;
             }
             output.append(current);

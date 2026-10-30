@@ -43,7 +43,7 @@ class ExtractedPageTextTest {
         assertThat(normalized.get("raw_content_original_hash"))
                 .isEqualTo(EvidencePolicy.hash(text));
         assertThat(normalized.get("raw_content_transform"))
-                .isEqualTo("ACTIVE_MARKDOWN_TARGETS_REMOVED_V1");
+                .isEqualTo("ACTIVE_MARKDOWN_TARGETS_REMOVED_V2");
         assertThat(SafetyGate.local().check("TOOL_OUTPUT", result.toString()).status())
                 .isEqualTo(SafetyGate.Status.ALLOW);
     }
@@ -77,6 +77,25 @@ class ExtractedPageTextTest {
         assertThat(ExtractedPageText.clean(data)).isSameAs(data);
         String cleaned = ExtractedPageText.visibleText("[预约](javascript:void(0))");
         assertThat(ExtractedPageText.visibleText(cleaned)).isEqualTo(cleaned);
+    }
+
+    /** 嵌套图片、嵌套链接及换行标签保留显示内容，外层清理不能恢复已移除的内层目标。 */
+    @Test
+    void nestedLabelsDoNotRestoreExecutableInnerTargets() {
+        assertThat(
+                        ExtractedPageText.visibleText(
+                                "[![预约](https://official.example/icon.png)](javascript:void(0))"))
+                .isEqualTo("![预约](https://official.example/icon.png)");
+        assertThat(ExtractedPageText.visibleText("[[预约](javascript:void(0))](javascript:go())"))
+                .isEqualTo("预约");
+        assertThat(ExtractedPageText.visibleText("[预约\n门票](javascript:void(0))"))
+                .isEqualTo("预约\n门票");
+        String safe = "[[预约]](https://official.example/)";
+        assertThat(ExtractedPageText.visibleText(safe)).isEqualTo(safe);
+        String deep = "[".repeat(33) + "预约" + "]".repeat(33) + "(javascript:void(0))";
+        assertThat(ExtractedPageText.visibleText(deep)).isEqualTo(deep);
+        assertThat(SafetyGate.local().check("TOOL_OUTPUT", deep).status())
+                .isEqualTo(SafetyGate.Status.REJECT);
     }
 
     /** 清理导航目标不降低证据标准；只有原文支持日期和值时才能标为已知。 */

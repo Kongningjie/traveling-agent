@@ -293,7 +293,7 @@ class Dev35TripDemoTest {
                 json.encode(
                         Map.of(
                                 "version",
-                                "tool-safety-probe-v1",
+                                "tool-safety-probe-v2",
                                 "mode",
                                 "DIAGNOSTIC_ONLY",
                                 "reviews",

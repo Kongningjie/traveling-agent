@@ -47,4 +47,22 @@ class ToolSafetyDiagnosticsTest {
                         "credentialLike")) assertThat(result.get(key)).isEqualTo(false);
         assertThat(ToolSafetyDiagnostics.inspect(null).get("missing")).isEqualTo(true);
     }
+
+    /** 剩余协议只记录数量和链接结构特征，不返回目标或标签片段。 */
+    @Test
+    void remainingLinksExposeStructureWithoutContent() {
+        String text =
+                "{\"raw_content_transform\":\"ACTIVE_MARKDOWN_TARGETS_REMOVED_V2\","
+                        + "\"raw_content\":\"[![PRIVATE_LABEL](icon)](javascript:void(0))\"}";
+        var result = ToolSafetyDiagnostics.inspect(text);
+        assertThat(result.get("remainingActiveUriCount")).isEqualTo(1);
+        assertThat(result.get("activeUriInInlineTarget")).isEqualTo(true);
+        assertThat(result.get("nestedMarkdownLabel")).isEqualTo(true);
+        assertThat(result.get("textTransformPresent")).isEqualTo(true);
+        assertThat(result.toString()).doesNotContain("PRIVATE_LABEL", "javascript:", "void(0)");
+        assertThat(
+                        ToolSafetyDiagnostics.inspect("\\[PRIVATE_LABEL](javascript:blocked)")
+                                .get("escapedMarkdownLabel"))
+                .isEqualTo(true);
+    }
 }

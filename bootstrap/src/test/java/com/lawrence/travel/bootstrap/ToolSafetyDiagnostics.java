@@ -16,27 +16,52 @@ final class ToolSafetyDiagnostics {
      */
     static Map<String, Object> inspect(String text) {
         String value = text == null ? "" : text;
-        return Map.of(
-                "characters",
-                value.length(),
-                "missing",
-                text == null,
-                "oversized",
-                value.length() > 262144,
-                "nul",
-                value.indexOf(0) >= 0,
-                "activeMarkup",
-                Pattern.compile("(?is)<\\s*(script|iframe|object)\\b").matcher(value).find(),
-                "activeUri",
+        var result =
+                new java.util.LinkedHashMap<String, Object>(
+                        Map.of(
+                                "characters",
+                                value.length(),
+                                "missing",
+                                text == null,
+                                "oversized",
+                                value.length() > 262144,
+                                "nul",
+                                value.indexOf(0) >= 0,
+                                "activeMarkup",
+                                Pattern.compile("(?is)<\\s*(script|iframe|object)\\b")
+                                        .matcher(value)
+                                        .find(),
+                                "activeUri",
+                                Pattern.compile(
+                                                "(?is)(?:javascript|vbscript)\\s*:|data\\s*:\\s*text/html")
+                                        .matcher(value)
+                                        .find(),
+                                "eventAttribute",
+                                Pattern.compile("(?is)on(?:error|load)\\s*=").matcher(value).find(),
+                                "credentialLike",
+                                Pattern.compile(
+                                                "(?is)authorization\\s*[:=]\\s*bearer\\s+[a-zA-Z0-9._-]{8,}|\\bsk-[a-zA-Z0-9_-]{24,}")
+                                        .matcher(value)
+                                        .find()));
+        var active =
                 Pattern.compile("(?is)(?:javascript|vbscript)\\s*:|data\\s*:\\s*text/html")
-                        .matcher(value)
-                        .find(),
-                "eventAttribute",
-                Pattern.compile("(?is)on(?:error|load)\\s*=").matcher(value).find(),
-                "credentialLike",
-                Pattern.compile(
-                                "(?is)authorization\\s*[:=]\\s*bearer\\s+[a-zA-Z0-9._-]{8,}|\\bsk-[a-zA-Z0-9_-]{24,}")
-                        .matcher(value)
-                        .find());
+                        .matcher(value);
+        int count = 0;
+        boolean inlineTarget = false;
+        while (active.find()) {
+            count++;
+            String prefix = value.substring(Math.max(0, active.start() - 512), active.start());
+            int opening = prefix.lastIndexOf("](");
+            if (opening >= 0) {
+                String gap = prefix.substring(opening + 2).strip();
+                inlineTarget |= gap.isEmpty() || gap.equals("<");
+            }
+        }
+        result.put("remainingActiveUriCount", count);
+        result.put("activeUriInInlineTarget", inlineTarget);
+        result.put("nestedMarkdownLabel", value.contains("[![") || value.contains("[["));
+        result.put("escapedMarkdownLabel", value.contains("\\[") || value.contains("\\]"));
+        result.put("textTransformPresent", value.contains("\"raw_content_transform\""));
+        return Map.copyOf(result);
     }
 }
