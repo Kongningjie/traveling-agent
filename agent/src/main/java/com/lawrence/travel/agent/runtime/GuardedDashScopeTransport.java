@@ -484,6 +484,11 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
                                                                                 diagnostic
                                                                                         .limit()));
                                                             sink.error(safe);
+                                                        } else if (failure
+                                                                instanceof
+                                                                ProviderCallFailure provider) {
+                                                            // 已脱敏的供应商失败保留当前请求零用量证据。
+                                                            sink.error(provider);
                                                         } else {
                                                             String code =
                                                                     failure

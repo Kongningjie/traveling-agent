@@ -41,6 +41,7 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
     private final com.lawrence.travel.domain.execution.control.RunLimits sourceLimits;
     private final com.lawrence.travel.application.port.ExecutionTrace trace;
     private final OkHttpClient client = new OkHttpClient();
+    private final okhttp3.Call.Factory localConnections;
 
     /** smoke 仅提供状态，没有请求发送能力。 */
     public HarnessAgentRuntimeAdapter() {
@@ -216,6 +217,57 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
             com.lawrence.travel.application.port.BudgetLedger sourceLedger,
             com.lawrence.travel.domain.execution.control.RunLimits sourceLimits,
             com.lawrence.travel.application.port.ExecutionTrace trace) {
+        this(
+                admission,
+                models,
+                keySupplier,
+                workspaceRoot,
+                toolkits,
+                contexts,
+                json,
+                sessions,
+                safety,
+                sourceReads,
+                sourceLedger,
+                sourceLimits,
+                trace,
+                null);
+    }
+
+    /**
+     * 包内组合测试可替换连接工厂，生产装配仍使用受限OkHttp客户端和原端点白名单。
+     *
+     * @param admission 原请求准入
+     * @param models 固定角色型号
+     * @param keySupplier 凭据提供器，测试只传占位值
+     * @param workspaceRoot 隔离工作区
+     * @param toolkits 原工具集工厂
+     * @param contexts 权威上下文装配
+     * @param json 原业务编解码器
+     * @param sessions 会话服务，可空
+     * @param safety 输入输出检查
+     * @param sourceReads 附件读取，可空
+     * @param sourceLedger 附件调用计量，可空
+     * @param sourceLimits 附件预算，可空
+     * @param trace 原链路记录器
+     * @param localConnections 本地可控连接；null保持生产连接行为，不接受配置或用户输入
+     */
+    HarnessAgentRuntimeAdapter(
+            ModelCallAdmission admission,
+            Map<String, String> models,
+            Supplier<String> keySupplier,
+            Path workspaceRoot,
+            java.util.function.BiFunction<UUID, String, Toolkit> toolkits,
+            com.lawrence.travel.application.memory.ContextAssembler contexts,
+            com.lawrence.travel.application.port.InteractionCodec json,
+            com.lawrence.travel.application.memory.SessionContextService sessions,
+            com.lawrence.travel.application.safety.SafetyGate safety,
+            com.lawrence.travel.application.document.SourceReadService sourceReads,
+            com.lawrence.travel.application.port.BudgetLedger sourceLedger,
+            com.lawrence.travel.domain.execution.control.RunLimits sourceLimits,
+            com.lawrence.travel.application.port.ExecutionTrace trace,
+            okhttp3.Call.Factory localConnections) {
+        this.localConnections = localConnections;
         this.trace = trace;
         this.sourceReads = sourceReads;
         this.sourceLedger = sourceLedger;
@@ -361,17 +413,18 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         var sessionSource =
                 new java.util.concurrent.atomic.AtomicReference<
                         com.lawrence.travel.application.memory.SessionContext.Source>();
+        Runnable contextGuard =
+                () -> {
+                    if (toolkit instanceof SafetyToolkit boundary) boundary.check();
+                    if (sessionSource.get() != null) sessions.guard(sessionSource.get());
+                    else if (source.get() != null) contexts.guard(source.get());
+                };
         var transport =
-                new GuardedDashScopeTransport(
-                        admission,
-                        runId,
-                        role,
-                        client,
-                        () -> {
-                            if (toolkit instanceof SafetyToolkit boundary) boundary.check();
-                            if (sessionSource.get() != null) sessions.guard(sessionSource.get());
-                            else if (source.get() != null) contexts.guard(source.get());
-                        });
+                localConnections == null
+                        ? new GuardedDashScopeTransport(
+                                admission, runId, role, client, contextGuard)
+                        : new GuardedDashScopeTransport(
+                                admission, runId, role, localConnections, contextGuard);
         if (toolkit instanceof SourceToolkit sources)
             transport.contextHeadroom(sources::contextHeadroom);
         // 关闭SDK自动搜索和重试。

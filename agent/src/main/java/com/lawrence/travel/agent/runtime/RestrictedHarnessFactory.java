@@ -91,6 +91,7 @@ public final class RestrictedHarnessFactory {
                         .enableAgentTracingLog(false)
                         .enableTaskList(false)
                         .enableMetaTool(false);
+        if (businessJson) builder.middleware(new BusinessOutputGuard());
         if (toolkit instanceof SourceToolkit sources)
             builder.middleware(sources.budgetedEviction());
         var agent = builder.build();

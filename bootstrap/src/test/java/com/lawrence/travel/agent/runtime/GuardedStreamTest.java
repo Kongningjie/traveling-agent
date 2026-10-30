@@ -39,6 +39,50 @@ import static org.mockito.Mockito.when;
 
 /** 真实门禁和传输路径配可控 SSE 响应；不读密钥、不访问供应商。 */
 class GuardedStreamTest {
+    /** 流式错误边界保留零用量证据；未知用量不补零，三次显式调用没有内部重发。 */
+    @Test
+    void streamedProviderErrorsRetainCurrentUsageEvidence() throws Exception {
+        for (int index = 0; index < 3; index++) {
+            boolean zero = index < 2;
+            int status = index == 1 ? 503 : 429;
+            String body =
+                    zero
+                            ? "{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}"
+                            : "{\"message\":\"SYNTHETIC_PRIVATE\"}";
+            when(call.execute())
+                    .thenReturn(
+                            response(ResponseBody.create(body, MediaType.get("application/json")))
+                                    .newBuilder()
+                                    .code(status)
+                                    .build());
+            try (var transport = transport(true)) {
+                assertThatThrownBy(
+                                () -> transport.stream(request()).blockLast(Duration.ofSeconds(3)))
+                        .isInstanceOf(ProviderCallFailure.class)
+                        .satisfies(
+                                error -> {
+                                    var failure =
+                                            new SanitizedAgentFailure(error.getMessage(), error);
+                                    assertThat(failure.knownZeroUsage()).isEqualTo(zero);
+                                    assertThat(failure.recovery())
+                                            .isEqualTo(
+                                                    zero
+                                                            ? com.lawrence.travel.application
+                                                                    .execution.AgentCallFailure
+                                                                    .Recovery.RETRY
+                                                            : com.lawrence.travel.application
+                                                                    .execution.AgentCallFailure
+                                                                    .Recovery.PAUSE);
+                                    assertThat(error.getCause()).isNull();
+                                });
+            }
+        }
+        verify(call, org.mockito.Mockito.times(3)).execute();
+        verify(ledger, org.mockito.Mockito.times(2))
+                .finish(eq(reservation), eq(new TokenUsage(0, 0)), any());
+        verify(ledger).finish(eq(reservation), isNull(), any());
+    }
+
     /** 运行句柄关闭后的drain必须等实际请求退出，不能只等待Future取消。 */
     @Test
     void drainWaitsForActualTransportExitAfterCancellation() throws Exception {
