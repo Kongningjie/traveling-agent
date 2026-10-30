@@ -148,6 +148,7 @@ public final class TravelHttpTools implements TravelToolPort {
                             .build();
         }
         Map<String, Object> data = send(request, secret);
+        if (operation == Operation.EXTRACT) data = ExtractedPageText.clean(data);
         if (operation != Operation.SEARCH
                 && operation != Operation.EXTRACT
                 && !"1".equals(data.get("status"))) {
