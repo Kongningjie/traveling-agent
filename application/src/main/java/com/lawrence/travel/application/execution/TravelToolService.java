@@ -5,6 +5,7 @@ import com.lawrence.travel.application.port.ToolEvidenceJournal;
 import com.lawrence.travel.application.port.TravelToolPort;
 import com.lawrence.travel.domain.execution.control.CallKind;
 import com.lawrence.travel.domain.execution.control.RunLimits;
+import com.lawrence.travel.domain.execution.control.TokenUsage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -150,6 +151,7 @@ public final class TravelToolService {
                 UUID id = journal.reserve(runId, group);
                 long started = System.nanoTime();
                 BudgetLedger.Reservation meter = null;
+                boolean completed = false;
                 try {
                     meter =
                             ledger.reserve(
@@ -163,6 +165,7 @@ public final class TravelToolService {
                     var result = tools.query(operation, Map.copyOf(arguments));
                     safety.require("TOOL_OUTPUT", result.toString());
                     journal.finish(id, result);
+                    completed = true;
                     return result;
                 } finally {
                     // 未完成证据时由仓储将 RESERVED 转为 UNKNOWN；已完成记录不被覆盖。
@@ -172,7 +175,8 @@ public final class TravelToolService {
                         if (meter != null)
                             ledger.finish(
                                     meter.id(),
-                                    null,
+                                    // 工具不消耗模型Token；已保存响应记0，未完成仍记未知。
+                                    completed ? new TokenUsage(0, 0) : null,
                                     Duration.ofNanos(System.nanoTime() - started));
                     }
                 }

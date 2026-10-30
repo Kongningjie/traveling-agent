@@ -57,6 +57,12 @@ class TravelToolContractTest {
         }
         org.mockito.Mockito.verify(tools, org.mockito.Mockito.times(2)).query(any(), any());
         org.mockito.Mockito.verify(journal, org.mockito.Mockito.times(2)).finish(call, evidence);
+        org.mockito.Mockito.verify(ledger, org.mockito.Mockito.times(2))
+                .finish(
+                        any(),
+                        org.mockito.ArgumentMatchers.eq(
+                                new com.lawrence.travel.domain.execution.control.TokenUsage(0, 0)),
+                        any());
     }
 
     /** 直接应用调查路径也要在预占前拒绝危险参数，不能只保护Agent包装。 */
