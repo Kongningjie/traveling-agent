@@ -56,6 +56,7 @@ class Dev35TripDemoTest {
     @Autowired private ExecutionControlProperties properties;
     @MockitoSpyBean private SafetyGate safety;
     @Autowired private com.lawrence.travel.application.port.ToolEvidenceJournal toolJournal;
+    @Autowired private com.lawrence.travel.application.port.TravelToolPort toolPort;
     @MockitoSpyBean private DialogueInterpreter interpreter;
     @MockitoSpyBean private ResearchAdvisor researcher;
     @MockitoSpyBean private PlanningAdvisor planner;
@@ -235,9 +236,9 @@ class Dev35TripDemoTest {
                         })
                 .when(safety)
                 .require(org.mockito.ArgumentMatchers.eq("TOOL_OUTPUT"), any());
-        TravelToolService service = tools;
+        var adapter = toolPort;
         if (!real()) {
-            var adapter =
+            adapter =
                     org.mockito.Mockito.mock(
                             com.lawrence.travel.application.port.TravelToolPort.class);
             org.mockito.Mockito.when(adapter.query(any(), any()))
@@ -246,17 +247,18 @@ class Dev35TripDemoTest {
                                     URI.create("https://official.example/"),
                                     java.time.Instant.now(),
                                     "{\"raw_content\":\"[合成链接](javascript:blocked)\"}"));
-            service =
-                    new TravelToolService(
-                            adapter,
-                            toolJournal,
-                            ledger,
-                            properties.limits().runLimits(),
-                            Map.of(),
-                            true,
-                            java.time.Clock.systemUTC(),
-                            safety);
         }
+        // 独立探针没有旅行任务归属，不装配任务追踪；两种模式共用相同服务、账本和安全检查。
+        var service =
+                new TravelToolService(
+                        adapter,
+                        toolJournal,
+                        ledger,
+                        properties.limits().runLimits(),
+                        Map.of(),
+                        true,
+                        java.time.Clock.systemUTC(),
+                        safety);
         var run = java.util.UUID.randomUUID();
         ledger.create(run);
         String outcome = "ALLOW";
@@ -276,7 +278,6 @@ class Dev35TripDemoTest {
                             ? message
                             : "TOOL_PROBE_FAILED";
         }
-        assertThat(count.get()).isEqualTo(1);
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT count(*) FROM call_meter WHERE run_id=? AND kind='MODEL'",
@@ -305,14 +306,16 @@ class Dev35TripDemoTest {
                                                 "mode",
                                                 "DIAGNOSTIC_ONLY",
                                                 "status",
-                                                "PASS",
+                                                count.get() == 1 ? "PASS" : "FAIL",
                                                 "metrics",
                                                 metrics))));
         safety.require("EVALUATION_REPORT", body);
         Path report = Path.of(System.getenv("TRAVEL_DEV35_HTTP_REPORT"));
         Files.createDirectories(report.getParent());
         Files.writeString(report, body);
-        System.out.println("DEV35_HTTP case=DEMO-TOOL-PROBE status=PASS");
+        System.out.println(
+                "DEV35_HTTP case=DEMO-TOOL-PROBE status=" + (count.get() == 1 ? "PASS" : "FAIL"));
+        assertThat(count.get()).isEqualTo(1);
     }
 
     /**
