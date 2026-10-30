@@ -1,5 +1,6 @@
 package com.lawrence.travel.application.port;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import com.lawrence.travel.application.execution.StageCommitCommand;
 import com.lawrence.travel.application.execution.StageOutput;
 import com.lawrence.travel.application.execution.StagePlan;
@@ -81,9 +82,24 @@ public interface ExecutionEngineStore extends StageCommitPort {
          */
         BUDGET,
         /**
-         * 免费条件不满足。
+         * 外部调用条件不满足，暂停并等待人工处理。
          */
-        QUOTA
+        QUOTA;
+
+        /**
+         * 将模型恢复策略映射到现有运行状态，不新增运行预算或状态机。
+         *
+         * @param failure 已脱敏的模型失败
+         * @return 原引擎支持的处理分类
+         */
+        public static Failure forModel(AgentCallFailure failure) {
+            return switch (failure.recovery()) {
+                case STOP -> PERMANENT;
+                case RETRY -> RETRYABLE;
+                case PAUSE -> QUOTA;
+                case PAUSE_BUDGET -> BUDGET;
+            };
+        }
     }
 
     /**
@@ -143,6 +159,16 @@ public interface ExecutionEngineStore extends StageCommitPort {
      * @param failure 固定处理分类；重复或迟到不推进业务
      */
     void fail(ExecutionFence fence, Failure failure);
+
+    /**
+     * 保存模型固定失败码并按其恢复策略处理；旧替身默认只处理状态，不持久化诊断。
+     *
+     * @param fence 原尝试围栏
+     * @param failure 固定码及当前请求的重试证据
+     */
+    default void failModel(ExecutionFence fence, AgentCallFailure failure) {
+        fail(fence, Failure.forModel(failure));
+    }
 
     /**
      * @param scope 归属

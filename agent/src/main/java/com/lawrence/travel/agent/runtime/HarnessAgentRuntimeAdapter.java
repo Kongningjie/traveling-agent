@@ -608,6 +608,8 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
      */
     private static String failureCode(Throwable failure) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof com.lawrence.travel.application.execution.AgentCallFailure known)
+                return known.diagnosticCode();
             if (current instanceof CallRejectedException rejected) return rejected.getMessage();
             if (current instanceof ControlledHarnessCall.OutputFailure invalid) {
                 return invalid.diagnosticCode();
@@ -752,7 +754,10 @@ public final class HarnessAgentRuntimeAdapter implements AgentRuntimePort {
         @Override
         public void close() {
             cancelled.set(true);
-            result.completeExceptionally(new IllegalStateException("MODEL_CANCELLED"));
+            result.completeExceptionally(
+                    new com.lawrence.travel.application.execution.AgentCallFailure(
+                            com.lawrence.travel.application.execution.AgentCallFailure.Code
+                                    .MODEL_CANCELLED));
             transport.close();
             activeHarness.get().interrupt();
             transport.awaitIdle();

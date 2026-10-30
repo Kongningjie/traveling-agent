@@ -1,5 +1,6 @@
 package com.lawrence.travel.agent.runtime;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import com.lawrence.travel.application.interaction.Dialogue;
 import com.lawrence.travel.application.interaction.DialogueInterpretationFailure;
 import com.lawrence.travel.application.interaction.DialogueInterpretationFailure.Code;
@@ -93,9 +94,9 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
                 body = call.result().toCompletableFuture().get(305, TimeUnit.SECONDS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                throw new DialogueInterpretationFailure(Code.MODEL_INTERRUPTED);
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_INTERRUPTED);
             } catch (java.util.concurrent.TimeoutException timeout) {
-                throw new DialogueInterpretationFailure(Code.MODEL_TIMEOUT);
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_TIMEOUT);
             } catch (java.util.concurrent.ExecutionException failure) {
                 throw classified(failure.getCause(), Code.MODEL_EXECUTION_FAILED);
             }
@@ -117,6 +118,15 @@ public final class DialogueIntentInterpreter implements DialogueInterpreter {
      * @return 原有门禁、安全、版本分类优先；其余只返回脱敏固定码
      */
     private static RuntimeException classified(Throwable failure, Code fallback) {
+        for (int depth = 0;
+                depth < 8
+                        && (failure instanceof java.util.concurrent.CompletionException
+                                || failure instanceof java.util.concurrent.ExecutionException)
+                        && failure.getCause() != null;
+                depth++) {
+            failure = failure.getCause();
+        }
+        if (failure instanceof AgentCallFailure known) return known;
         if (failure instanceof DialogueInterpretationFailure known) return known;
         if (failure
                 instanceof com.lawrence.travel.application.interaction.DialogueDecodeFailure known)

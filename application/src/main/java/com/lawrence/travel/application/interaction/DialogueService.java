@@ -532,6 +532,8 @@ public final class DialogueService implements BackgroundWorkSource {
         if (failure instanceof DialogueInterpretationFailure rejected)
             return "DIALOGUE_" + rejected.code().name();
         if (failure instanceof DialogueDecodeFailure rejected) return rejected.diagnosticCode();
+        if (failure instanceof com.lawrence.travel.application.execution.AgentCallFailure rejected)
+            return rejected.diagnosticCode();
         if (failure instanceof TravelStorageFailure rejected)
             return "DIALOGUE_" + phase.name() + "_" + rejected.code().name();
         return "DIALOGUE_" + phase.name() + "_FAILED";

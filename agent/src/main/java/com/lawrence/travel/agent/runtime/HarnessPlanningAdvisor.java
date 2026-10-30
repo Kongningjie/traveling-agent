@@ -1,5 +1,6 @@
 package com.lawrence.travel.agent.runtime;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import com.lawrence.travel.application.itinerary.Planning;
 import com.lawrence.travel.application.port.AgentRuntimePort;
 import com.lawrence.travel.application.port.InteractionCodec;
@@ -189,17 +190,20 @@ public final class HarnessPlanningAdvisor implements PlanningAdvisor {
             com.lawrence.travel.application.memory.AgentContext.Basis basis) {
         try (var invocation = runtime.startContextual(run, role, prompt, basis, type)) {
             try {
-                return json.decode(
-                        invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS), type);
+                return AgentCallFailures.decode(
+                        json,
+                        invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS),
+                        type);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("PLANNING_INTERRUPTED");
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_INTERRUPTED);
             } catch (java.util.concurrent.ExecutionException failure) {
-                if (failure.getCause() instanceof CallRejectedException rejected) throw rejected;
-                throw new IllegalStateException("PLANNING_MODEL_FAILED");
+                throw AgentCallFailures.translate(failure);
             } catch (java.util.concurrent.TimeoutException timeout) {
-                throw new IllegalStateException("PLANNING_MODEL_TIMEOUT");
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_TIMEOUT);
             }
+        } catch (RuntimeException failure) {
+            throw AgentCallFailures.translate(failure);
         }
     }
 }

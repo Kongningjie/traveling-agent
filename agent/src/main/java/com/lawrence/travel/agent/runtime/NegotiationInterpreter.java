@@ -1,5 +1,6 @@
 package com.lawrence.travel.agent.runtime;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import com.lawrence.travel.application.interaction.Negotiation;
 import com.lawrence.travel.application.port.AgentRuntimePort;
 import com.lawrence.travel.application.port.InputInterpreter;
@@ -68,18 +69,20 @@ public final class NegotiationInterpreter implements InputInterpreter {
                                 context.revision().revision(), null),
                         Negotiation.Interpretation.class)) {
             try {
-                return json.decode(
+                return AgentCallFailures.decode(
+                        json,
                         invocation.result().toCompletableFuture().get(180, TimeUnit.SECONDS),
                         Negotiation.Interpretation.class);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("INTERPRETATION_INTERRUPTED");
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_INTERRUPTED);
             } catch (java.util.concurrent.ExecutionException failure) {
-                if (failure.getCause() instanceof CallRejectedException rejected) throw rejected;
-                throw new IllegalStateException("INTERPRETATION_FAILED");
+                throw AgentCallFailures.translate(failure);
             } catch (java.util.concurrent.TimeoutException timeout) {
-                throw new IllegalStateException("INTERPRETATION_TIMEOUT");
+                throw new AgentCallFailure(AgentCallFailure.Code.MODEL_TIMEOUT);
             }
+        } catch (RuntimeException failure) {
+            throw AgentCallFailures.translate(failure);
         }
     }
 }

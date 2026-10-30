@@ -1,5 +1,6 @@
 package com.lawrence.travel.bootstrap;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import com.lawrence.travel.application.execution.RunService;
 import com.lawrence.travel.application.execution.StageCommitCommand;
 import com.lawrence.travel.application.execution.StageExecutor;
@@ -64,6 +65,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "travel.engine.enabled=false")
 class ExecutionEngineIntegrationTest {
+    /**
+     * R2定向验证可绑定独立临时库；未指定时保持历史引擎测试的连接配置。
+     *
+     * @param registry 测试动态属性
+     */
+    @org.springframework.test.context.DynamicPropertySource
+    static void isolatedModelPolicyDatabase(
+            org.springframework.test.context.DynamicPropertyRegistry registry) {
+        ModelPolicyDatabase.bind(registry);
+    }
+
+    /** R2计量用例仅在独立临时库运行，避免与开发中的后台Worker争抢任务。 */
+    private void requireModelPolicyDatabase() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                System.getenv("TRAVEL_MODEL_POLICY_DATABASE") != null);
+    }
+
     @Autowired private ExecutionEngineStore engine;
     @Autowired private EngineMapper mapper;
     @Autowired private TravelStore travel;
@@ -507,6 +525,174 @@ class ExecutionEngineIntegrationTest {
                                 String.class,
                                 run.id()))
                 .isEqualTo("DEAD");
+    }
+
+    /** 模型错误在真实PG中停止/暂停/有限重试，次数与预算一致且固定码不丢失。 */
+    @Test
+    void modelFailurePolicyKeepsCodesAndOriginalBudget() throws Exception {
+        requireModelPolicyDatabase();
+        var failures =
+                List.of(
+                        new AgentCallFailure(AgentCallFailure.Code.MODEL_OUTPUT_SCHEMA),
+                        new AgentCallFailure(AgentCallFailure.Code.MODEL_ACCESS_DENIED),
+                        new AgentCallFailure(AgentCallFailure.Code.MODEL_TIMEOUT),
+                        new AgentCallFailure("MODEL_RATE_LIMITED", false),
+                        new AgentCallFailure("MODEL_RATE_LIMITED", true),
+                        new AgentCallFailure("MODEL_PROVIDER_HTTP_503", true),
+                        new AgentCallFailure(AgentCallFailure.Code.MODEL_CONTEXT_LIMIT));
+        for (var failure : failures) {
+            var first = plan(StageType.RESEARCH, 0, "model_policy");
+            var run = start(task(actor()), first);
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+            var handler = org.mockito.Mockito.mock(StageHandler.class);
+            org.mockito.Mockito.when(handler.supports(StageType.RESEARCH)).thenReturn(true);
+            org.mockito.Mockito.when(handler.execute(org.mockito.ArgumentMatchers.any()))
+                    .thenAnswer(
+                            call -> {
+                                calls.incrementAndGet();
+                                var reservation =
+                                        ledger.reserve(
+                                                run.id(),
+                                                CallKind.MODEL,
+                                                limits,
+                                                new BudgetLedger.Target("fake", "local", "TEST"),
+                                                10,
+                                                Instant.now());
+                                ledger.finish(
+                                        reservation.id(),
+                                        failure.knownZeroUsage()
+                                                ? new com.lawrence.travel.domain.execution.control
+                                                        .TokenUsage(0, 0)
+                                                : failure.recovery()
+                                                                == AgentCallFailure.Recovery.STOP
+                                                        ? new com.lawrence.travel.domain.execution
+                                                                .control.TokenUsage(2, 1)
+                                                        : null,
+                                        Duration.ofMillis(1));
+                                throw failure;
+                            });
+            var executor = new StageExecutor(engine, List.of(handler));
+            int expected = failure.recovery() == AgentCallFailure.Recovery.RETRY ? 3 : 1;
+            for (int i = 0; i < expected; i++) {
+                executor.execute(claim(run.id(), first.id()), localControl());
+                if (failure.recovery() == AgentCallFailure.Recovery.RETRY) due(run.id());
+            }
+            var state =
+                    switch (failure.recovery()) {
+                        case STOP, RETRY -> ExecutionRun.State.FAILED;
+                        case PAUSE -> ExecutionRun.State.PAUSED_QUOTA;
+                        case PAUSE_BUDGET -> ExecutionRun.State.PAUSED_BUDGET;
+                    };
+            assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(state);
+            assertThat(calls.get()).isEqualTo(expected);
+            assertThat(step(run, first.id()).attemptCount()).isEqualTo(expected);
+            assertThat(ledger.read(run.id()).modelCalls()).isEqualTo(expected);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT last_error_code FROM outbox_event WHERE run_id=?",
+                                    String.class,
+                                    run.id()))
+                    .isEqualTo(failure.diagnosticCode());
+            assertThat(
+                            jdbc.queryForObject(
+                                    "SELECT count(*) FROM execution_run WHERE task_id=?",
+                                    Integer.class,
+                                    run.scope().taskId()))
+                    .isEqualTo(1);
+            assertThat(engine.candidates(100).stream().noneMatch(h -> h.runId().equals(run.id())))
+                    .isTrue();
+        }
+    }
+
+    /** 暂时错误可在原运行内成功重试，已失败请求仍计入次数，没有重置预算。 */
+    @Test
+    void transientModelFailureCanSucceedOnSecondAttempt() throws Exception {
+        requireModelPolicyDatabase();
+        var first = plan(StageType.RESEARCH, 0, "model_recovers");
+        var run = start(task(actor()), first);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var handler = org.mockito.Mockito.mock(StageHandler.class);
+        org.mockito.Mockito.when(handler.supports(StageType.RESEARCH)).thenReturn(true);
+        org.mockito.Mockito.when(handler.execute(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(
+                        call -> {
+                            int count = calls.incrementAndGet();
+                            var reservation =
+                                    ledger.reserve(
+                                            run.id(),
+                                            CallKind.MODEL,
+                                            limits,
+                                            new BudgetLedger.Target("fake", "local", "TEST"),
+                                            10,
+                                            Instant.now());
+                            ledger.finish(
+                                    reservation.id(),
+                                    new com.lawrence.travel.domain.execution.control.TokenUsage(
+                                            0, 0),
+                                    Duration.ZERO);
+                            if (count == 1) throw new AgentCallFailure("MODEL_RATE_LIMITED", true);
+                            return output();
+                        });
+        var executor = new StageExecutor(engine, List.of(handler));
+        executor.execute(claim(run.id(), first.id()), localControl());
+        assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.QUEUED);
+        assertThat(step(run, first.id()).state()).isEqualTo(ExecutionStep.State.RETRY_WAIT);
+        due(run.id());
+        executor.execute(claim(run.id(), first.id()), localControl());
+        assertThat(engine.run(run.scope(), run.id()).state())
+                .isEqualTo(ExecutionRun.State.SUCCEEDED);
+        assertThat(calls.get()).isEqualTo(2);
+        assertThat(ledger.read(run.id()).modelCalls()).isEqualTo(2);
+    }
+
+    /** 用户取消后模型迟到报错不能把终态改成失败或暂停。 */
+    @Test
+    void lateModelFailureCannotOverwriteCancellation() {
+        requireModelPolicyDatabase();
+        var first = plan(StageType.RESEARCH, 0, "model_late");
+        var run = start(task(actor()), first);
+        var claim = claim(run.id(), first.id());
+        engine.cancel(run.scope(), run.id());
+        String before =
+                jdbc.queryForObject(
+                        "SELECT last_error_code FROM outbox_event WHERE run_id=?",
+                        String.class,
+                        run.id());
+        engine.failModel(
+                claim.fence(), new AgentCallFailure(AgentCallFailure.Code.MODEL_OUTPUT_SCHEMA));
+        assertThat(engine.run(run.scope(), run.id()).state())
+                .isEqualTo(ExecutionRun.State.CANCELLED);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT last_error_code FROM outbox_event WHERE run_id=?",
+                                String.class,
+                                run.id()))
+                .isEqualTo(before);
+    }
+
+    /**
+     * 提供不模拟中断的本地执行资格，实际提交仍由数据库围栏裁定。
+     *
+     * @return 本地单线程执行控制
+     */
+    private StageExecutor.Control localControl() {
+        return new StageExecutor.Control() {
+            /** {@inheritDoc} 本测试没有并发取消。 */
+            @Override
+            public boolean enter() {
+                return true;
+            }
+
+            /** {@inheritDoc} 不持有外部资源。 */
+            @Override
+            public void leave() {}
+
+            /** {@inheritDoc} 取消围栏由独立用例覆盖。 */
+            @Override
+            public boolean cancelled() {
+                return false;
+            }
+        };
     }
 
     /**
@@ -1173,11 +1359,12 @@ class ExecutionEngineIntegrationTest {
                                     "@" + argsFile.toAbsolutePath(),
                                     ExecutionCrashProbe.class.getName()));
             command.addAll(List.of(arguments));
-            child =
+            var process =
                     new ProcessBuilder(command)
                             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                            .redirectError(ProcessBuilder.Redirect.DISCARD)
-                            .start();
+                            .redirectError(ProcessBuilder.Redirect.DISCARD);
+            ModelPolicyDatabase.bindChild(process);
+            child = process.start();
             assertThat(child.waitFor(45, TimeUnit.SECONDS)).isTrue();
             assertThat(child.exitValue()).isEqualTo(23);
         } finally {

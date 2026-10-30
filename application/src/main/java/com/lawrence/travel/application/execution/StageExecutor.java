@@ -163,6 +163,15 @@ public final class StageExecutor {
                                 claim.fence().runId(),
                                 com.lawrence.travel.application.port.ExecutionTrace.Kind.WAIT,
                                 java.util.Map.of("stage", claim.fence().stepId().toString()))) {}
+        } catch (AgentCallFailure failure) {
+            if (control.cancelled()) return;
+            // 中断只暂停执行；短状态事务暂时清除中断位，结束后恢复。
+            boolean interrupted = Thread.interrupted();
+            try {
+                store.failModel(claim.fence(), failure);
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         } catch (CallRejectedException rejected) {
             if (control.cancelled()) return;
             var failure =

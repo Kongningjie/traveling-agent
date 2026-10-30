@@ -329,7 +329,9 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
             if (json.get("usage") instanceof Map<?, ?> usage
                     && usage.get("input_tokens") instanceof Number input
                     && usage.get("output_tokens") instanceof Number output) {
-                return new TokenUsage(input.longValue(), output.longValue());
+                return new TokenUsage(
+                        new java.math.BigDecimal(input.toString()).longValueExact(),
+                        new java.math.BigDecimal(output.toString()).longValueExact());
             }
         } catch (RuntimeException ignored) {
             // 解析失败不能凭空补零，后续门禁根据 UNKNOWN 暂停。
@@ -379,7 +381,7 @@ public final class GuardedDashScopeTransport implements HttpTransport, AutoClose
         }
         return "MODEL_FREE_QUOTA_EXHAUSTED".equals(code)
                 ? new CallRejectedException(CallRejectedException.Reason.QUOTA_INSUFFICIENT)
-                : new HttpTransportException(code);
+                : new ProviderCallFailure(code, readUsage(body));
     }
 
     /**

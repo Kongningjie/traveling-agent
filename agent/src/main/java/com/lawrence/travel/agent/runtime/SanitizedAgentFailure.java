@@ -1,10 +1,11 @@
 package com.lawrence.travel.agent.runtime;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import java.util.ArrayList;
 import java.util.List;
 
 /** 保留框架异常类型及类/方法定位点；不持有原异常、异常消息、模型正文或供应商响应。 */
-public final class SanitizedAgentFailure extends IllegalStateException {
+public final class SanitizedAgentFailure extends AgentCallFailure {
     private final List<String> exceptionTypes;
     private final List<String> exceptionSites;
 
@@ -15,7 +16,7 @@ public final class SanitizedAgentFailure extends IllegalStateException {
      * @param failure 仅提取最多八层Java类型及首个类/方法，不作为cause或suppressed保存
      */
     public SanitizedAgentFailure(String code, Throwable failure) {
-        super(code);
+        super(code, knownZeroUsage(failure));
         var types = new ArrayList<String>();
         var sites = new ArrayList<String>();
         for (Throwable current = failure;
@@ -46,5 +47,20 @@ public final class SanitizedAgentFailure extends IllegalStateException {
      */
     public List<String> exceptionSites() {
         return exceptionSites;
+    }
+
+    /**
+     * 仅从自有传输异常或已归一化异常读取当前请求的零用量证据。
+     *
+     * @param failure 内部失败链
+     * @return 不读取错误正文的重试证据
+     */
+    private static boolean knownZeroUsage(Throwable failure) {
+        int depth = 0;
+        for (var current = failure; current != null && depth++ < 8; current = current.getCause()) {
+            if (current instanceof ProviderCallFailure provider) return provider.knownZeroUsage();
+            if (current instanceof AgentCallFailure known) return known.knownZeroUsage();
+        }
+        return false;
     }
 }

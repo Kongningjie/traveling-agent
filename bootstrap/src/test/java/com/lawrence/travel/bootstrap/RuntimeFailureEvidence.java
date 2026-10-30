@@ -61,35 +61,11 @@ final class RuntimeFailureEvidence {
         for (var current = failure;
                 current != null && types.size() < 8;
                 current = current.getCause()) {
+            if (current
+                    instanceof com.lawrence.travel.application.execution.AgentCallFailure known) {
+                code = known.diagnosticCode();
+            }
             if (current instanceof SanitizedAgentFailure sanitized) {
-                if (sanitized.getMessage() != null
-                        && Set.of(
-                                        "MODEL_EXECUTION_FAILED",
-                                        "MODEL_CANCELLED",
-                                        "MODEL_FREE_QUOTA_EXHAUSTED",
-                                        "MODEL_ACCESS_DENIED",
-                                        "MODEL_INVALID_PARAMETER",
-                                        "MODEL_CONTEXT_LIMIT_SAFE",
-                                        "MODEL_CONTEXT_LIMIT",
-                                        "MODEL_NOT_FOUND",
-                                        "MODEL_RATE_LIMITED",
-                                        "MODEL_TRANSPORT_FAILED",
-                                        "MODEL_OPTIONS_REJECTED",
-                                        "MODEL_ENDPOINT_REJECTED",
-                                        "MODEL_INPUT_TOO_LARGE",
-                                        "MODEL_INPUT_INVALID",
-                                        "MODEL_MEDIA_NOT_ALLOWED",
-                                        "MODEL_ID_REJECTED",
-                                        "MODEL_OUTPUT_INVALID",
-                                        "MODEL_OUTPUT_MISSING",
-                                        "MODEL_OUTPUT_UNSTRUCTURED",
-                                        "MODEL_OUTPUT_ENVELOPE",
-                                        "MODEL_OUTPUT_EMPTY",
-                                        "MODEL_OUTPUT_SCHEMA",
-                                        "MODEL_STREAM_INVALID",
-                                        "MODEL_STREAM_INCOMPLETE",
-                                        "MODEL_STREAM_TOO_LARGE")
-                                .contains(sanitized.getMessage())) code = sanitized.getMessage();
                 for (int index = 0; index < sanitized.exceptionTypes().size(); index++) {
                     if (types.size() < 8) {
                         types.add(sanitized.exceptionTypes().get(index));

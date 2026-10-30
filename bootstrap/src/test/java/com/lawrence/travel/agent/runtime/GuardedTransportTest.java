@@ -37,6 +37,107 @@ import static org.mockito.Mockito.when;
 
 /** 使用真实门禁及可控连接验证每次 HTTP 的预占、异常与实际取消边界。 */
 class GuardedTransportTest {
+    /** 429和503只有明确零用量时才携带可重试证据，传输层本身不重发。 */
+    @Test
+    void rejectedProviderCallsKeepExplicitZeroUsageWithoutRetrying() throws Exception {
+        for (int status : new int[] {429, 503}) {
+            when(call.execute())
+                    .thenReturn(
+                            response(
+                                    status,
+                                    "{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}"));
+            try (var transport = transport(true)) {
+                assertThatThrownBy(() -> transport.execute(request()))
+                        .isInstanceOf(ProviderCallFailure.class)
+                        .satisfies(
+                                error -> {
+                                    var failure =
+                                            new SanitizedAgentFailure(error.getMessage(), error);
+                                    assertThat(failure.knownZeroUsage()).isTrue();
+                                    assertThat(failure.recovery())
+                                            .isEqualTo(
+                                                    com.lawrence.travel.application.execution
+                                                            .AgentCallFailure.Recovery.RETRY);
+                                });
+            }
+        }
+        verify(call, org.mockito.Mockito.times(2)).execute();
+        verify(ledger, org.mockito.Mockito.times(2))
+                .finish(eq(reservationId), eq(new TokenUsage(0, 0)), any());
+    }
+
+    /** 限流响应没有用量时保持UNKNOWN语义，不能伪造零用量再自动重试。 */
+    @Test
+    void rateLimitWithoutUsageRequiresPause() throws Exception {
+        when(call.execute()).thenReturn(response(429, "{\"message\":\"SYNTHETIC_PRIVATE\"}"));
+        try (var transport = transport(true)) {
+            assertThatThrownBy(() -> transport.execute(request()))
+                    .hasMessage("MODEL_RATE_LIMITED")
+                    .satisfies(
+                            error -> {
+                                var failure = new SanitizedAgentFailure(error.getMessage(), error);
+                                assertThat(failure.knownZeroUsage()).isFalse();
+                                assertThat(failure.recovery())
+                                        .isEqualTo(
+                                                com.lawrence.travel.application.execution
+                                                        .AgentCallFailure.Recovery.PAUSE);
+                                assertThat(failure.toString()).doesNotContain("SYNTHETIC_PRIVATE");
+                            });
+        }
+        verify(call).execute();
+        verify(ledger).finish(eq(reservationId), isNull(), any());
+    }
+
+    /** 小数、负数或溢出计量不是零用量证据，不能触发自动重试。 */
+    @Test
+    void malformedUsageNeverBecomesZeroUsage() throws Exception {
+        for (String input : java.util.List.of("0.5", "-1", "18446744073709551616")) {
+            when(call.execute())
+                    .thenReturn(
+                            response(
+                                    429,
+                                    "{\"usage\":{\"input_tokens\":"
+                                            + input
+                                            + ",\"output_tokens\":0}}"));
+            try (var transport = transport(true)) {
+                assertThatThrownBy(() -> transport.execute(request()))
+                        .satisfies(
+                                error -> {
+                                    var failure =
+                                            new SanitizedAgentFailure(error.getMessage(), error);
+                                    assertThat(failure.knownZeroUsage()).isFalse();
+                                    assertThat(failure.recovery())
+                                            .isEqualTo(
+                                                    com.lawrence.travel.application.execution
+                                                            .AgentCallFailure.Recovery.PAUSE);
+                                });
+            }
+        }
+        verify(call, org.mockito.Mockito.times(3)).execute();
+        verify(ledger, org.mockito.Mockito.times(3)).finish(eq(reservationId), isNull(), any());
+    }
+
+    /** 断线无法确认供应商是否执行，结束一次请求后暂停，不在传输层重放。 */
+    @Test
+    void networkFailureDoesNotClaimZeroUsage() throws Exception {
+        when(call.execute()).thenThrow(new java.io.IOException("SYNTHETIC_PRIVATE"));
+        try (var transport = transport(true)) {
+            assertThatThrownBy(() -> transport.execute(request()))
+                    .hasMessage("MODEL_TRANSPORT_FAILED")
+                    .satisfies(
+                            error ->
+                                    assertThat(
+                                                    new SanitizedAgentFailure(
+                                                                    error.getMessage(), error)
+                                                            .recovery())
+                                            .isEqualTo(
+                                                    com.lawrence.travel.application.execution
+                                                            .AgentCallFailure.Recovery.PAUSE));
+        }
+        verify(call).execute();
+        verify(ledger).finish(eq(reservationId), isNull(), any());
+    }
+
     /** 扩容协调输入允许原16K以上请求，但超过新48K仍在预占及HTTP前拒绝，输出上限不变。 */
     @Test
     void coordinatorAllowsLargerInputAndStillRejectsBeyond48K() throws Exception {

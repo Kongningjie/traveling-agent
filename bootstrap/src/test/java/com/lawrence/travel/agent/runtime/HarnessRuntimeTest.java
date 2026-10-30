@@ -44,6 +44,48 @@ class HarnessRuntimeTest {
         org.mockito.Mockito.verifyNoInteractions(admission);
     }
 
+    /** 关闭正在执行的句柄返回固定取消类型，不进入通用执行错误或自动重试。 */
+    @Test
+    void closingInvocationPreservesCancellationClassification() throws Exception {
+        var admission = mock(ModelCallAdmission.class);
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        when(admission.begin(any(), any(), any(), any(), anyLong()))
+                .thenAnswer(
+                        call -> {
+                            entered.countDown();
+                            release.await(5, TimeUnit.SECONDS);
+                            throw new CallRejectedException(
+                                    CallRejectedException.Reason.EXTERNAL_DISABLED);
+                        });
+        var runtime =
+                new HarnessAgentRuntimeAdapter(
+                        admission,
+                        Map.of("planner", "test-model"),
+                        () -> "test-placeholder",
+                        workspace);
+        var invocation = runtime.start(UUID.randomUUID(), "planner", "test");
+        Thread closer = null;
+        try {
+            org.assertj.core.api.Assertions.assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            closer = Thread.ofVirtual().start(invocation::close);
+            assertThatThrownBy(
+                            () ->
+                                    invocation
+                                            .result()
+                                            .toCompletableFuture()
+                                            .get(5, TimeUnit.SECONDS))
+                    .rootCause()
+                    .isInstanceOf(com.lawrence.travel.application.execution.AgentCallFailure.class)
+                    .hasMessage("MODEL_CANCELLED");
+        } finally {
+            release.countDown();
+            if (closer != null) closer.join(5000);
+            invocation.close();
+        }
+        verify(admission, times(1)).begin(any(), any(), any(), any(), anyLong());
+    }
+
     /** 门禁拒绝在 SDK 发送前生效，异步调用方得到可处理的暂停原因。 */
     @Test
     void forwardsAdmissionReasonWithoutRetrying() {

@@ -1,5 +1,6 @@
 package com.lawrence.travel.infrastructure.execution.persistence;
 
+import com.lawrence.travel.application.execution.AgentCallFailure;
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE;
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.IDEMPOTENCY_CONFLICT;
 import static com.lawrence.travel.application.travel.TravelStorageFailure.Code.INVALID_INPUT;
@@ -573,6 +574,23 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      */
     @Override
     public void fail(ExecutionFence fence, Failure failure) {
+        fail(fence, failure, null);
+    }
+
+    /** {@inheritDoc} 固定模型码与状态转换在同一围栏事务写入既有Outbox错误列。 */
+    @Override
+    public void failModel(ExecutionFence fence, AgentCallFailure failure) {
+        fail(fence, Failure.forModel(failure), failure.diagnosticCode());
+    }
+
+    /**
+     * 按原租约与代次处理失败，模型诊断只影响错误码，不绕过围栏或重试上限。
+     *
+     * @param fence 原领取资格
+     * @param failure 恢复分类
+     * @param diagnostic 固定模型码；旧非模型失败为空
+     */
+    private void fail(ExecutionFence fence, Failure failure, String diagnostic) {
         tx(
                 () -> {
                     Session session = lock(fence.scope(), fence.runId());
@@ -580,13 +598,13 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
                     if (!valid(session, fence, event)) return false;
                     settle(session, mapper.now());
                     if (failure == Failure.BUDGET || failure == Failure.QUOTA) {
-                        pause(session, failure);
+                        pause(session, failure, diagnostic);
                         return true;
                     }
                     ExecutionStep step = step(session, fence.stepId());
                     if (failure == Failure.PERMANENT || step.attemptCount() >= maximumAttempts)
-                        terminate(session, event, step, failure == Failure.PERMANENT);
-                    else retry(session, event, step, false);
+                        terminate(session, event, step, failure == Failure.PERMANENT, diagnostic);
+                    else retry(session, event, step, false, diagnostic);
                     return true;
                 });
     }
@@ -1174,6 +1192,17 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      * @param failure 暂停原因；保留原阶段与事件，暂停不创建新预算
      */
     private void pause(Session session, Failure failure) {
+        pause(session, failure, null);
+    }
+
+    /**
+     * 暂停原运行并保存固定模型码，不创建预算或自动恢复。
+     *
+     * @param session 原事务会话
+     * @param failure 暂停分类
+     * @param diagnostic 模型码，旧非模型路径为空
+     */
+    private void pause(Session session, Failure failure, String diagnostic) {
         if (session.run.state() == ExecutionRun.State.QUEUED) session.run = session.run.start();
         for (UUID id : session.steps.keySet()) {
             ExecutionStep step = step(session, id);
@@ -1190,7 +1219,7 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
                         mapper.now(),
                         null,
                         Math.incrementExact(e.fencingToken()),
-                        failure.name());
+                        diagnostic == null ? failure.name() : diagnostic);
         session.run =
                 failure == Failure.BUDGET ? session.run.pauseBudget() : session.run.pauseQuota();
         session.activeSince = null;
@@ -1206,6 +1235,24 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      */
     private void retry(
             Session session, EngineMapper.EventRow event, ExecutionStep step, boolean abandoned) {
+        retry(session, event, step, abandoned, null);
+    }
+
+    /**
+     * 在原事件和预算上安排下一次有限尝试，保留触发本次重试的模型码。
+     *
+     * @param session 原会话
+     * @param event 当前事件
+     * @param step 当前阶段
+     * @param abandoned 是否失联恢复
+     * @param diagnostic 固定模型码，旧路径为空
+     */
+    private void retry(
+            Session session,
+            EngineMapper.EventRow event,
+            ExecutionStep step,
+            boolean abandoned,
+            String diagnostic) {
         updateStep(step.finish(step.currentAttemptId(), ExecutionStep.State.RETRY_WAIT));
         checked(mapper.finishAttempt(step.currentAttemptId(), abandoned ? "ABANDONED" : "FAILED"));
         update(
@@ -1214,7 +1261,7 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
                 mapper.now().plusSeconds(Math.min(30, 1L << Math.min(5, step.attemptCount()))),
                 null,
                 Math.incrementExact(event.fencingToken()),
-                abandoned ? "LEASE_EXPIRED" : "STAGE_RETRY");
+                diagnostic != null ? diagnostic : abandoned ? "LEASE_EXPIRED" : "STAGE_RETRY");
         reconcile(session);
         visible(session.scope, session.run.id(), step.id(), "STAGE_RETRY");
     }
@@ -1227,6 +1274,24 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
      */
     private void terminate(
             Session session, EngineMapper.EventRow event, ExecutionStep step, boolean permanent) {
+        terminate(session, event, step, permanent, null);
+    }
+
+    /**
+     * 在原失败事务结束运行，模型最后一次固定原因不被通用耗尽码覆盖。
+     *
+     * @param session 原会话
+     * @param event 当前事件
+     * @param step 当前阶段
+     * @param permanent 是否确定性失败
+     * @param diagnostic 固定模型码，旧路径为空
+     */
+    private void terminate(
+            Session session,
+            EngineMapper.EventRow event,
+            ExecutionStep step,
+            boolean permanent,
+            String diagnostic) {
         if (step.state() == ExecutionStep.State.RUNNING) {
             updateStep(step.finish(step.currentAttemptId(), ExecutionStep.State.FAILED));
             checked(mapper.finishAttempt(step.currentAttemptId(), "FAILED"));
@@ -1238,7 +1303,9 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
                 mapper.now(),
                 null,
                 Math.incrementExact(event.fencingToken()),
-                permanent ? "PERMANENT_FAILURE" : "ATTEMPTS_EXHAUSTED");
+                diagnostic != null
+                        ? diagnostic
+                        : permanent ? "PERMANENT_FAILURE" : "ATTEMPTS_EXHAUSTED");
         if (session.run.state() == ExecutionRun.State.QUEUED) session.run = session.run.start();
         session.run =
                 session.run.fail(

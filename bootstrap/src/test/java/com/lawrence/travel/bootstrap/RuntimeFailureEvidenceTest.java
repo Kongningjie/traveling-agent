@@ -55,7 +55,8 @@ class RuntimeFailureEvidenceTest {
                 assertThatThrownBy(() -> observed.result().toCompletableFuture().join())
                         .hasCauseInstanceOf(SanitizedAgentFailure.class);
             }
-            assertThat(evidence.snapshot().getFirst()).containsEntry("code", "UNCLASSIFIED");
+            assertThat(evidence.snapshot().getFirst())
+                    .containsEntry("code", "MODEL_EXECUTION_FAILED");
             assertThat(evidence.snapshot().toString()).doesNotContain("SYNTHETIC_PRIVATE");
         }
     }

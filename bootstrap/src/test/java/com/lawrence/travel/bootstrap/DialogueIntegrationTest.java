@@ -35,6 +35,17 @@ import static org.mockito.Mockito.when;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "travel.engine.enabled=false")
 class DialogueIntegrationTest {
+    /**
+     * 失败策略定向验证使用独立库和恢复目录，普通测试沿用既有配置。
+     *
+     * @param registry 动态测试属性
+     */
+    @org.springframework.test.context.DynamicPropertySource
+    static void modelPolicyDatabase(
+            org.springframework.test.context.DynamicPropertyRegistry registry) {
+        ModelPolicyDatabase.bind(registry);
+    }
+
     /** 评测账本读取真实PG且按用户/聊天隔离；未知请求与替身型号不能变成真实完整计量。 */
     @Test
     void evaluationEvidenceKeepsUnknownUsageAndOwnerIsolation() {
@@ -303,6 +314,25 @@ class DialogueIntegrationTest {
                         List.of()));
         assertThat(service.read(user, other).messages().getLast().error())
                 .isEqualTo("DIALOGUE_SOURCE_FAILED");
+        UUID denied = UUID.randomUUID();
+        service.send(user, denied, UUID.randomUUID(), text);
+        org.mockito.Mockito.doThrow(
+                        new com.lawrence.travel.application.execution.AgentCallFailure(
+                                com.lawrence.travel.application.execution.AgentCallFailure.Code
+                                        .MODEL_ACCESS_DENIED))
+                .when(interpreter)
+                .interpret(any());
+        service.claimWork().orElseThrow().run();
+        assertThat(service.read(user, denied).messages().getLast().error())
+                .isEqualTo("MODEL_ACCESS_DENIED");
+        assertThat(service.read(user, denied).messages().getLast().state()).isEqualTo("PAUSED");
+        assertThat(
+                        jdbc.queryForList(
+                                "SELECT code FROM problem_event WHERE user_id=?",
+                                String.class,
+                                user.id()))
+                .contains("MODEL_ACCESS_DENIED");
+        org.mockito.Mockito.reset(interpreter);
         UUID invalid = UUID.randomUUID();
         String badDates = "开始规划北京旅行，2026-12-03到2026-12-01";
         service.send(user, invalid, UUID.randomUUID(), badDates);
