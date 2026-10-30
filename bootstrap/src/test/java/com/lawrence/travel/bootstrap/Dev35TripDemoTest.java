@@ -54,7 +54,8 @@ class Dev35TripDemoTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactions;
     @Autowired private ExecutionControlProperties properties;
-    @Autowired private SafetyGate safety;
+    @MockitoSpyBean private SafetyGate safety;
+    @Autowired private com.lawrence.travel.application.port.ToolEvidenceJournal toolJournal;
     @MockitoSpyBean private DialogueInterpreter interpreter;
     @MockitoSpyBean private ResearchAdvisor researcher;
     @MockitoSpyBean private PlanningAdvisor planner;
@@ -109,6 +110,10 @@ class Dev35TripDemoTest {
      */
     @Test
     void plansAcceptsAndRevisesOneTrip() throws Exception {
+        if (Boolean.parseBoolean(System.getenv("TRAVEL_DEV35_TRIP_TOOL_PROBE"))) {
+            probeToolSafety();
+            return;
+        }
         doAnswer(
                         call -> {
                             String role = call.getArgument(1);
@@ -203,6 +208,111 @@ class Dev35TripDemoTest {
         } finally {
             save(capture, script, passed);
         }
+    }
+
+    /**
+     * 单次原文提取定位；保留真实安全检查和PG计量，只报告长度/命中类别，不保存被拒正文。
+     *
+     * @throws Exception 本地报告不可写
+     */
+    private void probeToolSafety() throws Exception {
+        var count = new AtomicInteger();
+        var diagnostics =
+                new java.util.concurrent.atomic.AtomicReference<Map<String, Object>>(
+                        Map.of("receivedOutput", false));
+        doAnswer(
+                        call -> {
+                            if (call.getArgument(1) != CallKind.TOOL || count.incrementAndGet() > 1)
+                                throw new IllegalStateException("TOOL_PROBE_CALL_LIMIT");
+                            return call.callRealMethod();
+                        })
+                .when(ledger)
+                .reserve(any(), any(), any(), any(), anyLong(), any());
+        doAnswer(
+                        call -> {
+                            diagnostics.set(ToolSafetyDiagnostics.inspect(call.getArgument(1)));
+                            return call.callRealMethod();
+                        })
+                .when(safety)
+                .require(org.mockito.ArgumentMatchers.eq("TOOL_OUTPUT"), any());
+        TravelToolService service = tools;
+        if (!real()) {
+            var adapter =
+                    org.mockito.Mockito.mock(
+                            com.lawrence.travel.application.port.TravelToolPort.class);
+            org.mockito.Mockito.when(adapter.query(any(), any()))
+                    .thenReturn(
+                            new com.lawrence.travel.application.port.TravelToolPort.Evidence(
+                                    URI.create("https://official.example/"),
+                                    java.time.Instant.now(),
+                                    "{\"raw_content\":\"[合成链接](javascript:blocked)\"}"));
+            service =
+                    new TravelToolService(
+                            adapter,
+                            toolJournal,
+                            ledger,
+                            properties.limits().runLimits(),
+                            Map.of(),
+                            true,
+                            java.time.Clock.systemUTC(),
+                            safety);
+        }
+        var run = java.util.UUID.randomUUID();
+        ledger.create(run);
+        String outcome = "ALLOW";
+        try {
+            service.query(
+                    run,
+                    com.lawrence.travel.application.port.TravelToolPort.Operation.EXTRACT,
+                    Map.of("url", "https://www.dpm.org.cn/Visit.html"));
+        } catch (SafetyGate.Failure failure) {
+            outcome = failure.result().status().name() + ":" + failure.result().reason();
+        } catch (RuntimeException failure) {
+            String message = failure.getMessage();
+            outcome =
+                    message != null
+                                    && message.matches(
+                                            "TOOL_(HTTP_[1-5][0-9]{2}|REQUEST_FAILED|RESPONSE_INVALID|RESPONSE_TOO_LARGE|INTERRUPTED|CREDENTIAL_MISSING)")
+                            ? message
+                            : "TOOL_PROBE_FAILED";
+        }
+        assertThat(count.get()).isEqualTo(1);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM call_meter WHERE run_id=? AND kind='MODEL'",
+                                Long.class,
+                                run))
+                .isZero();
+        if (!real()) {
+            assertThat(outcome).isEqualTo("REJECT:UNSAFE_TEXT");
+            assertThat(diagnostics.get().get("activeUri")).isEqualTo(true);
+        }
+        var metrics = Map.of("actualModelRequests", 0, "toolAttempts", count.get());
+        String body =
+                json.encode(
+                        Map.of(
+                                "version",
+                                "tool-safety-probe-v1",
+                                "mode",
+                                "DIAGNOSTIC_ONLY",
+                                "reviews",
+                                List.of(Map.of("outcome", outcome, "features", diagnostics.get())),
+                                "rows",
+                                List.of(
+                                        Map.of(
+                                                "caseId",
+                                                "DEMO-TOOL-PROBE",
+                                                "mode",
+                                                "DIAGNOSTIC_ONLY",
+                                                "status",
+                                                "PASS",
+                                                "metrics",
+                                                metrics))));
+        safety.require("EVALUATION_REPORT", body);
+        Path report = Path.of(System.getenv("TRAVEL_DEV35_HTTP_REPORT"));
+        Files.createDirectories(report.getParent());
+        Files.writeString(report, body);
+        System.out.println("DEV35_HTTP case=DEMO-TOOL-PROBE status=PASS");
     }
 
     /**
