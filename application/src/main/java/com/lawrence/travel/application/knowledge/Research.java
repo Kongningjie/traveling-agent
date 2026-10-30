@@ -20,7 +20,7 @@ public final class Research {
      * @param fieldPath 待查字段
      * @param operation 白名单工具
      * @param arguments 精确业务参数
-     * @param date 适用日期，可空
+     * @param date 目标旅行日期；EXTRACT/WEATHER/ROUTE必填，后两者须与arguments.date一致；PLACE/SEARCH可空，非空时均须在旅行范围内
      */
     public record Query(
             String targetId,
