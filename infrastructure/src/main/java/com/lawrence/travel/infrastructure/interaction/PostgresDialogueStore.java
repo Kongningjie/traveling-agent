@@ -28,10 +28,10 @@ public final class PostgresDialogueStore implements DialogueStore {
 
     /** {@inheritDoc} 用户锁使停止命令的幂等判断和副作用同事务。 */
     @Override
-    public boolean containsInput(UUID user, UUID chat, UUID input, String text) {
+    public boolean containsInput(UUID userId, UUID chatId, UUID inputId, String text) {
         transaction();
-        lock(user, chat);
-        var row = mapper.message(user, chat, input);
+        lock(userId, chatId);
+        var row = mapper.message(userId, chatId, inputId);
         if (row != null) require(row.text().equals(text), false);
         return row != null;
     }
@@ -46,13 +46,13 @@ public final class PostgresDialogueStore implements DialogueStore {
 
     /** {@inheritDoc} 直接命令与回复、作业完成同事务，不借此接受候选或新增授权。 */
     @Override
-    public void completeCommand(UUID user, UUID chat, UUID input, String reply) {
+    public void completeCommand(UUID userId, UUID chatId, UUID inputId, String reply) {
         transaction();
-        lock(user, chat);
+        lock(userId, chatId);
         jobs.completeCommand(
-                new com.lawrence.travel.application.execution.Jobs.Scope(user, chat),
-                jobId(user, chat, input));
-        require(mapper.directReply(user, chat, input, reply) == 1, false);
+                new com.lawrence.travel.application.execution.Jobs.Scope(userId, chatId),
+                jobId(userId, chatId, inputId));
+        require(mapper.directReply(userId, chatId, inputId, reply) == 1, false);
     }
 
     private final DialogueMapper mapper;
@@ -175,17 +175,18 @@ public final class PostgresDialogueStore implements DialogueStore {
 
     /** {@inheritDoc} 用户锁串行收件与接受；普通输入不递增旅行代次。 */
     @Override
-    public Dialogue.View receive(UUID user, UUID chat, UUID id, String text) {
-        return receive(user, chat, id, text, List.of());
+    public Dialogue.View receive(UUID userId, UUID chatId, UUID inputId, String text) {
+        return receive(userId, chatId, inputId, text, List.of());
     }
 
     /**
      * 由DialogueService.send的事务调用：锁定归属 → 检查重放原文/附件集合 → 限制未决输入数量 → 插入原文 → 绑定文件内容版本 → ensureJob登记持久作业。
      */
     @Override
-    public Dialogue.View receive(UUID user, UUID chat, UUID id, String text, List<UUID> documents) {
+    public Dialogue.View receive(
+            UUID userId, UUID chatId, UUID inputId, String text, List<UUID> documents) {
         transaction();
-        lock(user, chat);
+        lock(userId, chatId);
         require(
                 documents != null
                         && documents.size() <= 10
@@ -193,7 +194,7 @@ public final class PostgresDialogueStore implements DialogueStore {
                         && new java.util.HashSet<>(documents).size() == documents.size(),
                 false);
         require(
-                id != null
+                inputId != null
                         && text != null
                         && !text.isBlank()
                         && text.length()
@@ -201,20 +202,20 @@ public final class PostgresDialogueStore implements DialogueStore {
                                         .MAX_TEXT_LENGTH
                         && text.indexOf(0) < 0,
                 false);
-        var replay = mapper.message(user, chat, id);
-        if (replay != null) {
+        var existingInput = mapper.message(userId, chatId, inputId);
+        if (existingInput != null) {
             require(
-                    replay.text().equals(text)
+                    existingInput.text().equals(text)
                             && new java.util.HashSet<>(
-                                            mapper.documents(user, chat, id).stream()
+                                            mapper.documents(userId, chatId, inputId).stream()
                                                     .map(Dialogue.DocumentReference::id)
                                                     .toList())
                                     .equals(new java.util.HashSet<>(documents)),
                     false);
-            return read(user, chat);
+            return read(userId, chatId);
         }
         require(
-                mapper.messages(user, chat).stream()
+                mapper.messages(userId, chatId).stream()
                                 .filter(
                                         m ->
                                                 List.of(
@@ -224,11 +225,11 @@ public final class PostgresDialogueStore implements DialogueStore {
                                 .count()
                         < 20,
                 false);
-        mapper.insert(user, chat, id, text);
+        mapper.insert(userId, chatId, inputId, text);
         for (UUID document : documents)
-            require(mapper.bindDocument(user, chat, id, document) == 1, true);
-        ensureJob(user, chat, id, false);
-        return read(user, chat);
+            require(mapper.bindDocument(userId, chatId, inputId, document) == 1, true);
+        ensureJob(userId, chatId, inputId, false);
+        return read(userId, chatId);
     }
 
     /** {@inheritDoc} 读取当前索引和原绑定版本；删除后只返回墓碑名称。 */
@@ -562,16 +563,18 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
 
     /**
-     * @param user 用户
-     * @param chat 聊天
+     * 在调用方事务内按用户、聊天、任务顺序加锁，并校验记录归属。
+     *
+     * @param userId 用户
+     * @param chatId 聊天
      * @return 已按统一锁序保护的关联，不允许适配器绕过事务
      */
-    private Dialogue.Chat lock(UUID user, UUID chat) {
-        require(mapper.lockUser(user) != null, true);
-        var result = mapper.lockChat(user, chat);
+    private Dialogue.Chat lock(UUID userId, UUID chatId) {
+        require(mapper.lockUser(userId) != null, true);
+        var result = mapper.lockChat(userId, chatId);
         require(result != null, true);
         if (result.taskId() != null)
-            require(tasks.lockTask(new TaskScope(user, result.taskId())) != null, true);
+            require(tasks.lockTask(new TaskScope(userId, result.taskId())) != null, true);
         return result;
     }
 

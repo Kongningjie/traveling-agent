@@ -26,21 +26,21 @@ import java.util.UUID;
  * 保存用户输入，调用模型理解，再保存回复或执行对应业务。
  */
 public final class DialogueService implements BackgroundWorkSource {
-    private final com.lawrence.travel.application.document.AdviceService advice;//保存分析建议
-    private final DialogueStore store;//聊天持久化、消息状态、任务领取
-    private final DialogueInterpreter interpreter;//	将用户自然语言理解为结构化意图
-    private final BusinessTransactions transactions;//管理数据库事务
-    private final AccountStore accounts;//查找和检查用户身份
-    private final NegotiationService negotiation;//收集、合并旅行需求和处理问题卡片
-    private final RunService runs;//取消旅行规划的执行
-    private final ItineraryService itineraries;//查询、接受候选行程
-    private final VersionService versions;//恢复历史行程版本
-    private final PreferenceService preferences;//读取、修改长期偏好
-    private final TravelStore travel;//	查询旅行任务及版本数据
-    private final InteractionCodec json;//	JSON 编解码
-    private final ExecutionEngineStore engine;//查询执行状态、恢复原运行
-    private final boolean externalEnabled;//控制真实外部调用是否获准
-    private final com.lawrence.travel.application.safety.SafetyGate safety;//输入和输出安全检查
+    private final com.lawrence.travel.application.document.AdviceService advice; // 保存分析建议
+    private final DialogueStore store; // 聊天持久化、消息状态、任务领取
+    private final DialogueInterpreter interpreter; // 	将用户自然语言理解为结构化意图
+    private final BusinessTransactions transactions; // 管理数据库事务
+    private final AccountStore accounts; // 查找和检查用户身份
+    private final NegotiationService negotiation; // 收集、合并旅行需求和处理问题卡片
+    private final RunService runs; // 取消旅行规划的执行
+    private final ItineraryService itineraries; // 查询、接受候选行程
+    private final VersionService versions; // 恢复历史行程版本
+    private final PreferenceService preferences; // 读取、修改长期偏好
+    private final TravelStore travel; // 	查询旅行任务及版本数据
+    private final InteractionCodec json; // 	JSON 编解码
+    private final ExecutionEngineStore engine; // 查询执行状态、恢复原运行
+    private final boolean externalEnabled; // 控制真实外部调用是否获准
+    private final com.lawrence.travel.application.safety.SafetyGate safety; // 输入和输出安全检查
 
     /**
      * @param store 聊天权威
@@ -191,28 +191,28 @@ public final class DialogueService implements BackgroundWorkSource {
      * 这个版本没有附件，直接调用带附件的版本，并传入空列表。
      *
      * @param actor 认证
-     * @param chat 可重试的创建ID
-     * @param input 消息幂等键
+     * @param chatId 可重试的创建ID
+     * @param inputId 消息幂等键
      * @param text 自由文本
      * @return 可靠保存的聊天，无旅行占位任务
      */
-    public Dialogue.View send(UserIdentity actor, UUID chat, UUID input, String text) {
-        return send(actor, chat, input, text, List.of());
+    public Dialogue.View send(UserIdentity actor, UUID chatId, UUID inputId, String text) {
+        return send(actor, chatId, inputId, text, List.of());
     }
 
     /**
      * 保存消息和附件；明确的停止指令直接执行。
      *
      * @param actor 当前登录用户
-     * @param chat 聊天ID，不存在时创建
-     * @param input 消息ID，重试时复用
+     * @param chatId 聊天ID，不存在时创建
+     * @param inputId 消息ID，重试时复用
      * @param text 用户原文，非空、长度不超限且不含NUL
      * @param documents 附件ID列表，最多10个，无空值或重复；null视为空列表
      * @return 保存或停止处理后的聊天视图
      * @throws TravelStorageFailure 参数、归属、版本或幂等校验失败
      */
     public Dialogue.View send(
-            UserIdentity actor, UUID chat, UUID input, String text, List<UUID> documents) {
+            UserIdentity actor, UUID chatId, UUID inputId, String text, List<UUID> documents) {
         // 未选择附件时使用空列表，否则复制附件列表。
         var selected = documents == null ? List.<UUID>of() : new java.util.ArrayList<>(documents);
         // 附件最多10个，不允许null或重复ID。
@@ -223,8 +223,8 @@ public final class DialogueService implements BackgroundWorkSource {
         // 校验身份、消息ID、非空文本、长度和NUL字符。
         require(
                 actor != null
-                        && chat != null
-                        && input != null
+                        && chatId != null
+                        && inputId != null
                         && text != null
                         && !text.isBlank()
                         && text.length() <= DialogueIntent.MAX_TEXT_LENGTH
@@ -233,11 +233,12 @@ public final class DialogueService implements BackgroundWorkSource {
         return transactions.required(
                 () -> {
                     // 先在当前用户的聊天列表中，寻找是否存在指定 chat ID。
-                    boolean exists = store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chat));
+                    boolean exists =
+                            store.list(actor.id(), 0).stream().anyMatch(c -> c.id().equals(chatId));
                     // 第一页未找到时按ID查询；仅NOT_FOUND表示聊天不存在。
                     if (!exists) {
                         try {
-                            store.read(actor.id(), chat);
+                            store.read(actor.id(), chatId);
                             exists = true;
                         } catch (TravelStorageFailure missing) {
                             if (missing.code() != TravelStorageFailure.Code.NOT_FOUND)
@@ -247,21 +248,21 @@ public final class DialogueService implements BackgroundWorkSource {
                     // 聊天不存在时创建，标题截取首条消息。
                     if (!exists)
                         store.create(
-                                actor.id(), chat, text.substring(0, Math.min(60, text.length())));
+                                actor.id(), chatId, text.substring(0, Math.min(60, text.length())));
                     // 匹配明确的停止指令，忽略首尾空白和一个末尾标点。
                     if (java.util.Set.of("停止", "停止规划", "停止当前规划", "停止当前执行")
                             .contains(text.trim().replaceAll("[。！!]$", ""))) {
                         // 停止指令不允许携带附件。
                         require(selected.isEmpty());
                         // 相同停止消息已处理时直接返回，避免重复取消。
-                        if (store.containsInput(actor.id(), chat, input, text))
-                            return store.receive(actor.id(), chat, input, text);
+                        if (store.containsInput(actor.id(), chatId, inputId, text))
+                            return store.receive(actor.id(), chatId, inputId, text);
                         // 撤销未完成输入的提交资格，阻止旧回复写入。
-                        store.stopPending(actor.id(), chat);
-                        var current = store.read(actor.id(), chat).chat();
+                        store.stopPending(actor.id(), chatId);
+                        var current = store.read(actor.id(), chatId).chat();
                         // 已关联旅行时，继续检查并取消当前运行。
                         if (current.taskId() != null) {
-                            var run = store.currentRun(actor.id(), chat);
+                            var run = store.currentRun(actor.id(), chatId);
                             // 存在尚未结束的运行时才取消。
                             if (run != null
                                     && !engine.run(new TaskScope(actor.id(), current.taskId()), run)
@@ -269,12 +270,12 @@ public final class DialogueService implements BackgroundWorkSource {
                                             .terminal()) runs.cancel(actor, current.taskId(), run);
                         }
                         // 保存停止消息并直接标记完成。
-                        store.receive(actor.id(), chat, input, text);
-                        store.completeCommand(actor.id(), chat, input, "已处理停止请求，已有行程和对话保留。");
-                        return store.read(actor.id(), chat);
+                        store.receive(actor.id(), chatId, inputId, text);
+                        store.completeCommand(actor.id(), chatId, inputId, "已处理停止请求，已有行程和对话保留。");
+                        return store.read(actor.id(), chatId);
                     }
                     // 保存普通消息、附件绑定和后台作业。
-                    return store.receive(actor.id(), chat, input, text, selected);
+                    return store.receive(actor.id(), chatId, inputId, text, selected);
                 });
     }
 

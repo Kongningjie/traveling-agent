@@ -19,13 +19,14 @@ public interface DialogueStore {
 
     /**
      * 核对消息幂等键与原文；默认实现不执行持久化检查，生产适配器必须覆盖。
-     * @param user 归属
-     * @param chat 聊天
-     * @param input 输入
+     *
+     * @param userId 归属
+     * @param chatId 聊天
+     * @param inputId 输入
      * @param text 原文
      * @return 精确幂等检查；同ID异原文拒绝
      */
-    default boolean containsInput(UUID user, UUID chat, UUID input, String text) {
+    default boolean containsInput(UUID userId, UUID chatId, UUID inputId, String text) {
         return false;
     }
 
@@ -40,12 +41,13 @@ public interface DialogueStore {
 
     /**
      * 将应用已执行的短命令登记为完成，不经模型推断执行结果；默认实现不支持此操作。
-     * @param user 归属
-     * @param chat 聊天
-     * @param input 本次明确停止命令
+     *
+     * @param userId 归属
+     * @param chatId 聊天
+     * @param inputId 本次明确停止命令
      * @param reply 应用执行事实，不经过模型
      */
-    default void completeCommand(UUID user, UUID chat, UUID input, String reply) {
+    default void completeCommand(UUID userId, UUID chatId, UUID inputId, String reply) {
         throw new IllegalStateException("DIRECT_STOP_UNSUPPORTED");
     }
 
@@ -104,27 +106,29 @@ public interface DialogueStore {
 
     /**
      * 在应用短事务中可靠收件；消息正文、附件选择与作业登记必须满足同一幂等契约。
-     * @param user 身份
-     * @param chat 聊天
-     * @param id 幂等输入
+     *
+     * @param userId 身份
+     * @param chatId 聊天
+     * @param inputId 幂等输入
      * @param text 原文
      * @return 收件后视图；重复请求不可变更正文
      */
-    Dialogue.View receive(UUID user, UUID chat, UUID id, String text);
+    Dialogue.View receive(UUID userId, UUID chatId, UUID inputId, String text);
 
     /**
      * 在应用短事务中可靠收件；消息正文、附件选择与作业登记必须满足同一幂等契约。
-     * @param user 归属
-     * @param chat 聊天
-     * @param id 幂等消息
+     *
+     * @param userId 归属
+     * @param chatId 聊天
+     * @param inputId 幂等消息
      * @param text 原文
      * @param documents 本轮明确选择的文件，最多10个且不得重复
      * @return 消息和文件版本绑定同事务保存；重放不得改变附件
      */
     default Dialogue.View receive(
-            UUID user, UUID chat, UUID id, String text, List<UUID> documents) {
+            UUID userId, UUID chatId, UUID inputId, String text, List<UUID> documents) {
         if (!documents.isEmpty()) throw new IllegalStateException("DOCUMENT_BINDING_UNSUPPORTED");
-        return receive(user, chat, id, text);
+        return receive(userId, chatId, inputId, text);
     }
 
     /**

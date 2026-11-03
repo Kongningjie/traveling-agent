@@ -190,14 +190,16 @@ public interface DialogueMapper {
     List<Row> messages(@Param("user") UUID user, @Param("chat") UUID chat);
 
     /**
-     * @param user 用户
-     * @param chat 聊天
-     * @param id 消息
+     * 按用户、聊天及输入消息编号查询已保存的消息，用于识别重复请求。
+     *
+     * @param userId 用户
+     * @param chatId 聊天
+     * @param inputId 消息
      * @return 精确输入
      */
     @Select(
             "SELECT id,text,state,reply,operation::text,error,token,received_at FROM dialogue_input WHERE user_id=#{user} AND chat_id=#{chat} AND id=#{id}")
-    Row message(@Param("user") UUID user, @Param("chat") UUID chat, @Param("id") UUID id);
+    Row message(@Param("user") UUID userId, @Param("chat") UUID chatId, @Param("id") UUID inputId);
 
     /**
      * @param user 用户
