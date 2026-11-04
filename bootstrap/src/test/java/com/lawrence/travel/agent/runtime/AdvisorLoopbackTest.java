@@ -162,6 +162,18 @@ class AdvisorLoopbackTest {
         }
     }
 
+    /** 单独的 JSON 围栏可解包，仍按真实调查 DTO 契约校验。 */
+    @Test
+    void fencedCoordinatorJsonUsesTheSameContract() throws Exception {
+        try (var fixture = new AdvisorLoopbackFixture(root)) {
+            String json = body(fixture, Entry.RESEARCH);
+            fixture.answer("```json\n" + json + "\n```", false);
+            assertThat(invoke(fixture, Entry.RESEARCH))
+                    .isEqualTo(fixture.json.decode(json, type(Entry.RESEARCH)));
+            fixture.assertCalls(1);
+        }
+    }
+
     /** 自由文本不冒充结构化产物，实际链路保留UNSTRUCTURED并停止，不重发。 */
     @Test
     void unstructuredTextStopsWithoutLosingFixedCode() throws Exception {
@@ -169,7 +181,13 @@ class AdvisorLoopbackTest {
             fixture.answer("SYNTHETIC_NON_JSON", false);
             assertThatThrownBy(() -> invoke(fixture, Entry.EXTRACTION))
                     .isInstanceOf(AgentCallFailure.class)
-                    .hasMessage("MODEL_OUTPUT_UNSTRUCTURED");
+                    .hasMessage("MODEL_OUTPUT_UNSTRUCTURED")
+                    .isInstanceOfSatisfying(
+                            SanitizedAgentFailure.class,
+                            failure ->
+                                    assertThat(failure.outputShape())
+                                            .isEqualTo(
+                                                    ControlledHarnessCall.OutputShape.OTHER_TEXT));
             fixture.assertCalls(1);
         }
     }

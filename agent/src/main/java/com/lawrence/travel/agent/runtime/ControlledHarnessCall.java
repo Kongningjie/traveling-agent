@@ -31,9 +31,26 @@ public final class ControlledHarnessCall {
         SCHEMA
     }
 
+    /** 验收仅记录返回形状，不保留正文或推理块。 */
+    public enum OutputShape {
+        UNKNOWN,
+        NO_TEXT,
+        UNSUPPORTED_BLOCK,
+        EMPTY_TEXT,
+        JSON_OBJECT,
+        JSON_FENCE,
+        OTHER_TEXT
+    }
+
+    private static final java.util.regex.Pattern JSON_FENCE =
+            java.util.regex.Pattern.compile(
+                    "\\A```(?:json)?[ \\t]*\\R([\\s\\S]*?)\\R```\\z",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+
     /** 用固定原因标记返回结构问题，保持既有异常消息和拒绝行为。 */
     public static final class OutputFailure extends IllegalStateException {
         private final OutputProblem problem;
+        private final OutputShape shape;
 
         /**
          * 标记适配失败的位置。
@@ -41,8 +58,28 @@ public final class ControlledHarnessCall {
          * @param problem 编译期固定原因
          */
         public OutputFailure(OutputProblem problem) {
+            this(problem, OutputShape.UNKNOWN);
+        }
+
+        /**
+         * 保存失败类型和脱敏形状。
+         *
+         * @param problem 固定错误分类
+         * @param shape 固定返回形状
+         */
+        private OutputFailure(OutputProblem problem, OutputShape shape) {
             super("MODEL_OUTPUT_INVALID");
+            this.shape = shape;
             this.problem = java.util.Objects.requireNonNull(problem);
+        }
+
+        /**
+         * 读取固定返回形状。
+         *
+         * @return 无模型正文的形状分类
+         */
+        public OutputShape shape() {
+            return shape;
         }
 
         /**
@@ -221,7 +258,7 @@ public final class ControlledHarnessCall {
      *
      * @param result 框架最终消息
      * @param businessJson 应用指定的业务JSON模式
-     * @param json 严格编解码器，不从正文截取或修复JSON
+     * @param json 严格编解码器，只解码完整对象或独立代码块内的完整对象
      * @param safety 原文及规范化结果的输出安全检查
      * @return 保留全部字段的产物；空答案及非法封装继续拒绝
      */
@@ -229,25 +266,41 @@ public final class ControlledHarnessCall {
             Msg result, boolean businessJson, InteractionCodec json, SafetyGate safety) {
         if (!result.hasStructuredData()) {
             // 仅业务模式接受完整的助手文本对象；工具调用、思考块等不当作最终业务结果。
-            if (!businessJson
-                    || json == null
-                    || result.getRole() != MsgRole.ASSISTANT
-                    || result.getContent().isEmpty()
-                    || result.getContent().stream()
-                            .anyMatch(block -> !(block instanceof TextBlock))) {
+            if (!businessJson || json == null || result.getRole() != MsgRole.ASSISTANT) {
                 throw new OutputFailure(OutputProblem.UNSTRUCTURED);
             }
-            String raw =
-                    new RestrictedHarnessFactory.StructuredReply(result.getTextContent()).answer();
+            if (result.getContent().stream().anyMatch(block -> !(block instanceof TextBlock))) {
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED, OutputShape.UNSUPPORTED_BLOCK);
+            }
+            if (result.getContent().isEmpty()) {
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED, OutputShape.NO_TEXT);
+            }
+            String raw = result.getTextContent();
+            if (raw == null || raw.isBlank()) {
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED, OutputShape.EMPTY_TEXT);
+            }
+            raw = new RestrictedHarnessFactory.StructuredReply(raw).answer();
             safety.require("OUTPUT", raw);
+            String candidate = raw.strip();
+            var fence = JSON_FENCE.matcher(candidate);
+            OutputShape shape;
+            if (fence.matches()) {
+                shape = OutputShape.JSON_FENCE;
+                candidate = fence.group(1);
+            } else {
+                shape =
+                        candidate.startsWith("{")
+                                ? OutputShape.JSON_OBJECT
+                                : OutputShape.OTHER_TEXT;
+            }
             Map<?, ?> data;
             try {
-                data = json.decode(raw, Map.class);
+                data = json.decode(candidate, Map.class);
             } catch (RuntimeException invalid) {
                 // 不保存解析器异常，避免正文、非法值或动态路径进入诊断。
-                throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+                throw new OutputFailure(OutputProblem.UNSTRUCTURED, shape);
             }
-            if (data == null) throw new OutputFailure(OutputProblem.UNSTRUCTURED);
+            if (data == null) throw new OutputFailure(OutputProblem.UNSTRUCTURED, shape);
             return readBusinessObject(data);
         }
         if (!businessJson)

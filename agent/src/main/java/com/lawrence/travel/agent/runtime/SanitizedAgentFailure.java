@@ -8,6 +8,7 @@ import java.util.List;
 public final class SanitizedAgentFailure extends AgentCallFailure {
     private final List<String> exceptionTypes;
     private final List<String> exceptionSites;
+    private final ControlledHarnessCall.OutputShape outputShape;
 
     /**
      * 提取类型和首个类/方法，不保留原异常引用。
@@ -19,9 +20,13 @@ public final class SanitizedAgentFailure extends AgentCallFailure {
         super(code, knownZeroUsage(failure));
         var types = new ArrayList<String>();
         var sites = new ArrayList<String>();
+        var shape = ControlledHarnessCall.OutputShape.UNKNOWN;
         for (Throwable current = failure;
                 current != null && types.size() < 8;
                 current = current.getCause()) {
+            if (current instanceof ControlledHarnessCall.OutputFailure output) {
+                shape = output.shape();
+            }
             types.add(current.getClass().getName());
             var frames = current.getStackTrace();
             sites.add(
@@ -29,8 +34,18 @@ public final class SanitizedAgentFailure extends AgentCallFailure {
                             ? "UNAVAILABLE"
                             : frames[0].getClassName() + "#" + frames[0].getMethodName());
         }
+        outputShape = shape;
         exceptionTypes = List.copyOf(types);
         exceptionSites = List.copyOf(sites);
+    }
+
+    /**
+     * 返回适配层确定的输出形状。
+     *
+     * @return 无模型正文的固定分类
+     */
+    public ControlledHarnessCall.OutputShape outputShape() {
+        return outputShape;
     }
 
     /**

@@ -87,7 +87,7 @@ class ControlledHarnessCallTest {
                 .isInstanceOf(ControlledHarnessCall.OutputFailure.class);
     }
 
-    /** 只解析完整对象；重复键、尾随内容、代码围栏及空对象不能被截取或补写后接受。 */
+    /** 只解析完整对象；重复键、尾随内容、多重围栏及空对象仍拒绝。 */
     @Test
     void textFallbackDoesNotRepairMalformedOrAmbiguousJson() {
         for (String text :
@@ -99,7 +99,8 @@ class ControlledHarnessCallTest {
                         "说明{\"reply\":\"a\"}",
                         "{\"reply\":\"a\"}尾随",
                         "{\"reply\":\"a\"}{}",
-                        "```json\n{\"reply\":\"a\"}\n```",
+                        "说明\n```json\n{\"reply\":\"a\"}\n```",
+                        "```json\n{\"reply\":\"a\"}\n```\n```json\n{}\n```",
                         "{\"reply\":\"a\",\"reply\":\"b\"}")) {
             assertThatThrownBy(() -> plainFixture(text, true, true))
                     .isInstanceOf(ControlledHarnessCall.OutputFailure.class)
