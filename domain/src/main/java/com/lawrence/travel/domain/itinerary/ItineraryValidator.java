@@ -233,7 +233,7 @@ public final class ItineraryValidator {
             billed.add(cost.relatedId());
             if (!billable.contains(cost.relatedId())
                     || cost.category() == null
-                    || !cost.category().matches("[A-Z][A-Z0-9_]{1,47}")
+                    || !cost.category().matches(TripSnapshot.Cost.CATEGORY_PATTERN)
                     || !chargeKeys.add(cost.relatedId() + ":" + cost.category())
                     || cost.unit() == null
                     || cost.quantity() == null

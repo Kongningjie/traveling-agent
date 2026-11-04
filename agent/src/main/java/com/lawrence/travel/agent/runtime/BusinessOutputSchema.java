@@ -145,6 +145,9 @@ final class BusinessOutputSchema {
                 throw new IllegalArgumentException("BUSINESS_OUTPUT_SCHEMA_INVALID");
             }
             enrich(property, component.getGenericType(), root, visited);
+            if (record == TripSnapshot.Cost.class && component.getName().equals("category")) {
+                property.put("pattern", TripSnapshot.Cost.CATEGORY_PATTERN);
+            }
             if (record == TripSnapshot.EvidenceUse.class
                     && component.getName().equals("fieldPath")) {
                 property.put(

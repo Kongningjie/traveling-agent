@@ -360,7 +360,11 @@ class PlanningIntegrationTest {
                         .collect(java.util.stream.Collectors.toSet());
         var uses =
                 context.evidence().stream()
-                        .filter(v -> refs.contains(v.evidence().reference()))
+                        .filter(
+                                v ->
+                                        refs.contains(v.evidence().reference())
+                                                && TripSnapshot.EvidenceUse.ALLOWED_FIELDS.contains(
+                                                        v.evidence().fieldPath()))
                         .map(
                                 v ->
                                         new TripSnapshot.EvidenceUse(
@@ -387,7 +391,11 @@ class PlanningIntegrationTest {
                                 "poi:123",
                                 start.plusHours(10),
                                 start.plusHours(11),
-                                null)),
+                                context.revision().fixedArrangements().stream()
+                                        .filter(fixed -> fixed.type().equals("景点预约"))
+                                        .findFirst()
+                                        .map(fixed -> fixed.id())
+                                        .orElse(null))),
                 List.of(),
                 List.of(),
                 List.of(
@@ -566,6 +574,37 @@ class PlanningIntegrationTest {
                                 .conclusion())
                 .isEqualTo(ItineraryReport.Conclusion.UNKNOWN);
         verify(advisor, org.mockito.Mockito.never()).review(any(), any(), any());
+        var card = negotiation.card(f.actor(), f.scope().taskId());
+        assertThat(card.decision().remaining().values().iterator().next().prompt())
+                .contains("官方开放时段", "已订日期及起止时刻", "票价及计费单位");
+        assertThat(card.specs().values().iterator().next().field()).isEqualTo("fixedArrangements");
+        var receipt =
+                negotiation.send(
+                        f.actor(),
+                        f.scope().taskId(),
+                        UUID.randomUUID(),
+                        "",
+                        List.of(
+                                new Negotiation.Fact(
+                                        "fixedArrangements",
+                                        "景点预约|"
+                                                + date
+                                                + "T10:00+08:00[Asia/Shanghai]|"
+                                                + date
+                                                + "T11:00+08:00[Asia/Shanghai]",
+                                        null)));
+        var resumed = new Fixture(f.actor(), f.scope(), receipt.runId());
+        through(resumed, StageType.UNDERSTAND);
+        var revision = travel.task(f.actor(), f.scope().taskId()).task().constraintRevision();
+        assertThat(travel.revision(f.actor(), f.scope().taskId(), revision).fixedArrangements())
+                .hasSize(1);
+        org.mockito.Mockito.doAnswer(
+                        invocation -> new Planning.Draft(draft(invocation.getArgument(1))))
+                .when(advisor)
+                .draft(any(), any(), any(), any());
+        through(resumed, StageType.PRESENT);
+        assertThat(itineraries.latest(f.actor(), f.scope().taskId()).acceptable()).isTrue();
+        assertThat(accept(resumed).status()).isEqualTo(CandidateStore.Status.ACCEPTED);
     }
 
     /** 相关证据撤回后接受只可靠排队重校验，不沿用用户先前接受意图。 */

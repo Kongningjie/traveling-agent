@@ -97,6 +97,26 @@ class BusinessOutputSchemaTest {
                         + "\"window\":{\"cityIds\":[\"北京\"],\"startsOn\":\"2026-11-07\",\"endsOn\":\"2026-11-07\",\"travelers\":2},"
                         + "\"cityStays\":[],\"days\":[],\"items\":[],\"transportLegs\":[],\"accommodationStays\":[],\"costEntries\":[],\"alternatives\":[],\"evidenceRefs\":[]}}";
         accepts(Planning.Draft.class, snapshot);
+        String cost =
+                "{\"id\":\""
+                        + id
+                        + "\",\"relatedId\":\""
+                        + id
+                        + "\",\"category\":\"ACTIVITIES\",\"unit\":\"PER_GROUP\",\"quantity\":1,"
+                        + "\"lower\":0,\"upper\":null,\"paid\":false,\"includedInBudget\":true,\"currency\":\"CNY\"}";
+        String priced = snapshot.replace("\"costEntries\":[]", "\"costEntries\":[" + cost + "]");
+        accepts(Planning.Draft.class, priced);
+        rejects(Planning.Draft.class, priced.replace("ACTIVITIES", "景点活动门票"));
+        String costPatch =
+                "{\"patch\":{\"expectedBaseHash\":\""
+                        + "a".repeat(64)
+                        + "\",\"operations\":[{\"kind\":\"COST\",\"action\":\"REPLACE\",\"id\":\""
+                        + id
+                        + "\",\"cost\":"
+                        + cost
+                        + ",\"evidenceUses\":[]}]}}";
+        accepts(Planning.PatchReply.class, costPatch);
+        rejects(Planning.PatchReply.class, costPatch.replace("ACTIVITIES", "景点活动门票"));
         codec.decode(snapshot, Planning.Draft.class);
         String boundSnapshot =
                 snapshot.replace(

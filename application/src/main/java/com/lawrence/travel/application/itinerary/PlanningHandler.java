@@ -457,6 +457,39 @@ public final class PlanningHandler implements StageHandler {
                     extra,
                     stage(StageType.PLAN, continued(claim, candidate.candidateId(), true, issues)),
                     null);
+        var blockingCodes =
+                issues.stream()
+                        .filter(ItineraryReport.Issue::blocking)
+                        .map(ItineraryReport.Issue::code)
+                        .distinct()
+                        .toList();
+        boolean reservationUnknown = blockingCodes.contains("RESERVATION_UNVERIFIED");
+        var prompts = new java.util.ArrayList<String>();
+        if (blockingCodes.contains("OPENING_UNVERIFIED")) {
+            prompts.add("请补充该景点在旅行当天的官方开放时段或公告链接。");
+        }
+        if (reservationUnknown) {
+            prompts.add("尚未核实预约要求。如果已经预约，请提供景点名称、已订日期及起止时刻；如未预约，请说明当前状态或补充官方预约规则。");
+        }
+        if (blockingCodes.stream()
+                .anyMatch(
+                        Set.of(
+                                        "COST_UNKNOWN",
+                                        "COST_UNVERIFIED",
+                                        "COST_ITEM_MISSING",
+                                        "HARD_BUDGET_UNKNOWN")
+                                ::contains)) {
+            prompts.add("请补充当天票价及计费单位，例如每人或每组，或提供官方票价链接。");
+        }
+        String questionText =
+                prompts.isEmpty()
+                        ? "草案仍有阻断问题："
+                                + blockingCodes.stream().limit(8).toList()
+                                + "。请补充可核实资料或明确修改要求。"
+                        : String.join(" ", prompts)
+                                + " 当前阻断项："
+                                + blockingCodes.stream().limit(8).toList()
+                                + "。";
         UUID question = UUID.randomUUID();
         UUID decisionId = UUID.randomUUID();
         var decision =
@@ -470,17 +503,7 @@ public final class PlanningHandler implements StageHandler {
                         Map.of(
                                 question,
                                 new DecisionRequest.Question(
-                                        question,
-                                        "草案仍有阻断问题："
-                                                + issues.stream()
-                                                        .filter(ItineraryReport.Issue::blocking)
-                                                        .map(ItineraryReport.Issue::code)
-                                                        .distinct()
-                                                        .limit(8)
-                                                        .toList()
-                                                + "。请补充可核实资料或明确修改要求；不会自动放宽原约束。",
-                                        Map.of(),
-                                        null)),
+                                        question, questionText, Map.of(), null)),
                         true,
                         Set.of(question),
                         DecisionRequest.State.OPEN);
@@ -492,7 +515,9 @@ public final class PlanningHandler implements StageHandler {
                         Map.of(
                                 question,
                                 new Negotiation.QuestionSpec(
-                                        "hardRequirements",
+                                        reservationUnknown
+                                                ? "fixedArrangements"
+                                                : "hardRequirements",
                                         "已用完本运行两轮修订，保留草案和问题。",
                                         "补充资料或提交新修改后重新校验；不自动接受。",
                                         Map.of()))));

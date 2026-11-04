@@ -52,6 +52,7 @@ public final class HarnessResearchAdvisor implements ResearchAdvisor {
                                 + "WEATHER/weather 参数city(6位高德行政码),date；ROUTE/route 参数origin,destination(GCJ-02),mode(walking/driving/transit),date,可选city,destinationCity；这两种操作的query.date必填，且必须与arguments.date完全一致。"
                                 + "EXTRACT/openingHours或price或reservation或accessibility 的arguments只含url，query.date必须填写目标旅行日期，不得为null；url必须是人工白名单官方域名且已知准确地址，不得猜URL。"
                                 + "previousQueries是上一轮已尝试的查询，即使证据不足也不要重复提交相同查询；没有新查询且资料足够时用REUSE并进入PLAN。"
+                                + "行程依赖景区时，分别调查openingHours、price和reservation，按旅行日期核查临时关闭及预约公告。同一官方页可支持多个字段，地点搜索结果不能替代这三项。已明确提供的预约属于用户固定安排，不能推断其他日期或其他景点也已预约。"
                                 + "所有非空query.date均为已确认旅行起止日期范围内的ISO日期(yyyy-MM-dd)。缺少所需旅行日期时使用CLARIFY，不得用当前日期、抓取日期或猜测日期补齐。query.date是查询目标，不代表原文已经证明适用；提取结果validForDate仍须依据原文，未知保持null。"
                                 + "不确定坐标/行政码/网页地址时先搜索或地点查询，不能编造参数；可以返回空计划明确不足。targetId必须精确稳定标识查询的城市/地点/路线和方式，不混淆同名地点。不可实时票务或预订。官方主机白名单："
                                 + json.encode(officialHosts)

@@ -255,7 +255,10 @@ public record TripSnapshot(
             BigDecimal upper,
             boolean paid,
             boolean includedInBudget,
-            String currency) {}
+            String currency) {
+        /** 费用分类是 2 至 48 字符的业务代码，允许合法的扩展分类。 */
+        public static final String CATEGORY_PATTERN = "^[A-Z][A-Z0-9_]{1,47}$";
+    }
 
     /**
      * 备选不重复计入当前方案费用。
