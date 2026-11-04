@@ -43,9 +43,22 @@ class ExtractedPageTextTest {
         assertThat(normalized.get("raw_content_original_hash"))
                 .isEqualTo(EvidencePolicy.hash(text));
         assertThat(normalized.get("raw_content_transform"))
-                .isEqualTo("ACTIVE_MARKDOWN_TARGETS_REMOVED_V2");
+                .isEqualTo("ACTIVE_MARKDOWN_TARGETS_REMOVED_V3");
         assertThat(SafetyGate.local().check("TOOL_OUTPUT", result.toString()).status())
                 .isEqualTo(SafetyGate.Status.ALLOW);
+    }
+
+    /** 目标路径中的撇号和独立标题使用不同的括号规则。 */
+    @Test
+    void distinguishesDestinationApostropheFromLinkTitle() {
+        String officialLink = "[官网](https://official.example/visitor's-guide)";
+        String text = officialLink + " [预约](javascript:void(0) \"预约说明 )\") 门票40元";
+        String cleaned = ExtractedPageText.visibleText(text);
+        assertThat(cleaned).isEqualTo(officialLink + " 预约 门票40元");
+        assertThat(SafetyGate.local().check("TOOL_OUTPUT", cleaned).status())
+                .isEqualTo(SafetyGate.Status.ALLOW);
+        assertThat(ExtractedPageText.visibleText("[预约](javascript:openvisitor's-guide) 门票40元"))
+                .isEqualTo("预约 门票40元");
     }
 
     /** 未闭合、超深目标、裸协议及危险标签仍被拒绝；标签里的危险内容不能借清理放行。 */

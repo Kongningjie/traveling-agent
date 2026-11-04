@@ -37,7 +37,7 @@ final class ExtractedPageText {
             }
             var normalized = new LinkedHashMap<Object, Object>(page);
             normalized.put("raw_content", text);
-            normalized.put("raw_content_transform", "ACTIVE_MARKDOWN_TARGETS_REMOVED_V2");
+            normalized.put("raw_content_transform", "ACTIVE_MARKDOWN_TARGETS_REMOVED_V3");
             normalized.put("raw_content_original_hash", EvidencePolicy.hash(original));
             pages.add(normalized);
             changed = true;
@@ -107,7 +107,10 @@ final class ExtractedPageText {
                 if (current == quote) quote = 0;
                 continue;
             }
-            if (current == '\'' || current == '"') {
+            // 外层空白后的引号可开始标题，内层引号可包住脚本参数里的括号。
+            // 外层目标路径中的撇号按普通字符处理。
+            if ((current == '\'' || current == '"')
+                    && (depth > 1 || Character.isWhitespace(text.charAt(i - 1)))) {
                 quote = current;
                 continue;
             }
