@@ -25,6 +25,7 @@ final class TripDemoLocalFixture {
     private final LocalDate date = LocalDate.of(2026, 11, 7);
     private final TravelJson json = new TravelJson();
     private final ResearchAdvisor researcher;
+    private final boolean simpleTrip;
     private final PlanningAdvisor advisor;
     private final TravelToolService tools;
 
@@ -33,10 +34,15 @@ final class TripDemoLocalFixture {
      *
      * @param researcher 调查模型端口
      * @param advisor 规划及审核端口
+     * @param simpleTrip 仅包含同地休息的合成场景
      * @param tools 资料工具端口
      */
     TripDemoLocalFixture(
-            ResearchAdvisor researcher, PlanningAdvisor advisor, TravelToolService tools) {
+            ResearchAdvisor researcher,
+            PlanningAdvisor advisor,
+            TravelToolService tools,
+            boolean simpleTrip) {
+        this.simpleTrip = simpleTrip;
         this.researcher = researcher;
         this.advisor = advisor;
         this.tools = tools;
@@ -48,7 +54,7 @@ final class TripDemoLocalFixture {
                         invocation -> {
                             Research.Context context = invocation.getArgument(1);
                             return new Research.Plan(
-                                    context.baseVersionId() == null
+                                    !simpleTrip && context.baseVersionId() == null
                                             ? List.of(
                                                     query("openingHours"),
                                                     query("price"),
@@ -128,7 +134,7 @@ final class TripDemoLocalFixture {
                                             item.id(),
                                             item.cityStayId(),
                                             item.type(),
-                                            "景点说明：慢慢游览，可随时休息",
+                                            simpleTrip ? "自由休息，整理旅途照片" : "景点说明：慢慢游览，可随时休息",
                                             item.locationKey(),
                                             item.startsAt(),
                                             item.endsAt(),
@@ -229,26 +235,30 @@ final class TripDemoLocalFixture {
                         new TripSnapshot.Item(
                                 item,
                                 city,
-                                TripSnapshot.ItemType.ACTIVITY,
-                                "本地资料景点",
+                                simpleTrip
+                                        ? TripSnapshot.ItemType.REST
+                                        : TripSnapshot.ItemType.ACTIVITY,
+                                simpleTrip ? "自由休息" : "本地资料景点",
                                 "poi:123",
                                 start.plusHours(10),
                                 start.plusHours(11),
                                 null)),
                 List.of(),
                 List.of(),
-                List.of(
-                        new TripSnapshot.Cost(
-                                cost,
-                                item,
-                                "ACTIVITIES",
-                                TripSnapshot.CostUnit.PER_PERSON,
-                                BigDecimal.ONE,
-                                new BigDecimal("20"),
-                                new BigDecimal("20"),
-                                false,
-                                true,
-                                "CNY")),
+                simpleTrip
+                        ? List.of()
+                        : List.of(
+                                new TripSnapshot.Cost(
+                                        cost,
+                                        item,
+                                        "ACTIVITIES",
+                                        TripSnapshot.CostUnit.PER_PERSON,
+                                        BigDecimal.ONE,
+                                        new BigDecimal("20"),
+                                        new BigDecimal("20"),
+                                        false,
+                                        true,
+                                        "CNY")),
                 List.of(
                         new TripSnapshot.Alternative(
                                 UUID.randomUUID(), item, "雨天保留休息备选，不承诺未经核实的场馆")),

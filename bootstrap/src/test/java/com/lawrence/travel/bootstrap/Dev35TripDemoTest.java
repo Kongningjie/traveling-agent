@@ -196,23 +196,33 @@ class Dev35TripDemoTest {
                 .when(ledger)
                 .reserve(any(), any(), any(), any(), anyLong(), any());
         if (!real()) {
-            new TripDemoLocalFixture(researcher, planner, tools).install();
+            new TripDemoLocalFixture(researcher, planner, tools, simpleTrip()).install();
             doAnswer(call -> localReply(call.getArgument(0))).when(interpreter).interpret(any());
         }
         var turns =
                 List.of(
                         new HttpSessionEvaluationDriver.Turn(
-                                "MESSAGE", "开始规划北京旅行：2026年11月7日当天，2人，上午只参观故宫一个景点，其余时间自由休息。", null),
+                                "MESSAGE",
+                                simpleTrip()
+                                        ? "开始规划北京旅行：2026年11月7日当天，2人，上午只安排一段同地自由休息和整理旅行照片，不安排门票景点、交通、用餐或住宿。"
+                                        : "开始规划北京旅行：2026年11月7日当天，2人，上午只参观故宫一个景点，其余时间自由休息。",
+                                null),
                         new HttpSessionEvaluationDriver.Turn(
-                                "MESSAGE", "预算只计算景点活动，两人合计100元，没有已订安排。", null),
+                                "MESSAGE",
+                                simpleTrip() ? "预算不设上限，没有已订安排。" : "预算只计算景点活动，两人合计100元，没有已订安排。",
+                                null),
                         new HttpSessionEvaluationDriver.Turn("ACCEPT_CANDIDATE", null, null),
                         new HttpSessionEvaluationDriver.Turn(
-                                "MESSAGE", "只把第一个活动的说明补充为“慢慢游览，可随时休息”，不改变活动地点、时间、费用和其他安排。", null),
+                                "MESSAGE",
+                                simpleTrip()
+                                        ? "只把第一项休息安排的标题改为“自由休息，整理旅途照片”，不改变地点、时间、费用和其他安排。"
+                                        : "只把第一个活动的说明补充为“慢慢游览，可随时休息”，不改变活动地点、时间、费用和其他安排。",
+                                null),
                         new HttpSessionEvaluationDriver.Turn("ACCEPT_CANDIDATE", null, null));
         String script = json.encode(understandOnly() ? turns.subList(0, 1) : turns);
         var input =
                 new Evaluation.Case(
-                        understandOnly() ? "DEMO-UNDERSTAND-01" : "DEMO-TRIP-01",
+                        caseId(),
                         "DEVELOPMENT",
                         "TRIP_DEMO",
                         "单日旅行的规划、接受和局部说明修改",
@@ -370,14 +380,19 @@ class Dev35TripDemoTest {
         } else if (text.startsWith("预算")) {
             action = DialogueIntent.Action.SUPPLEMENT;
             facts =
-                    List.of(
-                            new DialogueIntent.Fact("budgetRule", "PER_GROUP", "两人合计100元"),
-                            new DialogueIntent.Fact("budgetCny", "100", "两人合计100元"),
-                            new DialogueIntent.Fact("budgetScope", "ACTIVITIES", "只计算景点活动"),
-                            new DialogueIntent.Fact("fixedStatus", "NONE", "没有已订安排"));
+                    simpleTrip()
+                            ? List.of(
+                                    new DialogueIntent.Fact("budgetRule", "NONE", "预算不设上限"),
+                                    new DialogueIntent.Fact("fixedStatus", "NONE", "没有已订安排"))
+                            : List.of(
+                                    new DialogueIntent.Fact("budgetRule", "PER_GROUP", "两人合计100元"),
+                                    new DialogueIntent.Fact("budgetCny", "100", "两人合计100元"),
+                                    new DialogueIntent.Fact("budgetScope", "ACTIVITIES", "只计算景点活动"),
+                                    new DialogueIntent.Fact("fixedStatus", "NONE", "没有已订安排"));
         } else {
             action = DialogueIntent.Action.REVISE_ITINERARY;
-            facts = List.of(new DialogueIntent.Fact("interests", "慢慢游览，可随时休息", "慢慢游览，可随时休息"));
+            String title = simpleTrip() ? "自由休息，整理旅途照片" : "慢慢游览，可随时休息";
+            facts = List.of(new DialogueIntent.Fact("interests", title, title));
         }
         return new DialogueIntent.Result(
                 List.of(new DialogueIntent.Intent(DialogueIntent.Kind.PLANNING, action, text)),
@@ -388,6 +403,25 @@ class Dev35TripDemoTest {
                 "",
                 "",
                 "");
+    }
+
+    /**
+     * 返回本次演示用例的固定编号。
+     *
+     * @return 与脚本报告核对一致的编号
+     */
+    private static String caseId() {
+        if (understandOnly()) return "DEMO-UNDERSTAND-01";
+        return simpleTrip() ? "DEMO-TRIP-SIMPLE" : "DEMO-TRIP-01";
+    }
+
+    /**
+     * 选择无需景区证据的同地休息场景。
+     *
+     * @return 当前批次是否选择该场景
+     */
+    private static boolean simpleTrip() {
+        return Boolean.parseBoolean(System.getenv("TRAVEL_DEV35_TRIP_SIMPLE"));
     }
 
     /**
@@ -445,6 +479,12 @@ class Dev35TripDemoTest {
         var revised = (List<?>) second.get("items");
         assertThat(original).isNotEmpty();
         assertThat(revised).hasSameSizeAs(original);
+        if (simpleTrip()) {
+            assertThat(original).hasSize(1);
+            assertThat(((Map<?, ?>) original.getFirst()).get("type")).isEqualTo("REST");
+            assertThat(((Map<?, ?>) revised.getFirst()).get("title")).isEqualTo("自由休息，整理旅途照片");
+            assertThat((List<?>) first.get("costEntries")).isEmpty();
+        }
         for (int index = 0; index < original.size(); index++) {
             var before = (Map<?, ?>) original.get(index);
             var after = (Map<?, ?>) revised.get(index);
@@ -537,9 +577,7 @@ class Dev35TripDemoTest {
                                 List.of(
                                         Map.of(
                                                 "caseId",
-                                                understandOnly()
-                                                        ? "DEMO-UNDERSTAND-01"
-                                                        : "DEMO-TRIP-01",
+                                                caseId(),
                                                 "mode",
                                                 real() ? "REAL_MODEL_AND_TOOL" : "LOCAL_CONTRACT",
                                                 "status",
@@ -550,10 +588,6 @@ class Dev35TripDemoTest {
         Path report = Path.of(System.getenv("TRAVEL_DEV35_HTTP_REPORT"));
         Files.createDirectories(report.getParent());
         Files.writeString(report, body);
-        System.out.println(
-                "DEV35_HTTP case="
-                        + (understandOnly() ? "DEMO-UNDERSTAND-01" : "DEMO-TRIP-01")
-                        + " status="
-                        + (passed ? "PASS" : "FAIL"));
+        System.out.println("DEV35_HTTP case=" + caseId() + " status=" + (passed ? "PASS" : "FAIL"));
     }
 }
