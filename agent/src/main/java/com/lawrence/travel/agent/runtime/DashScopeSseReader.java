@@ -14,6 +14,10 @@ import java.util.function.Consumer;
  * 解析模型SSE响应，检查流完整性并读取终帧用量。
  */
 final class DashScopeSseReader {
+    // 规划输出允许 12288 Token，细粒度 SSE 分片会带来额外的帧和协议开销。
+    private static final int MAX_STREAM_CHARS = 8 * 1024 * 1024;
+    private static final int MAX_FRAMES = 16384;
+
     /** 工具类不允许实例化。 */
     private DashScopeSseReader() {}
 
@@ -35,7 +39,8 @@ final class DashScopeSseReader {
         boolean carriageReturn = false;
         while ((value = reader.read()) != -1) {
             if (cancelled.getAsBoolean()) throw new HttpTransportException("MODEL_CANCELLED");
-            if (++total > 1_048_576) throw new HttpTransportException("MODEL_STREAM_TOO_LARGE");
+            if (++total > MAX_STREAM_CHARS)
+                throw new HttpTransportException("MODEL_STREAM_TOO_LARGE");
             if (value == '\n' && carriageReturn) {
                 carriageReturn = false;
                 continue;
@@ -85,7 +90,8 @@ final class DashScopeSseReader {
          * @param consumer 接收已经校验形状的模型产物
          */
         private void frame(String data, Consumer<String> consumer) {
-            if (++frames > 512 || done) throw new HttpTransportException("MODEL_STREAM_INVALID");
+            if (++frames > MAX_FRAMES) throw new HttpTransportException("MODEL_STREAM_TOO_LARGE");
+            if (done) throw new HttpTransportException("MODEL_STREAM_INVALID");
             if (data.equals("[DONE]")) {
                 if (!terminal) throw new HttpTransportException("MODEL_STREAM_INCOMPLETE");
                 done = true;

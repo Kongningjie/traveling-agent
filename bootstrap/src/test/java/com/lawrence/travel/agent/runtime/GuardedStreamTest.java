@@ -359,6 +359,22 @@ class GuardedStreamTest {
         }
     }
 
+    /** 细粒度规划流超过旧帧限额时，仍收到终帧并准确结算。 */
+    @Test
+    void longPlanningStreamSettlesTerminalUsage() throws Exception {
+        try (var transport = transport(true)) {
+            String frames = ("data:" + FIRST + "\n\n").repeat(1024) + completeFrames();
+            when(call.execute())
+                    .thenReturn(
+                            response(
+                                    ResponseBody.create(
+                                            frames, MediaType.get("text/event-stream"))));
+            assertThat(transport.stream(request()).blockLast(Duration.ofSeconds(5)))
+                    .isEqualTo(LAST);
+            verify(ledger).finish(eq(reservation), eq(new TokenUsage(17, 3)), any());
+        }
+    }
+
     /** 非 JSON 数据及过大单行均固定失败，不交给下游解析或无限缓冲。 */
     @Test
     void rejectsMalformedAndOversizedEvents() throws Exception {
