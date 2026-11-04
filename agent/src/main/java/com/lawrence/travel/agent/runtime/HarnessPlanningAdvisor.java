@@ -74,6 +74,7 @@ public final class HarnessPlanningAdvisor implements PlanningAdvisor {
                         + "transportLegs:[{id,fromItemId,toItemId,startsAt,endsAt,durationMinutes,estimated}],accommodationStays:[{id,cityStayId,checkIn,checkOut,rooms,locationKey}],"
                         + "costEntries:[{id,relatedId,category,unit:PER_PERSON/PER_GROUP/PER_ROOM_NIGHT,quantity,lower,upper,paid,includedInBudget,currency:CNY}],alternatives:[{id,replacesItemId,description}],"
                         + "evidenceRefs:[{id,revision,contentHash}],evidenceUses:[{objectId,fieldPath,reference:{id,revision,contentHash}}]}}。所有id用UUID，修订保留未改对象id；时间ISO完整带+08:00[Asia/Shanghai]，同城可多段。"
+                        + "window.cityIds与cityStays[].cityId逐字复制已确认cities的各项，保持原文和大小写。例如已确认城市是北京时必须写北京，不能写beijing、行政区码或地名slug。活动地点的locationKey与城市字段分开。taskId、constraintRevision和baseVersionId沿用输入权威值。"
                         + "交通价格证据targetId为起点locationKey->终点locationKey，绑定费用对象price字段，明确日期及每人/每组单位；没有官方证据保持未知。费用只写分项，不能自报校验通过；费用的quantity、lower、upper使用JSON数字，quantity必须大于0，lower必须非负且不能为null。完全未知时填lower:0,upper:null，0只是数学下界，绝不表示免费或已核实；仅upper可为null。已核实固定金额时lower和upper都填写该金额。按用户预算包含范围和已付口径，未确认不排除。活动locationKey必须是证据targetId；证据绑定实际对象及字段，不能拿搜索线索当事实。"
                         + "evidenceUses.fieldPath仅可使用openingHours、price、route、reservation、weather、poi。只绑定实际被用到的证据，reference逐字段复制输入中的对象；检索线索、无关及未知证据不绑定。没有用到证据时evidenceRefs和evidenceUses都返回空数组。用户只要求同地休息时用REST，不额外创建景点、餐饮或费用。"
                         + "开放时段与预约分别核实，证据不明可生成明确未知草案。休息、候车、接驳、步行和缓冲占用时间；住宿不与白天活动冲突。没有时长或内部步行数据保持未知。"

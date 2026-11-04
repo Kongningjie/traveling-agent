@@ -204,7 +204,7 @@ class Dev35TripDemoTest {
                         new HttpSessionEvaluationDriver.Turn(
                                 "MESSAGE",
                                 simpleTrip()
-                                        ? "开始规划北京旅行：2026年11月7日当天，2人，上午只安排一段同地自由休息和整理旅行照片，不安排门票景点、交通、用餐或住宿。"
+                                        ? "开始规划北京旅行：2026年11月7日当天，2人，希望上午在同一个地方自由休息和整理旅行照片，整体安排尽量简单。"
                                         : "开始规划北京旅行：2026年11月7日当天，2人，上午只参观故宫一个景点，其余时间自由休息。",
                                 null),
                         new HttpSessionEvaluationDriver.Turn(
