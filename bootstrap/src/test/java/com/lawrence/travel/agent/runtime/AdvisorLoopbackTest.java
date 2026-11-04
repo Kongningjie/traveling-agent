@@ -113,6 +113,26 @@ class AdvisorLoopbackTest {
         }
     }
 
+    /** 错误金额类型定位到 Schema 字段，报告不带模型值。 */
+    @Test
+    void wrongNegotiationValueTypeReportsSafeSchemaPath() throws Exception {
+        try (var fixture = new AdvisorLoopbackFixture(root)) {
+            fixture.answer(
+                    "{\"facts\":[{\"field\":\"budgetCny\",\"value\":100,\"quote\":\"SYNTHETIC_PRIVATE\"}],\"outsideScope\":false,\"clarification\":\"\"}",
+                    true);
+            assertThatThrownBy(() -> invoke(fixture, Entry.NEGOTIATION))
+                    .isInstanceOfSatisfying(
+                            SanitizedAgentFailure.class,
+                            failure -> {
+                                assertThat(failure.diagnosticCode())
+                                        .isEqualTo("MODEL_OUTPUT_SCHEMA");
+                                assertThat(failure.schemaPaths())
+                                        .contains("$.response.facts[].value");
+                            });
+            fixture.assertCalls(1);
+        }
+    }
+
     /** 权限拒绝、429/503零用量及429未知用量通过实际SDK保留分类；运行时本身不自动重发。 */
     @Test
     void providerFailuresKeepRecoveryEvidenceAndRequestCounts() throws Exception {

@@ -51,6 +51,7 @@ public final class ControlledHarnessCall {
     public static final class OutputFailure extends IllegalStateException {
         private final OutputProblem problem;
         private final OutputShape shape;
+        private final List<String> schemaPaths;
 
         /**
          * 标记适配失败的位置。
@@ -68,7 +69,29 @@ public final class ControlledHarnessCall {
          * @param shape 固定返回形状
          */
         private OutputFailure(OutputProblem problem, OutputShape shape) {
+            this(problem, shape, List.of());
+        }
+
+        /**
+         * 保存工具校验失败的 Schema 路径。
+         *
+         * @param problem 固定校验类别
+         * @param schemaPaths 已由工具守卫过滤的路径
+         */
+        OutputFailure(OutputProblem problem, List<String> schemaPaths) {
+            this(problem, OutputShape.UNKNOWN, schemaPaths);
+        }
+
+        /**
+         * 创建固定分类与白名单路径组成的失败。
+         *
+         * @param problem 固定错误分类
+         * @param shape 固定返回形状
+         * @param schemaPaths 已过滤的字段路径
+         */
+        private OutputFailure(OutputProblem problem, OutputShape shape, List<String> schemaPaths) {
             super("MODEL_OUTPUT_INVALID");
+            this.schemaPaths = List.copyOf(schemaPaths);
             this.shape = shape;
             this.problem = java.util.Objects.requireNonNull(problem);
         }
@@ -80,6 +103,15 @@ public final class ControlledHarnessCall {
          */
         public OutputShape shape() {
             return shape;
+        }
+
+        /**
+         * 返回业务 Schema 中的失败位置。
+         *
+         * @return 只读白名单字段路径
+         */
+        List<String> schemaPaths() {
+            return schemaPaths;
         }
 
         /**

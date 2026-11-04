@@ -1,6 +1,5 @@
 package com.lawrence.travel.agent.runtime;
 
-import com.lawrence.travel.application.execution.AgentCallFailure;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.middleware.ActingInput;
 import io.agentscope.core.middleware.MiddlewareBase;
@@ -8,6 +7,8 @@ import io.agentscope.core.middleware.ReasoningInput;
 import io.agentscope.core.tool.ToolValidator;
 import io.agentscope.core.util.JsonUtils;
 import java.util.Map;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
@@ -64,13 +65,66 @@ final class BusinessOutputGuard implements MiddlewareBase {
                     for (var tool : input.toolCalls()) {
                         if (!tool.getName().equals("generate_response")) continue;
                         String body = JsonUtils.getJsonCodec().toJson(tool.getInput());
-                        if (responseSchema == null
-                                || ToolValidator.validateInput(body, responseSchema) != null)
+                        var schema = responseSchema;
+                        String error =
+                                schema == null ? null : ToolValidator.validateInput(body, schema);
+                        if (schema == null || error != null) {
                             return Flux.error(
-                                    new AgentCallFailure(
-                                            AgentCallFailure.Code.MODEL_OUTPUT_SCHEMA));
+                                    new ControlledHarnessCall.OutputFailure(
+                                            ControlledHarnessCall.OutputProblem.SCHEMA,
+                                            schema == null
+                                                    ? List.of("SCHEMA_UNAVAILABLE")
+                                                    : schemaPaths(error, schema)));
+                        }
                     }
                     return next.apply(input);
                 });
+    }
+
+    /**
+     * 从 SDK 错误中提取已知字段路径，仅保留当前 Schema 声明的字段和数组位置。
+     *
+     * @param error SDK 校验信息，仅在内存读取
+     * @param schema 实际工具 Schema
+     * @return 固定字段路径，不含动态键、值或异常正文
+     */
+    private static List<String> schemaPaths(String error, Map<String, Object> schema) {
+        var names = new java.util.HashSet<String>();
+        collectPropertyNames(schema, names);
+        var paths = new java.util.LinkedHashSet<String>();
+        for (String line : error.split("\\R", 32)) {
+            int end = line.indexOf(": ");
+            if (end < 1 || end > 128) continue;
+            String path = line.substring(0, end);
+            if (path.startsWith("/")) {
+                path = "$" + path.replaceAll("/([0-9]{1,5})(?=/|$)", "[$1]").replace('/', '.');
+            }
+            if (!path.matches("\\$(?:\\.[A-Za-z][A-Za-z0-9]*|\\[\\d{1,5}\\])*")) continue;
+            String[] segments = path.replaceAll("\\[\\d{1,5}\\]", "").split("\\.");
+            if (java.util.Arrays.stream(segments).skip(1).allMatch(names::contains)) {
+                paths.add(path.replaceAll("\\[\\d{1,5}\\]", "[]"));
+            }
+            if (paths.size() == 8) break;
+        }
+        return List.copyOf(paths);
+    }
+
+    /**
+     * 收集服务端 Schema 中的属性名。
+     *
+     * @param node 服务端生成的 Schema 节点
+     * @param names 收集属性名的集合
+     */
+    private static void collectPropertyNames(Object node, Set<String> names) {
+        if (node instanceof Map<?, ?> map) {
+            if (map.get("properties") instanceof Map<?, ?> properties) {
+                for (Object key : properties.keySet()) {
+                    if (key instanceof String name) names.add(name);
+                }
+            }
+            map.values().forEach(child -> collectPropertyNames(child, names));
+        } else if (node instanceof List<?> list) {
+            list.forEach(child -> collectPropertyNames(child, names));
+        }
     }
 }

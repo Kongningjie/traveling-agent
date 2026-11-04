@@ -9,6 +9,7 @@ public final class SanitizedAgentFailure extends AgentCallFailure {
     private final List<String> exceptionTypes;
     private final List<String> exceptionSites;
     private final ControlledHarnessCall.OutputShape outputShape;
+    private final List<String> schemaPaths;
 
     /**
      * 提取类型和首个类/方法，不保留原异常引用。
@@ -21,11 +22,13 @@ public final class SanitizedAgentFailure extends AgentCallFailure {
         var types = new ArrayList<String>();
         var sites = new ArrayList<String>();
         var shape = ControlledHarnessCall.OutputShape.UNKNOWN;
+        List<String> paths = List.of();
         for (Throwable current = failure;
                 current != null && types.size() < 8;
                 current = current.getCause()) {
             if (current instanceof ControlledHarnessCall.OutputFailure output) {
                 shape = output.shape();
+                paths = output.schemaPaths();
             }
             types.add(current.getClass().getName());
             var frames = current.getStackTrace();
@@ -35,8 +38,18 @@ public final class SanitizedAgentFailure extends AgentCallFailure {
                             : frames[0].getClassName() + "#" + frames[0].getMethodName());
         }
         outputShape = shape;
+        schemaPaths = paths;
         exceptionTypes = List.copyOf(types);
         exceptionSites = List.copyOf(sites);
+    }
+
+    /**
+     * 获取输出校验失败位置。
+     *
+     * @return 白名单路径，不含模型字段值
+     */
+    public List<String> schemaPaths() {
+        return schemaPaths;
     }
 
     /**

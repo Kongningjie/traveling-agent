@@ -59,6 +59,7 @@ final class RuntimeFailureEvidence {
         var sites = new ArrayList<String>();
         String code = "UNCLASSIFIED";
         String outputShape = "UNKNOWN";
+        List<String> schemaPaths = List.of();
         for (var current = failure;
                 current != null && types.size() < 8;
                 current = current.getCause()) {
@@ -68,6 +69,7 @@ final class RuntimeFailureEvidence {
             }
             if (current instanceof SanitizedAgentFailure sanitized) {
                 outputShape = sanitized.outputShape().name();
+                schemaPaths = sanitized.schemaPaths();
                 for (int index = 0; index < sanitized.exceptionTypes().size(); index++) {
                     if (types.size() < 8) {
                         types.add(sanitized.exceptionTypes().get(index));
@@ -97,6 +99,8 @@ final class RuntimeFailureEvidence {
                         code,
                         "outputShape",
                         outputShape,
+                        "schemaPaths",
+                        schemaPaths,
                         "exceptionTypes",
                         List.copyOf(types),
                         "exceptionSites",
