@@ -47,6 +47,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -1181,6 +1183,10 @@ class ResearchIntegrationTest {
                                 "strategy-test")
                         .orElseThrow();
         var refined = handler.execute(join);
+        verify(advisor)
+                .plan(
+                        eq(join.fence().runId()),
+                        argThat(context -> context.previousQueries().equals(first.queries())));
         assertThat(refined.next().getLast().key().type()).isEqualTo(StageType.PLAN);
         engine.commit(engine.prepare(join, refined));
         var branch =
@@ -1197,6 +1203,59 @@ class ResearchIntegrationTest {
                                 Integer.class,
                                 root.fence().runId()))
                 .isEqualTo(1);
+    }
+
+    /** 补查重复提交时永久失败，固定原因随本次围栏事务写入。 */
+    @Test
+    void refinementRejectsRepeatedQueryAndPersistsReason() {
+        var first =
+                strategyPlan(
+                        1, com.lawrence.travel.domain.execution.AgentStrategy.Stop.REFINE_ONCE);
+        when(advisor.plan(any(), any())).thenReturn(first);
+        when(tools.query(any(), any(), any()))
+                .thenThrow(new IllegalStateException("SYNTHETIC_TIMEOUT"));
+        var root = claim(fixture(), "{}");
+        var initial = handler.execute(root);
+        engine.commit(engine.prepare(root, initial));
+        complete(
+                engine.claim(
+                                hint(root.fence().runId(), initial.next().getFirst().id()),
+                                "strategy-test")
+                        .orElseThrow());
+        var join =
+                engine.claim(
+                                hint(root.fence().runId(), initial.next().getLast().id()),
+                                "strategy-test")
+                        .orElseThrow();
+        var executor =
+                new com.lawrence.travel.application.execution.StageExecutor(
+                        engine, List.of(handler));
+        executor.execute(
+                join,
+                new com.lawrence.travel.application.execution.StageExecutor.Control() {
+                    /** 允许测试线程运行已领取的阶段。 */
+                    @Override
+                    public boolean enter() {
+                        return true;
+                    }
+
+                    /** 此替身无需释放资源。 */
+                    @Override
+                    public void leave() {}
+
+                    /** 此场景没有取消操作。 */
+                    @Override
+                    public boolean cancelled() {
+                        return false;
+                    }
+                });
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT last_error_code FROM outbox_event WHERE step_id=? AND status='DEAD'",
+                                String.class,
+                                join.fence().stepId()))
+                .isEqualTo("RESEARCH_NO_PROGRESS");
+        verify(tools, times(1)).query(any(), any(), any());
     }
 
     /** 恢复交接不能换用户、代次、工具或输出协议，拒绝发生在任何工具调用之前。 */

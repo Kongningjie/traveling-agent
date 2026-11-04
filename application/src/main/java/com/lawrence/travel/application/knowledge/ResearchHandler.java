@@ -68,9 +68,25 @@ public final class ResearchHandler implements StageHandler {
         String dependency = EvidencePolicy.dependency(context.revision(), json::encode);
         var body = json.decode(claim.input(), Map.class);
         if (!body.containsKey("queries")) {
-            var plan = advisor.plan(claim.fence().runId(), context);
+            var planningContext = context;
+            if (body.containsKey("previousQueries")) {
+                var previous = json.decode(claim.input(), Refinement.class).previousQueries();
+                planningContext =
+                        new Research.Context(
+                                context.revision(),
+                                context.evidence(),
+                                context.now(),
+                                context.baseVersionId(),
+                                context.preferenceRevision(),
+                                previous);
+            }
+            var plan = advisor.plan(claim.fence().runId(), planningContext);
+            var previousKeys = new java.util.HashSet<String>();
+            if (body.get("previousKeys") instanceof List<?> keys) {
+                for (var key : keys) previousKeys.add((String) key);
+            }
             if (plan == null || plan.queries() == null || plan.queries().size() > 12)
-                throw new IllegalArgumentException("RESEARCH_PLAN_LIMIT");
+                throw new Research.Rejected(Research.Rejected.Code.RESEARCH_PLAN_LIMIT);
             var queries =
                     plan.queries().stream()
                             .map(
@@ -80,8 +96,8 @@ public final class ResearchHandler implements StageHandler {
                                                     LocalDate.parse(fields.get("startDate")),
                                                     LocalDate.parse(fields.get("endDate"))))
                             .toList();
-            if (queries.stream().map(policy::key).distinct().count() != queries.size())
-                throw new IllegalArgumentException("RESEARCH_NO_PROGRESS");
+            if (queries.stream().map(policy::key).anyMatch(key -> !previousKeys.add(key)))
+                throw new Research.Rejected(Research.Rejected.Code.RESEARCH_NO_PROGRESS);
             var applicableSeeds =
                     seeds.stream()
                             .filter(
@@ -340,19 +356,14 @@ public final class ResearchHandler implements StageHandler {
         var policyPlan = plan.strategy();
         int round = body.get("strategyRound") instanceof Number n ? n.intValue() : 0;
         if (round < 0 || round > 1 || queries.size() != policyPlan.branches().size())
-            throw new IllegalArgumentException("AGENT_STRATEGY_INVALID");
-        var prior = new java.util.HashSet<String>();
-        if (body.get("previousKeys") instanceof List<?> keys)
-            for (var key : keys) prior.add((String) key);
-        if (queries.stream().anyMatch(q -> prior.contains(policy.key(q))))
-            throw new IllegalArgumentException("RESEARCH_NO_PROGRESS");
+            throw new Research.Rejected(Research.Rejected.Code.AGENT_STRATEGY_INVALID);
         for (int i = 0; i < queries.size(); i++)
             if (!policyPlan
                     .branches()
                     .get(i)
                     .allowedTools()
                     .equals(List.of(queries.get(i).operation().name())))
-                throw new IllegalArgumentException("AGENT_TOOL_SCOPE_INVALID");
+                throw new Research.Rejected(Research.Rejected.Code.AGENT_TOOL_SCOPE_INVALID);
         var checkpoint = new java.util.LinkedHashMap<String, Object>();
         checkpoint.put("research", prepared);
         checkpoint.put("strategy", policyPlan);
@@ -369,7 +380,7 @@ public final class ResearchHandler implements StageHandler {
                             "hardRequirements",
                             "interests")
                     .containsAll(policyPlan.missingFields()))
-                throw new IllegalArgumentException("AGENT_MISSING_FIELD_INVALID");
+                throw new Research.Rejected(Research.Rejected.Code.AGENT_MISSING_FIELD_INVALID);
             var questions =
                     new java.util.LinkedHashMap<
                             java.util.UUID,
@@ -449,7 +460,6 @@ public final class ResearchHandler implements StageHandler {
                                             h)),
                             node.dependsOn().stream().map(ids::get).toList()));
             ids.add(id);
-            prior.add(policy.key(queries.get(i)));
         }
         boolean refine =
                 round == 0
@@ -471,7 +481,11 @@ public final class ResearchHandler implements StageHandler {
                                         ? com.lawrence.travel.domain.execution.PlanningMode.INITIAL
                                         : com.lawrence.travel.domain.execution.PlanningMode.REPLAN,
                         refine
-                                ? json.encode(Map.of("strategyRound", 1, "previousKeys", prior))
+                                ? json.encode(
+                                        new Refinement(
+                                                1,
+                                                queries.stream().map(policy::key).toList(),
+                                                queries))
                                 : "{}",
                         ids));
         return new StageOutput(
@@ -481,6 +495,16 @@ public final class ResearchHandler implements StageHandler {
                 StageOutput.Outcome.CONTINUE,
                 null);
     }
+
+    /**
+     * 补查的持久化输入，保留旧版去重键并提供可读查询。
+     *
+     * @param strategyRound 补查轮次
+     * @param previousKeys 已尝试查询的去重键
+     * @param previousQueries 已尝试的结构化查询
+     */
+    private record Refinement(
+            int strategyRound, List<String> previousKeys, List<Research.Query> previousQueries) {}
 
     /**
      * @param prepared 待 C 事务登记

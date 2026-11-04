@@ -171,6 +171,18 @@ public interface ExecutionEngineStore extends StageCommitPort {
     }
 
     /**
+     * 停止无效调查并记录固定校验码；旧替身只处理失败状态。
+     *
+     * @param fence 原尝试围栏
+     * @param code 调查校验失败原因
+     */
+    default void failResearch(
+            ExecutionFence fence,
+            com.lawrence.travel.application.knowledge.Research.Rejected.Code code) {
+        fail(fence, Failure.PERMANENT);
+    }
+
+    /**
      * @param scope 归属
      * @param runId 取消目标
      * @return 先提交终态和代次；重复取消幂等

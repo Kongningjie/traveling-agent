@@ -100,7 +100,7 @@ public final class EvidencePolicy {
                         .anyMatch(v -> v.isBlank() || v.length() > 1000)
                 || (query.date() != null
                         && (query.date().isBefore(start) || query.date().isAfter(end))))
-            throw new IllegalArgumentException("RESEARCH_QUERY_INVALID");
+            throw new Research.Rejected(Research.Rejected.Code.RESEARCH_QUERY_INVALID);
         Set<String> keys =
                 switch (query.operation()) {
                     case PLACE -> Set.of("city", "keywords");
@@ -117,7 +117,7 @@ public final class EvidencePolicy {
                     case EXTRACT -> Set.of("url");
                 };
         if (!keys.containsAll(query.arguments().keySet()))
-            throw new IllegalArgumentException("RESEARCH_ARGUMENT_REJECTED");
+            throw new Research.Rejected(Research.Rejected.Code.RESEARCH_ARGUMENT_REJECTED);
         String field = query.fieldPath();
         if (!(switch (query.operation()) {
             case PLACE -> field.equals("poi");
@@ -126,21 +126,21 @@ public final class EvidencePolicy {
             case SEARCH -> field.equals("searchLead");
             case EXTRACT ->
                     Set.of("openingHours", "price", "reservation", "accessibility").contains(field);
-        })) throw new IllegalArgumentException("RESEARCH_FIELD_REJECTED");
+        })) throw new Research.Rejected(Research.Rejected.Code.RESEARCH_FIELD_REJECTED);
         if ((query.operation() == TravelToolPort.Operation.WEATHER
                         || query.operation() == TravelToolPort.Operation.ROUTE)
                 && (query.date() == null
                         || !query.date().toString().equals(query.arguments().get("date"))))
-            throw new IllegalArgumentException("RESEARCH_DATE_MISMATCH");
+            throw new Research.Rejected(Research.Rejected.Code.RESEARCH_DATE_MISMATCH);
         if (query.operation() == TravelToolPort.Operation.EXTRACT)
             requireOfficial(query.arguments().get("url"));
         if (query.operation() == TravelToolPort.Operation.EXTRACT && query.date() == null)
-            throw new IllegalArgumentException("RESEARCH_DATE_REQUIRED");
+            throw new Research.Rejected(Research.Rejected.Code.RESEARCH_DATE_REQUIRED);
         for (String required : keys)
             if (!(query.operation() == TravelToolPort.Operation.ROUTE
                             && Set.of("city", "destinationCity").contains(required))
                     && !query.arguments().containsKey(required))
-                throw new IllegalArgumentException("RESEARCH_ARGUMENT_MISSING");
+                throw new Research.Rejected(Research.Rejected.Code.RESEARCH_ARGUMENT_MISSING);
         return query;
     }
 
@@ -160,7 +160,7 @@ public final class EvidencePolicy {
                     || uri.getPort() != -1) throw new IllegalArgumentException();
             return uri;
         } catch (RuntimeException invalid) {
-            throw new IllegalArgumentException("RESEARCH_URL_REJECTED");
+            throw new Research.Rejected(Research.Rejected.Code.RESEARCH_URL_REJECTED);
         }
     }
 

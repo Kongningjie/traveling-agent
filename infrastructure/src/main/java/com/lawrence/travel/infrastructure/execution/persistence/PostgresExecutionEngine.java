@@ -583,12 +583,20 @@ public final class PostgresExecutionEngine implements ExecutionEngineStore {
         fail(fence, Failure.forModel(failure), failure.diagnosticCode());
     }
 
+    /** {@inheritDoc} 与永久失败状态在同一围栏事务保存。 */
+    @Override
+    public void failResearch(
+            ExecutionFence fence,
+            com.lawrence.travel.application.knowledge.Research.Rejected.Code code) {
+        fail(fence, Failure.PERMANENT, code.name());
+    }
+
     /**
-     * 按原租约与代次处理失败，模型诊断只影响错误码，不绕过围栏或重试上限。
+     * 按原租约与代次处理失败，诊断码不绕过围栏或重试上限。
      *
      * @param fence 原领取资格
      * @param failure 恢复分类
-     * @param diagnostic 固定模型码；旧非模型失败为空
+     * @param diagnostic 固定诊断码；通用失败为空
      */
     private void fail(ExecutionFence fence, Failure failure, String diagnostic) {
         tx(

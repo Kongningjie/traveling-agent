@@ -191,6 +191,9 @@ public final class StageExecutor {
                     rejected.code() == TravelStorageFailure.Code.DEPENDENCY_UNAVAILABLE
                             ? ExecutionEngineStore.Failure.RETRYABLE
                             : ExecutionEngineStore.Failure.PERMANENT);
+        } catch (com.lawrence.travel.application.knowledge.Research.Rejected rejected) {
+            if (control.cancelled()) return;
+            store.failResearch(claim.fence(), rejected.code());
         } catch (DomainViolation | IllegalArgumentException invalid) {
             if (control.cancelled()) return;
             store.fail(claim.fence(), ExecutionEngineStore.Failure.PERMANENT);

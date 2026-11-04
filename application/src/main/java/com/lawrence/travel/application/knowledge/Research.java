@@ -40,13 +40,38 @@ public final class Research {
      * @param now 当前业务时刻
      * @param baseVersionId 当前生效版本，可空
      * @param preferenceRevision 当前偏好水位
+     * @param previousQueries 本运行上一轮已尝试的查询
      */
     public record Context(
             ConstraintRevision revision,
             List<View> evidence,
             Instant now,
             java.util.UUID baseVersionId,
-            long preferenceRevision) {
+            long preferenceRevision,
+            List<Query> previousQueries) {
+        /** 保存独立的补查历史视图。 */
+        public Context {
+            previousQueries = List.copyOf(previousQueries);
+        }
+
+        /**
+         * 构造初始调查上下文。
+         *
+         * @param revision 需求
+         * @param evidence 证据
+         * @param now 时间
+         * @param baseVersionId 生效版本，可空
+         * @param preferenceRevision 偏好水位
+         */
+        public Context(
+                ConstraintRevision revision,
+                List<View> evidence,
+                Instant now,
+                java.util.UUID baseVersionId,
+                long preferenceRevision) {
+            this(revision, evidence, now, baseVersionId, preferenceRevision, List.of());
+        }
+
         /**
          * @param revision 需求
          * @param evidence 证据
@@ -68,6 +93,47 @@ public final class Research {
          */
         public Context(ConstraintRevision revision, List<View> evidence, Instant now) {
             this(revision, evidence, now, null);
+        }
+    }
+
+    /** 调查协调的固定校验失败，可安全写入 Outbox。 */
+    public static final class Rejected extends IllegalArgumentException {
+        /** 允许持久化的固定原因。 */
+        public enum Code {
+            RESEARCH_PLAN_LIMIT,
+            RESEARCH_NO_PROGRESS,
+            AGENT_STRATEGY_REQUIRED,
+            AGENT_STRATEGY_INVALID,
+            AGENT_TOOL_SCOPE_INVALID,
+            AGENT_MISSING_FIELD_INVALID,
+            RESEARCH_QUERY_INVALID,
+            RESEARCH_ARGUMENT_REJECTED,
+            RESEARCH_FIELD_REJECTED,
+            RESEARCH_DATE_MISMATCH,
+            RESEARCH_DATE_REQUIRED,
+            RESEARCH_ARGUMENT_MISSING,
+            RESEARCH_URL_REJECTED
+        }
+
+        private final Code code;
+
+        /**
+         * 仅携带固定分类。
+         *
+         * @param code 校验失败原因
+         */
+        public Rejected(Code code) {
+            super(code.name());
+            this.code = code;
+        }
+
+        /**
+         * 读取可持久化分类。
+         *
+         * @return 固定原因
+         */
+        public Code code() {
+            return code;
         }
     }
 
