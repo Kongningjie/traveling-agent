@@ -4,6 +4,8 @@ import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.middleware.ActingInput;
 import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.middleware.ReasoningInput;
+import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.model.ToolChoice;
 import io.agentscope.core.tool.ToolValidator;
 import io.agentscope.core.util.JsonUtils;
 import java.util.Map;
@@ -20,13 +22,13 @@ final class BusinessOutputGuard implements MiddlewareBase {
     BusinessOutputGuard() {}
 
     /**
-     * 保存本轮真正交给模型的generate_response参数Schema，不按角色猜测输出类型。
+     * 保存本轮结果工具的 Schema。只有结果工具可用时显式选择该工具。
      *
      * @param agent 当前隔离Agent
      * @param context 当前调用上下文
      * @param input 实际推理输入及工具定义
      * @param next 原推理链
-     * @return 未改写的推理事件流
+     * @return 保留原消息和工具的推理事件流
      */
     @Override
     public Flux<AgentEvent> onReasoning(
@@ -42,7 +44,17 @@ final class BusinessOutputGuard implements MiddlewareBase {
                                 .map(tool -> tool.getParameters())
                                 .findFirst()
                                 .orElse(null);
-        return next.apply(input);
+        if (responseSchema == null || input.tools().size() != 1) {
+            return next.apply(input);
+        }
+        // 还有文档等业务工具时，保留模型选择工具的能力。
+        var options =
+                GenerateOptions.mergeOptions(
+                        GenerateOptions.builder()
+                                .toolChoice(new ToolChoice.Specific("generate_response"))
+                                .build(),
+                        input.options());
+        return next.apply(new ReasoningInput(input.messages(), input.tools(), options));
     }
 
     /**

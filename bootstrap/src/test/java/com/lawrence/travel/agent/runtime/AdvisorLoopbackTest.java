@@ -233,6 +233,15 @@ class AdvisorLoopbackTest {
                     .isEqualTo(entry == Entry.REVIEW ? "local-reviewer" : "local-model");
             var parameters = (Map<?, ?>) request.get("parameters");
             var tools = (List<?>) parameters.get("tools");
+            if (tools.size() == 1) {
+                assertThat(parameters.get("tool_choice"))
+                        .isEqualTo(
+                                Map.of(
+                                        "type",
+                                        "function",
+                                        "function",
+                                        Map.of("name", "generate_response")));
+            }
             assertThat(tools).hasSize(1);
             var function = (Map<?, ?>) ((Map<?, ?>) tools.getFirst()).get("function");
             assertThat(function.get("name")).isEqualTo("generate_response");
