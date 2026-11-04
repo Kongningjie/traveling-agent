@@ -129,6 +129,36 @@ class Dev35TripDemoTest {
                         })
                 .when(runtime)
                 .startContextual(any(), any(), any(), any(), any());
+        if (real()) {
+            doAnswer(
+                            call -> {
+                                try {
+                                    return call.callRealMethod();
+                                } catch (
+                                        com.lawrence.travel.application.itinerary
+                                                        .PlanningDecodeFailure
+                                                failure) {
+                                    runtimeFailures.planningDecode("planner", failure);
+                                    throw failure;
+                                }
+                            })
+                    .when(planner)
+                    .draft(any(), any(), any(), any());
+            doAnswer(
+                            call -> {
+                                try {
+                                    return call.callRealMethod();
+                                } catch (
+                                        com.lawrence.travel.application.itinerary
+                                                        .PlanningDecodeFailure
+                                                failure) {
+                                    runtimeFailures.planningDecode("planner", failure);
+                                    throw failure;
+                                }
+                            })
+                    .when(planner)
+                    .patch(any(), any(), any(), any(), any(), any());
+        }
         assertThat(properties.models())
                 .containsEntry("coordinator", "qwen3.8-flash")
                 .containsEntry("planner", "qwen3.8-flash")

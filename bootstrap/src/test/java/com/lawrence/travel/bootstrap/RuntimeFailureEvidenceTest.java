@@ -13,6 +13,25 @@ import static org.mockito.Mockito.when;
 
 /** 本地验证类型诊断不泄露正文，且不改变原句柄结果和关闭行为。 */
 class RuntimeFailureEvidenceTest {
+    /** 只记录已声明的日期字段及固定类别，丢弃非法输入正文。 */
+    @Test
+    void planningDecodeReportsDeclaredTemporalPath() {
+        var codec = new com.lawrence.travel.infrastructure.travel.TravelJson();
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () ->
+                                codec.decodePlanning(
+                                        "{\"snapshot\":{\"window\":{\"startsOn\":\"SYNTHETIC_PRIVATE\"}}}",
+                                        com.lawrence.travel.application.itinerary.Planning.Draft
+                                                .class))
+                .isInstanceOfSatisfying(
+                        com.lawrence.travel.application.itinerary.PlanningDecodeFailure.class,
+                        failure -> {
+                            assertThat(failure.field()).isEqualTo("$.snapshot.window.startsOn");
+                            assertThat(failure.category()).isEqualTo("TEMPORAL");
+                            assertThat(failure.toString()).doesNotContain("SYNTHETIC_PRIVATE");
+                        });
+    }
+
     /** 首个异步失败完成时立即锁定批次停止标记，后续成功不能清除它。 */
     @Test
     void firstFailureLatchesBatchStopBeforeNextReservation() {

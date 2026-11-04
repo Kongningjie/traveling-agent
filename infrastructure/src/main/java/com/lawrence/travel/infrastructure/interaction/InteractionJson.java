@@ -29,6 +29,11 @@ public final class InteractionJson implements InteractionCodec {
     public <T> T decode(String text, Class<T> type) {
         if (type == com.lawrence.travel.domain.interaction.DialogueIntent.Result.class)
             return type.cast(json.decodeDialogue(text));
+        if (type == com.lawrence.travel.application.itinerary.Planning.Draft.class
+                || type == com.lawrence.travel.application.itinerary.Planning.PatchReply.class
+                || type == com.lawrence.travel.application.itinerary.Planning.Review.class) {
+            return json.decodePlanning(text, type);
+        }
         return json.decode(text, type);
     }
 }

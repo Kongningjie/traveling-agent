@@ -72,6 +72,61 @@ public final class TravelJson {
     }
 
     /**
+     * 严格解码规划产物，并记录固定解码类别和已声明的属性路径。
+     *
+     * @param text 模型业务正文
+     * @param type 固定规划类型
+     * @param <T> 规划结果类型
+     * @return 已解码对象
+     */
+    public <T> T decodePlanning(String text, Class<T> type) {
+        try {
+            return mapper.readValue(text, type);
+        } catch (tools.jackson.core.JacksonException failure) {
+            String category =
+                    switch (failure) {
+                        case tools.jackson.databind.exc.InvalidFormatException invalid ->
+                                invalid.getTargetType() == UUID.class
+                                        ? "UUID"
+                                        : invalid.getTargetType() != null
+                                                        && java.time.temporal.Temporal.class
+                                                                .isAssignableFrom(
+                                                                        invalid.getTargetType())
+                                                ? "TEMPORAL"
+                                                : "FORMAT";
+                        case tools.jackson.databind.exc.ValueInstantiationException ignored ->
+                                "CONSTRAINT";
+                        case tools.jackson.databind.exc.MismatchedInputException ignored -> "SHAPE";
+                        default -> "SYNTAX";
+                    };
+            var field = new StringBuilder("$");
+            java.lang.reflect.Type cursor = type;
+            for (var reference : failure.getPath().stream().limit(8).toList()) {
+                if (reference.getIndex() >= 0
+                        && cursor instanceof java.lang.reflect.ParameterizedType collection
+                        && collection.getRawType() instanceof Class<?> raw
+                        && Iterable.class.isAssignableFrom(raw)) {
+                    field.append("[]");
+                    cursor = collection.getActualTypeArguments()[0];
+                    continue;
+                }
+                if (!(cursor instanceof Class<?> owner) || !owner.isRecord()) break;
+                String name = reference.getPropertyName();
+                var component =
+                        java.util.Arrays.stream(owner.getRecordComponents())
+                                .filter(candidate -> candidate.getName().equals(name))
+                                .findFirst()
+                                .orElse(null);
+                if (component == null) break;
+                field.append('.').append(component.getName());
+                cursor = component.getGenericType();
+            }
+            throw new com.lawrence.travel.application.itinerary.PlanningDecodeFailure(
+                    field.toString(), category);
+        }
+    }
+
+    /**
      * 将模型业务JSON解码为DialogueIntent.Result，并生成可脱敏定位的协议错误。
      *
      * @param text 不可信模型业务JSON

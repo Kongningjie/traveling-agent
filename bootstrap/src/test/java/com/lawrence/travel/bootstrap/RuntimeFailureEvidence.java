@@ -108,6 +108,29 @@ final class RuntimeFailureEvidence {
     }
 
     /**
+     * 记录调用完成后在业务 DTO 解码处发现的失败。
+     *
+     * @param role 固定规划角色
+     * @param failure 只包含声明属性的解码异常
+     */
+    synchronized void planningDecode(
+            String role, com.lawrence.travel.application.itinerary.PlanningDecodeFailure failure) {
+        if (failures.size() >= 32) return;
+        failures.add(
+                Map.of(
+                        "role",
+                        role,
+                        "boundary",
+                        "DTO_DECODE",
+                        "code",
+                        failure.diagnosticCode(),
+                        "schemaPaths",
+                        List.of(failure.field()),
+                        "decodeCategory",
+                        failure.category()));
+    }
+
+    /**
      * 返回有界只读快照，可安全写入合成验收报告。
      *
      * @return 仅角色、边界、固定码和类/方法，不代表根因已经确定
