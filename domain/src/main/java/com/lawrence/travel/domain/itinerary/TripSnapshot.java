@@ -108,19 +108,16 @@ public record TripSnapshot(
      * @param reference 精确证据，不能只附一堆无关引用
      */
     public record EvidenceUse(UUID objectId, String fieldPath, EvidenceRecord.Reference reference) {
+        /** 可绑定到行程对象的证据字段，与模型 Schema 共用。 */
+        public static final Set<String> ALLOWED_FIELDS =
+                Set.of("openingHours", "price", "route", "reservation", "weather", "poi");
+
         /** 必须有明确对象及受控字段。 */
         public EvidenceUse {
             if (objectId == null
                     || reference == null
                     || fieldPath == null
-                    || !java.util.Set.of(
-                                    "openingHours",
-                                    "price",
-                                    "route",
-                                    "reservation",
-                                    "weather",
-                                    "poi")
-                            .contains(fieldPath))
+                    || !ALLOWED_FIELDS.contains(fieldPath))
                 throw new IllegalArgumentException("EVIDENCE_USE_INVALID");
         }
     }

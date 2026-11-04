@@ -98,6 +98,18 @@ class BusinessOutputSchemaTest {
                         + "\"cityStays\":[],\"days\":[],\"items\":[],\"transportLegs\":[],\"accommodationStays\":[],\"costEntries\":[],\"alternatives\":[],\"evidenceRefs\":[]}}";
         accepts(Planning.Draft.class, snapshot);
         codec.decode(snapshot, Planning.Draft.class);
+        String boundSnapshot =
+                snapshot.replace(
+                        "\"evidenceRefs\":[]",
+                        "\"evidenceRefs\":[],\"evidenceUses\":[{\"objectId\":\""
+                                + id
+                                + "\",\"fieldPath\":\"poi\",\"reference\":{\"id\":\""
+                                + id
+                                + "\",\"revision\":1,\"contentHash\":\""
+                                + "a".repeat(64)
+                                + "\"}}]");
+        accepts(Planning.Draft.class, boundSnapshot);
+        rejects(Planning.Draft.class, boundSnapshot.replace("poi", "searchLead"));
         String patch =
                 "{\"patch\":{\"expectedBaseHash\":\""
                         + "a".repeat(64)

@@ -145,6 +145,11 @@ final class BusinessOutputSchema {
                 throw new IllegalArgumentException("BUSINESS_OUTPUT_SCHEMA_INVALID");
             }
             enrich(property, component.getGenericType(), root, visited);
+            if (record == TripSnapshot.EvidenceUse.class
+                    && component.getName().equals("fieldPath")) {
+                property.put(
+                        "enum", TripSnapshot.EvidenceUse.ALLOWED_FIELDS.stream().sorted().toList());
+            }
             if (optional.contains(component.getName())) {
                 properties.put(
                         component.getName(),
