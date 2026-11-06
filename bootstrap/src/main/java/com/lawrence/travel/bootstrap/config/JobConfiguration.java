@@ -4,7 +4,7 @@ import com.lawrence.travel.application.execution.BackgroundJobService;
 import com.lawrence.travel.application.execution.JobPolicy;
 import com.lawrence.travel.application.port.JobHandler;
 import com.lawrence.travel.application.port.JobStore;
-import com.lawrence.travel.infrastructure.execution.PersistentStageWorker;
+import com.lawrence.travel.infrastructure.execution.PersistentWorkDispatcher;
 import com.lawrence.travel.infrastructure.execution.jobs.DiagnosticMapper;
 import com.lawrence.travel.infrastructure.execution.jobs.JobMapper;
 import com.lawrence.travel.infrastructure.execution.jobs.PostgresJobStore;
@@ -73,12 +73,12 @@ public class JobConfiguration {
      */
     @Bean
     org.springframework.beans.factory.SmartInitializingSingleton jobRegistration(
-            PersistentStageWorker worker,
+            PersistentWorkDispatcher worker,
             JobStore store,
             List<JobHandler> handlers,
             DiagnosticMapper diagnostics) {
         return () -> {
-            worker.problems(
+            worker.setProblemReporter(
                     (component, code) -> {
                         var ids =
                                 com.lawrence.travel.application.execution.ExecutionCorrelation
@@ -92,8 +92,8 @@ public class JobConfiguration {
                                 component,
                                 code);
                     });
-            worker.register(new BackgroundJobService(store, handlers, false));
-            worker.register(new BackgroundJobService(store, handlers, true));
+            worker.registerBackgroundWorkSource(new BackgroundJobService(store, handlers, false));
+            worker.registerBackgroundWorkSource(new BackgroundJobService(store, handlers, true));
         };
     }
 }

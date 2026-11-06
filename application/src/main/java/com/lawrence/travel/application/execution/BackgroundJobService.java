@@ -85,7 +85,7 @@ public final class BackgroundJobService implements BackgroundWorkSource {
                                         handler.commit(c, output, () -> store.finish(c, output));
                                     } catch (RuntimeException failure) {
                                         Thread.interrupted();
-                                        if (store.live(c.fence()))
+                                        if (store.isJobExecutionValid(c.fence()))
                                             store.finish(
                                                     c,
                                                     new Jobs.Output(

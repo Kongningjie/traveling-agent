@@ -25,7 +25,7 @@ import com.lawrence.travel.domain.interaction.DecisionAnswer;
 import com.lawrence.travel.domain.interaction.DecisionRequest;
 import com.lawrence.travel.domain.travel.TaskScope;
 import com.lawrence.travel.infrastructure.execution.BoundedExecutionResources;
-import com.lawrence.travel.infrastructure.execution.PersistentStageWorker;
+import com.lawrence.travel.infrastructure.execution.PersistentWorkDispatcher;
 import com.lawrence.travel.infrastructure.execution.persistence.EngineMapper;
 import com.lawrence.travel.infrastructure.execution.persistence.PostgresExecutionEngine;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
@@ -1075,7 +1075,7 @@ class ExecutionEngineIntegrationTest {
                 };
         try (var resources = new BoundedExecutionResources(2, 2);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of(handler)),
                                 resources,
@@ -1084,7 +1084,7 @@ class ExecutionEngineIntegrationTest {
             var runs = new RunService(engine, transactions, worker);
             runs.start(actor, scope.taskId(), oldInput, first);
             var newer = runs.start(actor, scope.taskId(), UUID.randomUUID(), second);
-            worker.tick();
+            worker.dispatchAvailableWork();
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
             runs.start(actor, scope.taskId(), oldInput, first);
             assertThat(interrupted.await(150, TimeUnit.MILLISECONDS)).isFalse();
@@ -1232,13 +1232,13 @@ class ExecutionEngineIntegrationTest {
         var run = start(task(actor()), first);
         try (var resources = new BoundedExecutionResources(2, 2);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of()),
                                 resources,
                                 2,
                                 Duration.ofSeconds(15))) {
-            worker.tick();
+            worker.dispatchAvailableWork();
         }
         assertThat(engine.run(run.scope(), run.id()).state()).isEqualTo(ExecutionRun.State.QUEUED);
         assertThat(step(run, first.id()).attemptCount()).isZero();
@@ -1288,23 +1288,23 @@ class ExecutionEngineIntegrationTest {
                 };
         try (var resources = new BoundedExecutionResources(1, 2);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of(handler)),
                                 resources,
                                 2,
                                 Duration.ofSeconds(15))) {
-            worker.tick();
+            worker.dispatchAvailableWork();
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
             new RunService(engine, transactions, worker).cancel(actor, scope.taskId(), run.id());
             var second = plan(StageType.UNDERSTAND, 0, "next");
             var next = start(task(actor), second);
-            worker.tick();
+            worker.dispatchAvailableWork();
             assertThat(step(next, second.id()).attemptCount()).isZero();
             release.countDown();
             await(
                     () -> {
-                        worker.tick();
+                        worker.dispatchAvailableWork();
                         return engine.run(next.scope(), next.id()).state()
                                 == ExecutionRun.State.SUCCEEDED;
                     });

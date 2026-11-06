@@ -204,7 +204,7 @@ public final class DocumentService implements JobHandler {
                     }
                     if (!exists) files.write(key, stable);
                     var job =
-                            jobs.submit(
+                            jobs.registerBackgroundJob(
                                     new Jobs.Submit(
                                             scope,
                                             UUID.nameUUIDFromBytes(
@@ -296,24 +296,24 @@ public final class DocumentService implements JobHandler {
                             // 删除触发来源撤销后，通过原作业用例取消已读旧资料的输入并结算；不让失效作业等待租约后自动重跑。
                             // 只取消受影响CHAT_INPUT，不使其他附件解析失去资格，也不绕过JobStore的预算与投影处理。
                             for (UUID reader : store.revokedReaders(s))
-                                jobs.control(s, reader, false);
+                                jobs.applyJobRetryOrCancellation(s, reader, false);
                             var job = jobs.read(s, e.jobId());
                             if (!BackgroundJob.terminal(job.state()))
-                                jobs.control(s, e.jobId(), false);
+                                jobs.applyJobRetryOrCancellation(s, e.jobId(), false);
                         }
                     } else {
                         if (e.deleted()) throw new DocumentFailure("DOCUMENT_NOT_FOUND");
                         var job = jobs.read(s, e.jobId());
                         if (action.equals("STOP")) {
                             if (!BackgroundJob.terminal(job.state()))
-                                jobs.control(s, e.jobId(), false);
+                                jobs.applyJobRetryOrCancellation(s, e.jobId(), false);
                         } else if (action.equals("RETRY")) {
                             if (job.state() != BackgroundJob.State.PAUSED
                                     && job.state() != BackgroundJob.State.WAITING_USER)
                                 throw new DocumentFailure("DOCUMENT_STATE_CHANGED");
                             store.retryCapacity(s, id);
                             store.report(s, id, null);
-                            jobs.control(s, e.jobId(), true);
+                            jobs.applyJobRetryOrCancellation(s, e.jobId(), true);
                         } else throw new DocumentFailure("DOCUMENT_INPUT_LIMIT");
                     }
                     return null;
@@ -335,7 +335,7 @@ public final class DocumentService implements JobHandler {
                 tx.required(
                         () -> {
                             store.lock(claim.fence().scope());
-                            if (!jobs.live(claim.fence()))
+                            if (!jobs.isJobExecutionValid(claim.fence()))
                                 throw new DocumentFailure("DOCUMENT_STALE");
                             return visible(claim.fence().scope(), id);
                         });
@@ -382,7 +382,8 @@ public final class DocumentService implements JobHandler {
                 () -> {
                     var s = claim.fence().scope();
                     store.lock(s);
-                    if (!jobs.live(claim.fence())) throw new DocumentFailure("DOCUMENT_STALE");
+                    if (!jobs.isJobExecutionValid(claim.fence()))
+                        throw new DocumentFailure("DOCUMENT_STALE");
                     var id =
                             UUID.fromString(
                                     json.decode(claim.payload(), Map.class)

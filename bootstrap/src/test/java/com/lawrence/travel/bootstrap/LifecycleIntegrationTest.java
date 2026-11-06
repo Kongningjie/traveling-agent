@@ -295,7 +295,7 @@ class LifecycleIntegrationTest {
         var e = store.get(new Jobs.Scope(u.id(), c), d.id());
         var claim = jobs.claim(new Jobs.Scope(u.id(), c), e.jobId()).orElseThrow();
         documents.action(u, c, d.id(), "DELETE");
-        assertThat(jobs.live(claim.fence())).isFalse();
+        assertThat(jobs.isJobExecutionValid(claim.fence())).isFalse();
         assertThatThrownBy(() -> documents.download(u, c, d.id())).hasMessage("DOCUMENT_NOT_FOUND");
         assertThat(dialogue.read(u, c).chat().id()).isEqualTo(c);
         dialogue.send(u, c, UUID.randomUUID(), "删除来源后仍可继续聊天");

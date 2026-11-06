@@ -131,7 +131,7 @@ class DialogueIntegrationTest {
             var future = pool.submit(work);
             try {
                 assertThat(entered.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-                service.act(user, chat, input, "WITHDRAW");
+                service.applyChatInputAction(user, chat, input, "WITHDRAW");
             } finally {
                 release.countDown();
             }
@@ -783,7 +783,8 @@ class DialogueIntegrationTest {
                 .execute(
                         status -> {
                             store.create(user.id(), chat, "预算六千够吗");
-                            return store.receive(user.id(), chat, input, "预算六千够吗");
+                            return store.saveChatInputAndEnsureJob(
+                                    user.id(), chat, input, "预算六千够吗");
                         });
         service.send(user, chat, input, "预算六千够吗");
         service.send(user, chat, input, "预算六千够吗");
@@ -884,11 +885,11 @@ class DialogueIntegrationTest {
                         UUID.class,
                         user.id());
         jdbc.update("UPDATE execution_budget SET model_calls=7 WHERE run_id=?", budget);
-        service.act(user, chat, input, "RETRY");
+        service.applyChatInputAction(user, chat, input, "RETRY");
         var claim = tx.required(store::claim).orElseThrow();
         assertThat(claim.budgetId()).isEqualTo(budget);
-        service.act(user, chat, input, "WITHDRAW");
-        assertThat(tx.required(() -> store.guard(claim))).isFalse();
+        service.applyChatInputAction(user, chat, input, "WITHDRAW");
+        assertThat(tx.required(() -> store.isChatInputExecutionValid(claim))).isFalse();
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT model_calls FROM execution_budget WHERE run_id=?",
@@ -926,8 +927,8 @@ class DialogueIntegrationTest {
                                 Long.class,
                                 old.budgetId()))
                 .isGreaterThanOrEqualTo(9000L);
-        assertThat(tx.required(() -> store.guard(old))).isFalse();
-        assertThat(tx.required(() -> store.guard(next))).isTrue();
+        assertThat(tx.required(() -> store.isChatInputExecutionValid(old))).isFalse();
+        assertThat(tx.required(() -> store.isChatInputExecutionValid(next))).isTrue();
     }
 
     /** 保存偏好必须确认，重复确认只产生一条；后来删除同样先确认。 */
@@ -952,8 +953,8 @@ class DialogueIntegrationTest {
                         "");
         process(save);
         assertThat(preferences.read(user).entries()).isEmpty();
-        service.act(user, chat, input, "CONFIRM");
-        service.act(user, chat, input, "CONFIRM");
+        service.applyChatInputAction(user, chat, input, "CONFIRM");
+        service.applyChatInputAction(user, chat, input, "CONFIRM");
         assertThat(preferences.read(user).entries()).hasSize(1);
         assertThat(service.read(user, chat).messages().getFirst().reply())
                 .isEqualTo("已保存你确认的长期偏好。");
@@ -975,7 +976,7 @@ class DialogueIntegrationTest {
                         "",
                         ""));
         assertThat(preferences.read(user).entries()).hasSize(1);
-        service.act(user, chat, remove, "CONFIRM");
+        service.applyChatInputAction(user, chat, remove, "CONFIRM");
         assertThat(preferences.read(user).entries()).isEmpty();
     }
 
@@ -987,7 +988,7 @@ class DialogueIntegrationTest {
         UUID chat = UUID.randomUUID(), input = UUID.randomUUID();
         service.send(user, chat, input, "你好");
         assertThatThrownBy(() -> service.read(foreign, chat)).isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(() -> service.act(foreign, chat, input, "WITHDRAW"))
+        assertThatThrownBy(() -> service.applyChatInputAction(foreign, chat, input, "WITHDRAW"))
                 .isInstanceOf(RuntimeException.class);
         process(
                 result(
@@ -1140,7 +1141,7 @@ class DialogueIntegrationTest {
         var view = service.read(user, chat);
         assertThat(view.messages()).hasSize(101);
         assertThat(view.messages().getFirst().id()).isEqualTo(input);
-        service.act(user, chat, input, "WITHDRAW");
+        service.applyChatInputAction(user, chat, input, "WITHDRAW");
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT state FROM dialogue_input WHERE user_id=? AND id=?",

@@ -7,7 +7,7 @@ import static org.mockito.Mockito.mock;
 import com.lawrence.travel.application.execution.StageExecutor;
 import com.lawrence.travel.application.port.ExecutionEngineStore;
 import com.lawrence.travel.infrastructure.execution.BoundedExecutionResources;
-import com.lawrence.travel.infrastructure.execution.PersistentStageWorker;
+import com.lawrence.travel.infrastructure.execution.PersistentWorkDispatcher;
 
 import org.junit.jupiter.api.Test;
 import java.time.Duration;
@@ -30,13 +30,13 @@ class DialogueWorkerTest {
         var claimed = new AtomicInteger();
         try (var resources = new BoundedExecutionResources(1, 1);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of()),
                                 resources,
                                 1,
                                 Duration.ofMillis(20))) {
-            worker.register(
+            worker.registerBackgroundWorkSource(
                     () -> {
                         claimed.incrementAndGet();
                         return Optional.of(
@@ -62,11 +62,11 @@ class DialogueWorkerTest {
                                     }
                                 });
                     });
-            worker.tick();
+            worker.dispatchAvailableWork();
             try {
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
                 assertThat(cancelled.await(3, TimeUnit.SECONDS)).isTrue();
-                worker.tick();
+                worker.dispatchAvailableWork();
                 assertThat(claimed.get()).isEqualTo(1);
                 assertThatThrownBy(resources::openRun)
                         .isInstanceOf(RejectedExecutionException.class);
@@ -89,13 +89,13 @@ class DialogueWorkerTest {
         var claimed = new AtomicInteger();
         try (var resources = new BoundedExecutionResources(1, 1);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of()),
                                 resources,
                                 1,
                                 Duration.ofSeconds(1))) {
-            worker.register(
+            worker.registerBackgroundWorkSource(
                     new com.lawrence.travel.application.port.BackgroundWorkSource() {
                         /** 解析源获得独立物理槽。 */
                         @Override
@@ -118,10 +118,10 @@ class DialogueWorkerTest {
                                     });
                         }
                     });
-            worker.tick();
+            worker.dispatchAvailableWork();
             try {
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
-                worker.tick();
+                worker.dispatchAvailableWork();
                 assertThat(claimed.get()).isEqualTo(1);
                 try (var model = resources.openRun()) {
                     assertThat(model).isNotNull();
@@ -141,13 +141,13 @@ class DialogueWorkerTest {
         var claimed = new AtomicInteger();
         try (var resources = new BoundedExecutionResources(1, 1);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of()),
                                 resources,
                                 1,
                                 Duration.ofSeconds(1))) {
-            worker.register(
+            worker.registerBackgroundWorkSource(
                     () -> {
                         claimed.incrementAndGet();
                         return Optional.of(
@@ -160,10 +160,10 @@ class DialogueWorkerTest {
                                     }
                                 });
                     });
-            worker.tick();
+            worker.dispatchAvailableWork();
             try {
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
-                worker.tick();
+                worker.dispatchAvailableWork();
                 assertThat(claimed.get()).isEqualTo(1);
                 assertThatThrownBy(resources::openRun)
                         .isInstanceOf(RejectedExecutionException.class);
@@ -193,13 +193,13 @@ class DialogueWorkerTest {
         var calls = new AtomicInteger();
         try (var resources = new BoundedExecutionResources(2, 1);
                 var worker =
-                        new PersistentStageWorker(
+                        new PersistentWorkDispatcher(
                                 engine,
                                 new StageExecutor(engine, List.of()),
                                 resources,
                                 1,
                                 Duration.ofMillis(20))) {
-            worker.register(
+            worker.registerBackgroundWorkSource(
                     new com.lawrence.travel.application.port.BackgroundWorkSource() {
                         /** 所有领取必须使用排除用户的端口。 */
                         @Override
@@ -246,11 +246,11 @@ class DialogueWorkerTest {
                                     });
                         }
                     });
-            worker.tick();
+            worker.dispatchAvailableWork();
             try {
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
                 assertThat(cancelled.await(3, TimeUnit.SECONDS)).isTrue();
-                worker.tick();
+                worker.dispatchAvailableWork();
                 assertThat(otherEntered.await(3, TimeUnit.SECONDS)).isTrue();
             } finally {
                 exit.countDown();

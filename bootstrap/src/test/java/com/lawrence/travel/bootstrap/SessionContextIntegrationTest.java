@@ -114,7 +114,7 @@ class SessionContextIntegrationTest {
                 contexts.prepare(
                         c.budgetId(), "coordinator", "本轮", null, new LocalCompression(), true);
         assertThat(result.summary()).isNotNull();
-        dialogue.act(user, chat, c.messageId(), "WITHDRAW");
+        dialogue.applyChatInputAction(user, chat, c.messageId(), "WITHDRAW");
         var next = receive(user, chat, "新的输入");
         assertThat(source.cached(source.load(next.budgetId(), "coordinator"))).isNull();
     }
@@ -387,7 +387,7 @@ class SessionContextIntegrationTest {
                     /** {@inheritDoc} 模拟摘要期间用户撤回，数据库没有跨模型锁。 */
                     @Override
                     public ConversationDigest compact(List<AgentContext.Message> messages) {
-                        dialogue.act(user, chat, c.messageId(), "WITHDRAW");
+                        dialogue.applyChatInputAction(user, chat, c.messageId(), "WITHDRAW");
                         return super.compact(messages);
                     }
                 };
@@ -446,7 +446,7 @@ class SessionContextIntegrationTest {
         var stopped = dialogue.send(user, chat, input, "停止规划");
         assertThat(stopped.messages().getLast().state()).isEqualTo("DONE");
         assertThat(stopped.messages().getFirst().text()).isEqualTo("请帮我规划");
-        assertThat(tx.required(() -> chats.guard(old))).isFalse();
+        assertThat(tx.required(() -> chats.isChatInputExecutionValid(old))).isFalse();
         long epoch =
                 jdbc.queryForObject(
                         "SELECT work_revision FROM dialogue_chat WHERE id=?", Long.class, chat);
@@ -472,7 +472,7 @@ class SessionContextIntegrationTest {
         var first = dialogue.read(user, chat).messages().getFirst();
         assertThat(first.state()).isEqualTo("PAUSED");
         assertThat(first.reply()).contains("问题编号").doesNotContain("<script>");
-        dialogue.act(user, chat, first.id(), "WITHDRAW");
+        dialogue.applyChatInputAction(user, chat, first.id(), "WITHDRAW");
         dialogue.send(user, chat, UUID.randomUUID(), "你好");
         when(interpreter.interpret(any()))
                 .thenReturn(

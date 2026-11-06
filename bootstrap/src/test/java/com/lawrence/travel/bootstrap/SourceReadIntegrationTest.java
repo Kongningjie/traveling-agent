@@ -395,7 +395,7 @@ class SourceReadIntegrationTest {
         var chat = UUID.randomUUID();
         var c = receive(u, chat, "当前");
         reads.offload(c.budgetId(), c.token(), "/work/coordinator/original", "旧产物");
-        dialogue.act(u, chat, c.messageId(), "WITHDRAW");
+        dialogue.applyChatInputAction(u, chat, c.messageId(), "WITHDRAW");
         assertThatThrownBy(
                         () ->
                                 reads.file(
@@ -454,7 +454,7 @@ class SourceReadIntegrationTest {
         var cancelled = receive(u, chat, "随后取消");
         reads.offload(
                 cancelled.budgetId(), cancelled.token(), "/work/coordinator/cancelled", "不得复活");
-        dialogue.act(u, chat, cancelled.messageId(), "WITHDRAW");
+        dialogue.applyChatInputAction(u, chat, cancelled.messageId(), "WITHDRAW");
         var third = receive(u, chat, "第三轮");
         assertThat(reads.files(third.budgetId(), third.token()))
                 .extracting(com.lawrence.travel.application.document.SourceRead.WorkFile::path)

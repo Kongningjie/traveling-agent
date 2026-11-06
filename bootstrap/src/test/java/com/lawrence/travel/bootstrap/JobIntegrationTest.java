@@ -44,14 +44,14 @@ class JobIntegrationTest {
     void invalidationWithdrawsLinkedInputAndRejectsOldInterpretation() {
         var s = scope();
         UUID input = UUID.randomUUID();
-        tx.required(() -> chats.receive(s.userId(), s.chatId(), input, "原始旅行想法"));
+        tx.required(() -> chats.saveChatInputAndEnsureJob(s.userId(), s.chatId(), input, "原始旅行想法"));
         var old = tx.required(chats::claim).orElseThrow();
         store.invalidate(s);
         assertThat(chats.read(s.userId(), s.chatId()).messages().getFirst().state())
                 .isEqualTo("WITHDRAWN");
         assertThat(chats.read(s.userId(), s.chatId()).messages().getFirst().text())
                 .isEqualTo("原始旅行想法");
-        assertThat(tx.required(() -> chats.guard(old))).isFalse();
+        assertThat(tx.required(() -> chats.isChatInputExecutionValid(old))).isFalse();
         assertThatThrownBy(
                         () ->
                                 tx.required(
@@ -266,7 +266,8 @@ class JobIntegrationTest {
      * @return 新输入作业
      */
     private Jobs.View submit(Jobs.Scope s, BackgroundJob.Kind kind) {
-        return store.submit(new Jobs.Submit(s, UUID.randomUUID(), kind, "main", "{}", null, null));
+        return store.registerBackgroundJob(
+                new Jobs.Submit(s, UUID.randomUUID(), kind, "main", "{}", null, null));
     }
 
     /**
@@ -283,12 +284,12 @@ class JobIntegrationTest {
         var s = scope();
         UUID op = UUID.randomUUID();
         var input = new Jobs.Submit(s, op, BackgroundJob.Kind.CHAT_INPUT, "main", "{}", null, null);
-        var a = store.submit(input);
-        assertThat(store.submit(input).id()).isEqualTo(a.id());
+        var a = store.registerBackgroundJob(input);
+        assertThat(store.registerBackgroundJob(input).id()).isEqualTo(a.id());
         assertThat(submit(s, BackgroundJob.Kind.CHAT_INPUT).budgetId()).isNotEqualTo(a.budgetId());
         assertThatThrownBy(
                         () ->
-                                store.submit(
+                                store.registerBackgroundJob(
                                         new Jobs.Submit(
                                                 s,
                                                 op,
@@ -385,7 +386,7 @@ class JobIntegrationTest {
                         j.id(),
                         null);
         store.finish(c, new Jobs.Output(BackgroundJob.State.COMPLETED, "{}", List.of(good), ""));
-        var n = store.submit(good);
+        var n = store.registerBackgroundJob(good);
         assertThat(store.claim(s, n.id())).isPresent();
         assertThatThrownBy(() -> store.finish(c, output(BackgroundJob.State.COMPLETED)))
                 .isInstanceOf(IllegalStateException.class);
@@ -397,7 +398,7 @@ class JobIntegrationTest {
         var s = scope();
         var a = submit(s, BackgroundJob.Kind.DOCUMENT_PARSE);
         var b =
-                store.submit(
+                store.registerBackgroundJob(
                         new Jobs.Submit(
                                 s,
                                 a.operationId(),
@@ -408,11 +409,11 @@ class JobIntegrationTest {
                                 null));
         assertThat(store.claim(s, b.id())).isEmpty();
         var c = store.claim(s, a.id()).orElseThrow();
-        assertThatThrownBy(() -> store.control(s, a.id(), true))
+        assertThatThrownBy(() -> store.applyJobRetryOrCancellation(s, a.id(), true))
                 .isInstanceOf(IllegalStateException.class);
         store.finish(c, output(BackgroundJob.State.WAITING_USER));
         assertThat(store.read(s, a.id()).leaseUntil()).isNull();
-        store.control(s, a.id(), true);
+        store.applyJobRetryOrCancellation(s, a.id(), true);
         var next = store.claim(s, a.id()).orElseThrow();
         assertThat(next.job().budgetId()).isEqualTo(c.job().budgetId());
         store.finish(next, output(BackgroundJob.State.COMPLETED));
@@ -425,14 +426,14 @@ class JobIntegrationTest {
         var s = scope();
         var j = submit(s, BackgroundJob.Kind.MEMORY_UPDATE);
         var c = store.claim(s, j.id()).orElseThrow();
-        store.control(s, j.id(), false);
-        assertThat(store.live(c.fence())).isFalse();
-        assertThatThrownBy(() -> store.control(s, j.id(), true))
+        store.applyJobRetryOrCancellation(s, j.id(), false);
+        assertThat(store.isJobExecutionValid(c.fence())).isFalse();
+        assertThatThrownBy(() -> store.applyJobRetryOrCancellation(s, j.id(), true))
                 .isInstanceOf(IllegalStateException.class);
         var another = submit(s, BackgroundJob.Kind.DOCUMENT_ANALYZE);
         var old = store.claim(s, another.id()).orElseThrow();
         store.invalidate(s);
-        assertThat(store.live(old.fence())).isFalse();
+        assertThat(store.isJobExecutionValid(old.fence())).isFalse();
         assertThat(store.read(s, another.id()).state()).isEqualTo(BackgroundJob.State.SUPERSEDED);
     }
 

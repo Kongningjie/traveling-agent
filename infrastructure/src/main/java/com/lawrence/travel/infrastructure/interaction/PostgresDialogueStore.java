@@ -21,133 +21,137 @@ import java.util.UUID;
 public final class PostgresDialogueStore implements DialogueStore {
     /** {@inheritDoc} 与停止命令共用归属锁，不能定位其他聊天的运行。 */
     @Override
-    public UUID currentRun(UUID user, UUID chat) {
-        transaction();
-        return basis(user, lock(user, chat)).runId();
+    public UUID currentRun(UUID userId, UUID chatId) {
+        requireActiveTransaction();
+        return getTravelExecutionSnapshot(userId, lockUserChatAndTask(userId, chatId)).runId();
     }
 
     /** {@inheritDoc} 用户锁使停止命令的幂等判断和副作用同事务。 */
     @Override
     public boolean containsInput(UUID userId, UUID chatId, UUID inputId, String text) {
-        transaction();
-        lock(userId, chatId);
-        var row = mapper.message(userId, chatId, inputId);
-        if (row != null) require(row.text().equals(text), false);
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        var row = dialogueMapper.getChatInputById(userId, chatId, inputId);
+        if (row != null) requireStorageCondition(row.text().equals(text), false);
         return row != null;
     }
 
     /** {@inheritDoc} 原文及已生效行程保留，只撤销未完成执行权。 */
     @Override
-    public void stopPending(UUID user, UUID chat) {
-        transaction();
-        lock(user, chat);
-        jobs.invalidate(new com.lawrence.travel.application.execution.Jobs.Scope(user, chat));
+    public void stopPending(UUID userId, UUID chatId) {
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        jobStore.invalidate(
+                new com.lawrence.travel.application.execution.Jobs.Scope(userId, chatId));
     }
 
     /** {@inheritDoc} 直接命令与回复、作业完成同事务，不借此接受候选或新增授权。 */
     @Override
     public void completeCommand(UUID userId, UUID chatId, UUID inputId, String reply) {
-        transaction();
-        lock(userId, chatId);
-        jobs.completeCommand(
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        jobStore.completeCommand(
                 new com.lawrence.travel.application.execution.Jobs.Scope(userId, chatId),
-                jobId(userId, chatId, inputId));
-        require(mapper.directReply(userId, chatId, inputId, reply) == 1, false);
+                getChatInputJobId(userId, chatId, inputId));
+        requireStorageCondition(
+                dialogueMapper.directReply(userId, chatId, inputId, reply) == 1, false);
     }
 
-    private final DialogueMapper mapper;
-    private final TravelMapper tasks;
-    private final BudgetMapper budgets;
-    private final TravelJson json;
-    private final com.lawrence.travel.application.port.JobStore jobs;
+    private final DialogueMapper dialogueMapper;
+    private final TravelMapper taskMapper;
+    private final BudgetMapper budgetMapper;
+    private final TravelJson interactionCodec;
+    private final com.lawrence.travel.application.port.JobStore jobStore;
 
     /**
-     * @param mapper 聊天SQL
-     * @param tasks 权威任务SQL
-     * @param budgets 原预算
-     * @param json 严格JSON
+     * @param dialogueMapper 聊天SQL
+     * @param taskMapper 权威任务SQL
+     * @param budgetMapper 原预算
+     * @param interactionCodec 严格JSON
      */
     public PostgresDialogueStore(
-            DialogueMapper mapper,
-            TravelMapper tasks,
-            BudgetMapper budgets,
-            TravelJson json,
-            com.lawrence.travel.application.port.JobStore jobs) {
-        this.mapper = mapper;
-        this.tasks = tasks;
-        this.budgets = budgets;
-        this.json = json;
-        this.jobs = jobs;
+            DialogueMapper dialogueMapper,
+            TravelMapper taskMapper,
+            BudgetMapper budgetMapper,
+            TravelJson interactionCodec,
+            com.lawrence.travel.application.port.JobStore jobStore) {
+        this.dialogueMapper = dialogueMapper;
+        this.taskMapper = taskMapper;
+        this.budgetMapper = budgetMapper;
+        this.interactionCodec = interactionCodec;
+        this.jobStore = jobStore;
     }
 
     /** {@inheritDoc} 同会话ID异标题拒绝，不重置预算。 */
     @Override
-    public Dialogue.Chat create(UUID user, UUID id, String title) {
-        transaction();
-        require(id != null && title != null && !title.isBlank() && title.length() <= 120, false);
-        require(mapper.lockUser(user) != null, true);
-        var old = mapper.chat(user, id);
+    public Dialogue.Chat create(UUID userId, UUID chatId, String title) {
+        requireActiveTransaction();
+        requireStorageCondition(
+                chatId != null && title != null && !title.isBlank() && title.length() <= 120,
+                false);
+        requireStorageCondition(dialogueMapper.lockUser(userId) != null, true);
+        var old = dialogueMapper.chat(userId, chatId);
         if (old != null) {
-            require(old.title().equals(title), false);
+            requireStorageCondition(old.title().equals(title), false);
             return old;
         }
-        budgets.create(id);
-        mapper.create(user, id, title);
-        return mapper.chat(user, id);
+        budgetMapper.create(chatId);
+        dialogueMapper.create(userId, chatId, title);
+        return dialogueMapper.chat(userId, chatId);
     }
 
     /** {@inheritDoc} 有界分页。 */
     @Override
-    public List<Dialogue.Chat> list(UUID user, int offset) {
-        require(offset >= 0 && offset <= 100000, false);
-        return safe(() -> mapper.list(user, offset));
+    public List<Dialogue.Chat> list(UUID userId, int offset) {
+        requireStorageCondition(offset >= 0 && offset <= 100000, false);
+        return executeStorageReadWithErrorMapping(() -> dialogueMapper.list(userId, offset));
     }
 
     /** {@inheritDoc} 同用户串行关联，不因前端重试生成第二个聊天或预算。 */
     @Override
-    public Dialogue.Chat attach(UUID user, UUID id, UUID task) {
-        transaction();
-        require(mapper.lockUser(user) != null, true);
-        var row = tasks.lockTask(new TaskScope(user, task));
-        require(row != null, true);
-        var old = mapper.forTask(user, task);
+    public Dialogue.Chat attach(UUID userId, UUID chatId, UUID task) {
+        requireActiveTransaction();
+        requireStorageCondition(dialogueMapper.lockUser(userId) != null, true);
+        var row = taskMapper.lockTask(new TaskScope(userId, task));
+        requireStorageCondition(row != null, true);
+        var old = dialogueMapper.forTask(userId, task);
         if (old != null) return old;
-        var chat = create(user, id, row.title());
-        require(chat.taskId() == null || chat.taskId().equals(task), false);
+        var chat = create(userId, chatId, row.title());
+        requireStorageCondition(chat.taskId() == null || chat.taskId().equals(task), false);
         if (chat.taskId() == null) {
-            var c =
+            var chatInputClaim =
                     new Dialogue.Claim(
-                            user,
-                            id,
-                            id,
+                            userId,
+                            chatId,
+                            chatId,
                             0,
-                            id,
+                            chatId,
                             "",
                             java.time.Instant.EPOCH,
-                            basis(user, chat),
+                            getTravelExecutionSnapshot(userId, chat),
                             "{}");
-            require(mapper.link(c, task) == 1, false);
+            requireStorageCondition(dialogueMapper.link(chatInputClaim, task) == 1, false);
         }
-        return mapper.chat(user, id);
+        return dialogueMapper.chat(userId, chatId);
     }
 
     /**
      * DialogueController.read及收件/提交返回路径均使用此投影。
      */
     @Override
-    public Dialogue.View read(UUID user, UUID chat) {
-        return safe(
+    public Dialogue.View read(UUID userId, UUID chatId) {
+        return executeStorageReadWithErrorMapping(
                 () -> {
-                    var c = mapper.chat(user, chat);
-                    require(c != null, true);
-                    var rows = mapper.messages(user, chat);
+                    var c = dialogueMapper.chat(userId, chatId);
+                    requireStorageCondition(c != null, true);
+                    var rows = dialogueMapper.messages(userId, chatId);
                     var attachments =
                             new java.util.HashMap<UUID, List<Dialogue.DocumentReference>>();
                     if (!rows.isEmpty())
                         for (var reference :
-                                mapper.attachedDocuments(
-                                        user,
-                                        chat,
+                                dialogueMapper.attachedDocuments(
+                                        userId,
+                                        chatId,
                                         rows.stream().map(DialogueMapper.Row::id).toList())) {
                             attachments
                                     .computeIfAbsent(
@@ -169,31 +173,32 @@ public final class PostgresDialogueStore implements DialogueStore {
                                                             attachments.getOrDefault(
                                                                     row.id(), List.of())))
                                     .toList(),
-                            c.taskId() != null && blocked(user, c.taskId()));
+                            c.taskId() != null && blocked(userId, c.taskId()));
                 });
     }
 
     /** {@inheritDoc} 用户锁串行收件与接受；普通输入不递增旅行代次。 */
     @Override
-    public Dialogue.View receive(UUID userId, UUID chatId, UUID inputId, String text) {
-        return receive(userId, chatId, inputId, text, List.of());
+    public Dialogue.View saveChatInputAndEnsureJob(
+            UUID userId, UUID chatId, UUID inputId, String text) {
+        return saveChatInputAndEnsureJob(userId, chatId, inputId, text, List.of());
     }
 
     /**
      * 由DialogueService.send的事务调用：锁定归属 → 检查重放原文/附件集合 → 限制未决输入数量 → 插入原文 → 绑定文件内容版本 → ensureJob登记持久作业。
      */
     @Override
-    public Dialogue.View receive(
+    public Dialogue.View saveChatInputAndEnsureJob(
             UUID userId, UUID chatId, UUID inputId, String text, List<UUID> documents) {
-        transaction();
-        lock(userId, chatId);
-        require(
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        requireStorageCondition(
                 documents != null
                         && documents.size() <= 10
                         && documents.stream().noneMatch(Objects::isNull)
                         && new java.util.HashSet<>(documents).size() == documents.size(),
                 false);
-        require(
+        requireStorageCondition(
                 inputId != null
                         && text != null
                         && !text.isBlank()
@@ -202,20 +207,22 @@ public final class PostgresDialogueStore implements DialogueStore {
                                         .MAX_TEXT_LENGTH
                         && text.indexOf(0) < 0,
                 false);
-        var existingInput = mapper.message(userId, chatId, inputId);
+        var existingInput = dialogueMapper.getChatInputById(userId, chatId, inputId);
         if (existingInput != null) {
-            require(
+            requireStorageCondition(
                     existingInput.text().equals(text)
                             && new java.util.HashSet<>(
-                                            mapper.documents(userId, chatId, inputId).stream()
+                                            dialogueMapper
+                                                    .documents(userId, chatId, inputId)
+                                                    .stream()
                                                     .map(Dialogue.DocumentReference::id)
                                                     .toList())
                                     .equals(new java.util.HashSet<>(documents)),
                     false);
             return read(userId, chatId);
         }
-        require(
-                mapper.messages(userId, chatId).stream()
+        requireStorageCondition(
+                dialogueMapper.messages(userId, chatId).stream()
                                 .filter(
                                         m ->
                                                 List.of(
@@ -225,113 +232,139 @@ public final class PostgresDialogueStore implements DialogueStore {
                                 .count()
                         < 20,
                 false);
-        mapper.insert(userId, chatId, inputId, text);
+        dialogueMapper.insert(userId, chatId, inputId, text);
         for (UUID document : documents)
-            require(mapper.bindDocument(userId, chatId, inputId, document) == 1, true);
-        ensureJob(userId, chatId, inputId, false);
+            requireStorageCondition(
+                    dialogueMapper.bindDocument(userId, chatId, inputId, document) == 1, true);
+        getOrCreateChatInputJobId(userId, chatId, inputId, false);
         return read(userId, chatId);
     }
 
     /** {@inheritDoc} 读取当前索引和原绑定版本；删除后只返回墓碑名称。 */
     @Override
-    public List<Dialogue.DocumentReference> documents(UUID user, UUID chat, UUID input) {
-        return safe(() -> mapper.documents(user, chat, input));
+    public List<Dialogue.DocumentReference> documents(UUID userId, UUID chatId, UUID inputId) {
+        return executeStorageReadWithErrorMapping(
+                () -> dialogueMapper.documents(userId, chatId, inputId));
     }
 
     /** {@inheritDoc} 同聊天串行，领取使用用户锁与输入租约，恢复不创建新的预算身份。 */
     @Override
     public Optional<Dialogue.Claim> claim() {
-        return claimExcluding(java.util.Set.of());
+        return claimNextChatInputExcludingUsers(java.util.Set.of());
     }
 
     /**
      * 由Worker经DialogueService调用，在短事务中按提示发现聊天，并先排除物理运行尚未退出的用户。
      */
     @Override
-    public Optional<Dialogue.Claim> claimExcluding(java.util.Set<UUID> excluded) {
-        transaction();
-        for (var hint : mapper.hints()) {
-            if (excluded.contains(hint.userId())) continue;
-            var chat = lock(hint.userId(), hint.id());
-            var row = mapper.next(hint.userId(), hint.id());
-            if (row == null) continue;
-            if (mapper.legacyRunning(hint.userId(), hint.id(), row.id())) continue;
-            UUID jobId = ensureJob(hint.userId(), hint.id(), row.id(), true);
-            var work =
-                    jobs.claim(
+    public Optional<Dialogue.Claim> claimNextChatInputExcludingUsers(
+            java.util.Set<UUID> excludedUserIds) {
+        requireActiveTransaction();
+        for (var pendingChatHint : dialogueMapper.listPendingChatHints()) {
+            if (excludedUserIds.contains(pendingChatHint.userId())) continue;
+            var lockedChat = lockUserChatAndTask(pendingChatHint.userId(), pendingChatHint.id());
+            var inputRow =
+                    dialogueMapper.getEarliestPendingInputForUpdate(
+                            pendingChatHint.userId(), pendingChatHint.id());
+            if (inputRow == null) continue;
+            if (dialogueMapper.hasUnexpiredLegacyInputExecution(
+                    pendingChatHint.userId(), pendingChatHint.id(), inputRow.id())) continue;
+            UUID jobId =
+                    getOrCreateChatInputJobId(
+                            pendingChatHint.userId(), pendingChatHint.id(), inputRow.id(), true);
+            var jobClaimResult =
+                    jobStore.claim(
                             new com.lawrence.travel.application.execution.Jobs.Scope(
-                                    hint.userId(), hint.id()),
+                                    pendingChatHint.userId(), pendingChatHint.id()),
                             jobId);
-            if (work.isEmpty()) {
-                var state =
-                        jobs.read(
+            if (jobClaimResult.isEmpty()) {
+                var jobState =
+                        jobStore.read(
                                         new com.lawrence.travel.application.execution.Jobs.Scope(
-                                                hint.userId(), hint.id()),
+                                                pendingChatHint.userId(), pendingChatHint.id()),
                                         jobId)
                                 .state();
-                if (state == com.lawrence.travel.domain.execution.BackgroundJob.State.PAUSED)
-                    mapper.project(hint.userId(), hint.id(), row.id(), jobId);
+                if (jobState == com.lawrence.travel.domain.execution.BackgroundJob.State.PAUSED)
+                    dialogueMapper.updateInputExecutionFromJob(
+                            pendingChatHint.userId(), pendingChatHint.id(), inputRow.id(), jobId);
                 continue;
             }
-            mapper.project(hint.userId(), hint.id(), row.id(), jobId);
-            long token = work.get().fence().token();
-            var basis = basis(hint.userId(), chat);
-            var context = new LinkedHashMap<String, Object>();
+            dialogueMapper.updateInputExecutionFromJob(
+                    pendingChatHint.userId(), pendingChatHint.id(), inputRow.id(), jobId);
+            long leaseToken = jobClaimResult.get().fence().token();
+            var travelExecutionSnapshot =
+                    getTravelExecutionSnapshot(pendingChatHint.userId(), lockedChat);
+            var inputContext = new LinkedHashMap<String, Object>();
             // 权威问题按本轮水位读取；完整历史由统一SessionContextService装载。
-            context.put(
+            inputContext.put(
                     "unresolved",
-                    mapper.contextQuestions(hint.userId(), hint.id(), row.id()).stream()
+                    dialogueMapper
+                            .contextQuestions(
+                                    pendingChatHint.userId(), pendingChatHint.id(), inputRow.id())
+                            .stream()
                             .map(
-                                    m ->
+                                    unresolvedInput ->
                                             java.util.Map.of(
                                                     "id",
-                                                    m.id().toString(),
+                                                    unresolvedInput.id().toString(),
                                                     "text",
-                                                    m.text(),
+                                                    unresolvedInput.text(),
                                                     "question",
-                                                    m.reply()))
+                                                    unresolvedInput.reply()))
                             .toList());
-            if (chat.taskId() != null) {
-                var scope = new TaskScope(hint.userId(), chat.taskId());
-                context.put(
+            if (lockedChat.taskId() != null) {
+                var scope = new TaskScope(pendingChatHint.userId(), lockedChat.taskId());
+                inputContext.put(
                         "requirements",
-                        json.decode(tasks.revision(scope, basis.revision()), Object.class));
-                var candidateId = mapper.candidate(hint.userId(), chat.taskId());
-                if (candidateId != null) context.put("candidateId", candidateId.toString());
-                if (basis.currentVersion() != null)
-                    context.put(
+                        interactionCodec.decode(
+                                taskMapper.revision(scope, travelExecutionSnapshot.revision()),
+                                Object.class));
+                var candidateId =
+                        dialogueMapper.candidate(pendingChatHint.userId(), lockedChat.taskId());
+                if (candidateId != null) inputContext.put("candidateId", candidateId.toString());
+                if (travelExecutionSnapshot.currentVersion() != null)
+                    inputContext.put(
                             "itinerary",
-                            json.decode(
-                                    tasks.snapshot(scope, basis.currentVersion()).payload(),
+                            interactionCodec.decode(
+                                    taskMapper
+                                            .snapshot(
+                                                    scope, travelExecutionSnapshot.currentVersion())
+                                            .payload(),
                                     Object.class));
             }
-            context.put("selectedDocuments", mapper.documents(hint.userId(), chat.id(), row.id()));
-            context.put(
+            inputContext.put(
+                    "selectedDocuments",
+                    dialogueMapper.documents(
+                            pendingChatHint.userId(), lockedChat.id(), inputRow.id()));
+            inputContext.put(
                     "previousDocumentSelections",
-                    mapper.previousDocumentInputs(hint.userId(), chat.id(), row.id()).stream()
+                    dialogueMapper
+                            .previousDocumentInputs(
+                                    pendingChatHint.userId(), lockedChat.id(), inputRow.id())
+                            .stream()
                             .map(
-                                    id ->
+                                    previousInputId ->
                                             java.util.Map.of(
                                                     "messageId",
-                                                    id,
+                                                    previousInputId,
                                                     "documents",
-                                                    mapper.documents(
-                                                            hint.userId(),
-                                                            chat.id(),
-                                                            UUID.fromString(id))))
+                                                    dialogueMapper.documents(
+                                                            pendingChatHint.userId(),
+                                                            lockedChat.id(),
+                                                            UUID.fromString(previousInputId))))
                             .toList());
-            String data = json.encode(context);
+            String contextJson = interactionCodec.encode(inputContext);
             return Optional.of(
                     new Dialogue.Claim(
-                            hint.userId(),
-                            chat.id(),
-                            row.id(),
-                            token,
-                            work.get().job().budgetId(),
-                            row.text(),
-                            row.receivedAt(),
-                            basis,
-                            data));
+                            pendingChatHint.userId(),
+                            lockedChat.id(),
+                            inputRow.id(),
+                            leaseToken,
+                            jobClaimResult.get().job().budgetId(),
+                            inputRow.text(),
+                            inputRow.receivedAt(),
+                            travelExecutionSnapshot,
+                            contextJson));
         }
         return Optional.empty();
     }
@@ -340,42 +373,48 @@ public final class PostgresDialogueStore implements DialogueStore {
      * 由process提交前调用，同时比较JobStore围栏、输入有效状态及旅行Basis。
      */
     @Override
-    public boolean guard(Dialogue.Claim claim) {
-        transaction();
-        var chat = lock(claim.userId(), claim.chatId());
-        return jobs.live(jobClaim(claim).fence())
-                && mapper.live(claim)
-                && Objects.equals(basis(claim.userId(), chat), claim.basis());
+    public boolean isChatInputExecutionValid(Dialogue.Claim chatInputClaim) {
+        requireActiveTransaction();
+        var chat = lockUserChatAndTask(chatInputClaim.userId(), chatInputClaim.chatId());
+        return jobStore.isJobExecutionValid(buildJobClaimFromChatInput(chatInputClaim).fence())
+                && dialogueMapper.live(chatInputClaim)
+                && Objects.equals(
+                        getTravelExecutionSnapshot(chatInputClaim.userId(), chat),
+                        chatInputClaim.basis());
     }
 
     /** {@inheritDoc} 保留旧原文和提问，状态变化与本轮处理同事务；不允许清理失败或其他聊天请求。 */
     @Override
-    public void resolve(Dialogue.Claim claim, List<UUID> inputs) {
-        transaction();
-        for (UUID id : inputs) {
-            var old = mapper.message(claim.userId(), claim.chatId(), id);
-            require(
-                    old != null && old.state().equals("CLARIFY") && !id.equals(claim.messageId()),
+    public void resolve(Dialogue.Claim chatInputClaim, List<UUID> inputs) {
+        requireActiveTransaction();
+        for (UUID inputId : inputs) {
+            var old =
+                    dialogueMapper.getChatInputById(
+                            chatInputClaim.userId(), chatInputClaim.chatId(), inputId);
+            requireStorageCondition(
+                    old != null
+                            && old.state().equals("CLARIFY")
+                            && !inputId.equals(chatInputClaim.messageId()),
                     false);
-            changeState(claim.userId(), claim.chatId(), id, "DONE");
+            changeState(chatInputClaim.userId(), chatInputClaim.chatId(), inputId, "DONE");
         }
     }
 
     /** {@inheritDoc} 明确确认的新任务关联不使用虚构Claim，不替换旧旅行。 */
     @Override
-    public void linkConfirmed(UUID user, UUID chat, UUID task) {
-        transaction();
-        lock(user, chat);
-        require(tasks.task(new TaskScope(user, task)) != null, true);
-        require(mapper.linkConfirmed(user, chat, task) == 1, false);
+    public void linkConfirmed(UUID userId, UUID chatId, UUID task) {
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        requireStorageCondition(taskMapper.task(new TaskScope(userId, task)) != null, true);
+        requireStorageCondition(dialogueMapper.linkConfirmed(userId, chatId, task) == 1, false);
     }
 
     /** {@inheritDoc} 一个聊天只能关联一个任务。 */
     @Override
-    public Dialogue.Chat link(Dialogue.Claim claim, UUID task) {
-        transaction();
-        require(mapper.link(claim, task) == 1, false);
-        return mapper.chat(claim.userId(), claim.chatId());
+    public Dialogue.Chat link(Dialogue.Claim chatInputClaim, UUID task) {
+        requireActiveTransaction();
+        requireStorageCondition(dialogueMapper.link(chatInputClaim, task) == 1, false);
+        return dialogueMapper.chat(chatInputClaim.userId(), chatInputClaim.chatId());
     }
 
     /**
@@ -383,14 +422,15 @@ public final class PostgresDialogueStore implements DialogueStore {
      */
     @Override
     public void finish(
-            Dialogue.Claim claim,
+            Dialogue.Claim chatInputClaim,
             String state,
             String reply,
             Dialogue.Operation operation,
             String error) {
-        transaction();
-        require(List.of("DONE", "CONFIRM", "CLARIFY", "PAUSED").contains(state), false);
-        require(mapper.live(claim), false);
+        requireActiveTransaction();
+        requireStorageCondition(
+                List.of("DONE", "CONFIRM", "CLARIFY", "PAUSED").contains(state), false);
+        requireStorageCondition(dialogueMapper.live(chatInputClaim), false);
         var target =
                 switch (state) {
                     case "DONE" ->
@@ -400,16 +440,16 @@ public final class PostgresDialogueStore implements DialogueStore {
                     default ->
                             com.lawrence.travel.domain.execution.BackgroundJob.State.WAITING_USER;
                 };
-        jobs.finish(
-                jobClaim(claim),
+        jobStore.finish(
+                buildJobClaimFromChatInput(chatInputClaim),
                 new com.lawrence.travel.application.execution.Jobs.Output(
                         target, null, List.of(), error));
-        require(
-                mapper.finish(
-                                claim,
+        requireStorageCondition(
+                dialogueMapper.finish(
+                                chatInputClaim,
                                 state,
                                 reply,
-                                operation == null ? null : json.encode(operation),
+                                operation == null ? null : interactionCodec.encode(operation),
                                 error)
                         == 1,
                 false);
@@ -417,82 +457,97 @@ public final class PostgresDialogueStore implements DialogueStore {
 
     /** {@inheritDoc} 用户和任务锁保护操作确认与候选接受的原子性。 */
     @Override
-    public Dialogue.Message lockMessage(UUID user, UUID chat, UUID message, String action) {
-        transaction();
-        lock(user, chat);
-        var row = mapper.message(user, chat, message);
-        require(row != null, true);
-        return message(row, user, chat);
+    public Dialogue.Message lockMessage(UUID userId, UUID chatId, UUID message, String action) {
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        var row = dialogueMapper.getChatInputById(userId, chatId, message);
+        requireStorageCondition(row != null, true);
+        return message(row, userId, chatId);
     }
 
     /** {@inheritDoc} 重试只改队列尝试，不重置execution_budget或未知用量。 */
     @Override
-    public void changeState(UUID user, UUID chat, UUID message, String state) {
-        transaction();
-        lock(user, chat);
-        require(List.of("DONE", "WITHDRAWN", "QUEUED").contains(state), false);
-        UUID id = jobId(user, chat, message);
-        if (id != null) {
-            var scope = new com.lawrence.travel.application.execution.Jobs.Scope(user, chat);
-            if (state.equals("DONE")) jobs.acknowledge(scope, id);
-            else jobs.control(scope, id, state.equals("QUEUED"));
-        } else if (state.equals("WITHDRAWN")) mapper.settle(user, chat, message, true, true);
-        require(mapper.state(user, chat, message, state) == 1, false);
+    public void changeState(UUID userId, UUID chatId, UUID message, String state) {
+        requireActiveTransaction();
+        lockUserChatAndTask(userId, chatId);
+        requireStorageCondition(List.of("DONE", "WITHDRAWN", "QUEUED").contains(state), false);
+        UUID inputId = getChatInputJobId(userId, chatId, message);
+        if (inputId != null) {
+            var scope = new com.lawrence.travel.application.execution.Jobs.Scope(userId, chatId);
+            if (state.equals("DONE")) jobStore.acknowledge(scope, inputId);
+            else jobStore.applyJobRetryOrCancellation(scope, inputId, state.equals("QUEUED"));
+        } else if (state.equals("WITHDRAWN"))
+            dialogueMapper.settleLegacyInputActiveTime(userId, chatId, message, true, true);
+        requireStorageCondition(dialogueMapper.state(userId, chatId, message, state) == 1, false);
     }
 
     /**
      * Worker心跳调用。
      */
     @Override
-    public boolean renew(Dialogue.Claim c) {
-        transaction();
-        lock(c.userId(), c.chatId());
-        boolean renewed = jobs.renew(jobClaim(c).fence());
+    public boolean renew(Dialogue.Claim chatInputClaim) {
+        requireActiveTransaction();
+        lockUserChatAndTask(chatInputClaim.userId(), chatInputClaim.chatId());
+        boolean renewed = jobStore.renew(buildJobClaimFromChatInput(chatInputClaim).fence());
         if (renewed)
-            mapper.project(
-                    c.userId(),
-                    c.chatId(),
-                    c.messageId(),
-                    jobId(c.userId(), c.chatId(), c.messageId()));
+            dialogueMapper.updateInputExecutionFromJob(
+                    chatInputClaim.userId(),
+                    chatInputClaim.chatId(),
+                    chatInputClaim.messageId(),
+                    getChatInputJobId(
+                            chatInputClaim.userId(),
+                            chatInputClaim.chatId(),
+                            chatInputClaim.messageId()));
         return renewed;
     }
 
     /** {@inheritDoc} 只读取已鉴权范围，不把用户原文或认证信息放进关联。 */
     @Override
     public com.lawrence.travel.application.execution.ExecutionCorrelation.Ids correlation(
-            Dialogue.Claim c) {
+            Dialogue.Claim chatInputClaim) {
         var job =
-                jobs.read(
+                jobStore.read(
                         new com.lawrence.travel.application.execution.Jobs.Scope(
-                                c.userId(), c.chatId()),
-                        jobId(c.userId(), c.chatId(), c.messageId()));
+                                chatInputClaim.userId(), chatInputClaim.chatId()),
+                        getChatInputJobId(
+                                chatInputClaim.userId(),
+                                chatInputClaim.chatId(),
+                                chatInputClaim.messageId()));
         return new com.lawrence.travel.application.execution.ExecutionCorrelation.Ids(
                 job.requestId(), job.traceId());
     }
 
     /**
-     * @param user 归属
-     * @param chat 聊天
-     * @param input 输入
+     * @param userId 归属
+     * @param chatId 聊天
+     * @param inputId 输入
      * @return 可空映射；MyBatis标量UUID通过显式文本转换
      */
-    private UUID jobId(UUID user, UUID chat, UUID input) {
-        String id = mapper.job(user, chat, input);
+    private UUID getChatInputJobId(UUID userId, UUID chatId, UUID inputId) {
+        String id = dialogueMapper.getChatInputJobId(userId, chatId, inputId);
         return id == null ? null : UUID.fromString(id);
     }
 
     /**
-     * @param c 既有聊天资格
+     * @param chatInputClaim 既有聊天资格
      * @return 当前作业元数据与原token组合，不能用读取到的新token替换旧资格
      */
-    private com.lawrence.travel.application.execution.Jobs.Claim jobClaim(Dialogue.Claim c) {
+    private com.lawrence.travel.application.execution.Jobs.Claim buildJobClaimFromChatInput(
+            Dialogue.Claim chatInputClaim) {
         var scope =
-                new com.lawrence.travel.application.execution.Jobs.Scope(c.userId(), c.chatId());
-        var job = jobs.read(scope, jobId(c.userId(), c.chatId(), c.messageId()));
-        require(job.budgetId().equals(c.budgetId()), false);
+                new com.lawrence.travel.application.execution.Jobs.Scope(
+                        chatInputClaim.userId(), chatInputClaim.chatId());
+        var job =
+                jobStore.read(
+                        scope,
+                        getChatInputJobId(
+                                chatInputClaim.userId(),
+                                chatInputClaim.chatId(),
+                                chatInputClaim.messageId()));
+        requireStorageCondition(job.budgetId().equals(chatInputClaim.budgetId()), false);
         return new com.lawrence.travel.application.execution.Jobs.Claim(
                 new com.lawrence.travel.application.execution.Jobs.Fence(
-                        scope, job.id(), c.token(), job.version()),
+                        scope, job.id(), chatInputClaim.token(), job.version()),
                 job,
                 "{}");
     }
@@ -500,60 +555,65 @@ public final class PostgresDialogueStore implements DialogueStore {
     /**
      * 保证聊天输入关联唯一持久作业，作为receive与claimExcluding衔接后台调度的桥梁。
      *
-     * @param user 归属
-     * @param chat 聊天
-     * @param input 输入
-     * @param legacy 是否旧待处理输入
+     * @param userId 归属
+     * @param chatId 聊天
+     * @param inputId 输入
+     * @param migrateLegacyInput 是否旧待处理输入
      * @return 稳定映射；旧完成消息不进入此路径
      */
-    private UUID ensureJob(UUID user, UUID chat, UUID input, boolean legacy) {
-        UUID old = jobId(user, chat, input);
-        if (old != null) return old;
+    private UUID getOrCreateChatInputJobId(
+            UUID userId, UUID chatId, UUID inputId, boolean migrateLegacyInput) {
+        UUID existingJobId = getChatInputJobId(userId, chatId, inputId);
+        if (existingJobId != null) return existingJobId;
         // 旧在途请求先保守结算到已保存租约；复制原累计预算不删除旧计量或UNKNOWN。
-        if (legacy) mapper.settle(user, chat, input, true, false);
-        UUID operation =
+        if (migrateLegacyInput)
+            dialogueMapper.settleLegacyInputActiveTime(userId, chatId, inputId, true, false);
+        UUID operationId =
                 UUID.nameUUIDFromBytes(
-                        (user + "/" + chat + "/" + input)
+                        (userId + "/" + chatId + "/" + inputId)
                                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         var job =
-                jobs.submit(
+                jobStore.registerBackgroundJob(
                         new com.lawrence.travel.application.execution.Jobs.Submit(
                                 new com.lawrence.travel.application.execution.Jobs.Scope(
-                                        user, chat),
-                                operation,
+                                        userId, chatId),
+                                operationId,
                                 com.lawrence.travel.domain.execution.BackgroundJob.Kind.CHAT_INPUT,
                                 "input",
-                                json.encode(java.util.Map.of("inputId", input)),
+                                interactionCodec.encode(java.util.Map.of("inputId", inputId)),
                                 null,
-                                legacy ? chat : null,
-                                legacy ? mapper.priorAttempts(user, chat, input) : 0));
-        mapper.associate(user, chat, input, job.id());
+                                migrateLegacyInput ? chatId : null,
+                                migrateLegacyInput
+                                        ? dialogueMapper.priorAttempts(userId, chatId, inputId)
+                                        : 0));
+        dialogueMapper.bindJobToChatInput(userId, chatId, inputId, job.id());
         return job.id();
     }
 
     /** {@inheritDoc} 用作任务锁内的接受门禁及对外展示屏障。 */
     @Override
-    public boolean blocked(UUID user, UUID task) {
-        return mapper.blocked(user, task);
+    public boolean blocked(UUID userId, UUID task) {
+        return dialogueMapper.blocked(userId, task);
     }
 
     /** {@inheritDoc} 只保存应用服务确认的结果，不接收模型自行声称的执行成功。 */
     @Override
-    public void operationResult(UUID user, UUID chat, UUID message, String reply) {
-        transaction();
-        require(mapper.operationResult(user, chat, message, reply) == 1, false);
+    public void operationResult(UUID userId, UUID chatId, UUID message, String reply) {
+        requireActiveTransaction();
+        requireStorageCondition(
+                dialogueMapper.operationResult(userId, chatId, message, reply) == 1, false);
     }
 
     /**
-     * @param user 用户
+     * @param userId 用户
      * @param chat 聊天
      * @return 权威当前基础
      */
-    private Dialogue.Basis basis(UUID user, Dialogue.Chat chat) {
+    private Dialogue.Basis getTravelExecutionSnapshot(UUID userId, Dialogue.Chat chat) {
         if (chat.taskId() == null) return new Dialogue.Basis(null, null, 0, 0, null);
-        var task = tasks.task(new TaskScope(user, chat.taskId()));
-        require(task != null, true);
-        var run = mapper.run(user, chat.taskId());
+        var task = taskMapper.task(new TaskScope(userId, chat.taskId()));
+        requireStorageCondition(task != null, true);
+        var run = dialogueMapper.run(userId, chat.taskId());
         return new Dialogue.Basis(
                 chat.taskId(),
                 run == null ? null : UUID.fromString(run),
@@ -569,23 +629,24 @@ public final class PostgresDialogueStore implements DialogueStore {
      * @param chatId 聊天
      * @return 已按统一锁序保护的关联，不允许适配器绕过事务
      */
-    private Dialogue.Chat lock(UUID userId, UUID chatId) {
-        require(mapper.lockUser(userId) != null, true);
-        var result = mapper.lockChat(userId, chatId);
-        require(result != null, true);
+    private Dialogue.Chat lockUserChatAndTask(UUID userId, UUID chatId) {
+        requireStorageCondition(dialogueMapper.lockUser(userId) != null, true);
+        var result = dialogueMapper.lockChat(userId, chatId);
+        requireStorageCondition(result != null, true);
         if (result.taskId() != null)
-            require(tasks.lockTask(new TaskScope(userId, result.taskId())) != null, true);
+            requireStorageCondition(
+                    taskMapper.lockTask(new TaskScope(userId, result.taskId())) != null, true);
         return result;
     }
 
     /**
      * @param row 数据行
-     * @param user 已认证归属
-     * @param chat 私有聊天
+     * @param userId 已认证归属
+     * @param chatId 私有聊天
      * @return 不暴露租约内部信息的界面消息
      */
-    private Dialogue.Message message(DialogueMapper.Row row, UUID user, UUID chat) {
-        return message(row, mapper.documents(user, chat, row.id()));
+    private Dialogue.Message message(DialogueMapper.Row row, UUID userId, UUID chatId) {
+        return message(row, dialogueMapper.documents(userId, chatId, row.id()));
     }
 
     /**
@@ -602,25 +663,25 @@ public final class PostgresDialogueStore implements DialogueStore {
                 row.reply(),
                 row.operation() == null
                         ? null
-                        : json.decode(row.operation(), Dialogue.Operation.class),
+                        : interactionCodec.decode(row.operation(), Dialogue.Operation.class),
                 row.error(),
                 List.copyOf(documents));
     }
 
     /** 必须参加应用短事务，禁止隐式自动提交产生部分结果。 */
-    private static void transaction() {
+    private static void requireActiveTransaction() {
         if (!TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException("TRANSACTION_REQUIRED");
     }
 
     /**
      * @param condition 检查
-     * @param missing 是否归属不存在，错误不能包含私有正文
+     * @param missingResource 是否归属不存在，错误不能包含私有正文
      */
-    private static void require(boolean condition, boolean missing) {
+    private static void requireStorageCondition(boolean condition, boolean missingResource) {
         if (!condition)
             throw new TravelStorageFailure(
-                    missing
+                    missingResource
                             ? TravelStorageFailure.Code.NOT_FOUND
                             : TravelStorageFailure.Code.STALE_VERSION);
     }
@@ -630,7 +691,7 @@ public final class PostgresDialogueStore implements DialogueStore {
      * @param <T> 结果类型
      * @return 固定依赖错误，不让SQL和用户原文进入HTTP异常日志
      */
-    private static <T> T safe(java.util.function.Supplier<T> work) {
+    private static <T> T executeStorageReadWithErrorMapping(java.util.function.Supplier<T> work) {
         try {
             return work.get();
         } catch (org.springframework.dao.DataAccessException failure) {

@@ -134,6 +134,6 @@ public final class DialogueController {
             @PathVariable UUID chat,
             @PathVariable UUID input,
             @RequestBody Command command) {
-        return service.act(actor, chat, input, command.action());
+        return service.applyChatInputAction(actor, chat, input, command.action());
     }
 }

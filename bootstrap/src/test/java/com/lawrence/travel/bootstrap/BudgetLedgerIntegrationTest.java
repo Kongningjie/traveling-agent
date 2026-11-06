@@ -158,9 +158,9 @@ class BudgetLedgerIntegrationTest {
                 .isFalse();
     }
 
-    /** 真实PG验证重建服务后UNKNOWN/RESERVED仍按上限扣算，余额充足放行、余额不足拒绝且不改历史。 */
+    /** 真实PG验证重建准入后保留UNKNOWN/RESERVED历史计量，免费快照不限制执行预算内的后续请求。 */
     @Test
-    void admissionAfterRestartChargesUnknownAndReservedWithoutBlanketBlock() {
+    void restartedAdmissionPreservesUsageWithoutFreeQuotaGate() {
         ledger.create(runId);
         var unknown = ledger.reserve(runId, CallKind.MODEL, limits, target, 20, started);
         ledger.finish(unknown.id(), null, Duration.ofMillis(1));
@@ -194,8 +194,11 @@ class BudgetLedgerIntegrationTest {
             permit.complete(new TokenUsage(1, 0));
         }
         assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(56);
-        assertThatThrownBy(() -> gate.begin(runId, "planner", target.region(), target.api(), 45))
-                .hasMessage("QUOTA_INSUFFICIENT");
+        try (var permit = gate.begin(runId, "planner", target.region(), target.api(), 45)) {
+            assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(101);
+            permit.complete(new TokenUsage(1, 0));
+        }
+        assertThat(recreated.tokensSince(target, started.minusSeconds(1))).isEqualTo(57);
         assertThat(
                         jdbc.queryForObject(
                                 "SELECT status FROM traveling_agent.call_meter WHERE id=?",
@@ -208,7 +211,7 @@ class BudgetLedgerIntegrationTest {
                                 String.class,
                                 pending.id()))
                 .isEqualTo("RESERVED");
-        assertThat(recreated.read(runId).modelCalls()).isEqualTo(4);
+        assertThat(recreated.read(runId).modelCalls()).isEqualTo(5);
     }
 
     /** 验证不在已有业务事务中返回未提交的请求许可，避免事务回滚后供应商仍已消耗。 */

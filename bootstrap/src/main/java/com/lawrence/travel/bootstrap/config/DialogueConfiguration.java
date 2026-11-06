@@ -14,7 +14,7 @@ import com.lawrence.travel.application.port.DialogueInterpreter;
 import com.lawrence.travel.application.port.DialogueStore;
 import com.lawrence.travel.application.port.InteractionCodec;
 import com.lawrence.travel.application.port.TravelStore;
-import com.lawrence.travel.infrastructure.execution.PersistentStageWorker;
+import com.lawrence.travel.infrastructure.execution.PersistentWorkDispatcher;
 import com.lawrence.travel.infrastructure.interaction.DialogueMapper;
 import com.lawrence.travel.infrastructure.interaction.PostgresDialogueStore;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
@@ -160,7 +160,7 @@ public class DialogueConfiguration {
      */
     @Bean
     org.springframework.beans.factory.SmartInitializingSingleton dialogueRegistration(
-            PersistentStageWorker worker, DialogueService service) {
-        return () -> worker.register(service);
+            PersistentWorkDispatcher worker, DialogueService service) {
+        return () -> worker.registerBackgroundWorkSource(service);
     }
 }

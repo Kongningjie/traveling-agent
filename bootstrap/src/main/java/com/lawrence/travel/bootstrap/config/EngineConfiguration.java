@@ -6,7 +6,7 @@ import com.lawrence.travel.application.port.BusinessTransactions;
 import com.lawrence.travel.application.port.ExecutionEngineStore;
 import com.lawrence.travel.application.port.ExecutionResources;
 import com.lawrence.travel.application.port.StageHandler;
-import com.lawrence.travel.infrastructure.execution.PersistentStageWorker;
+import com.lawrence.travel.infrastructure.execution.PersistentWorkDispatcher;
 import com.lawrence.travel.infrastructure.execution.persistence.EngineMapper;
 import com.lawrence.travel.infrastructure.execution.persistence.PostgresExecutionEngine;
 import com.lawrence.travel.infrastructure.persistence.control.BudgetMapper;
@@ -102,7 +102,7 @@ public class EngineConfiguration {
      */
     @org.springframework.context.annotation.DependsOn("lifecycleReady")
     @Bean(destroyMethod = "close")
-    PersistentStageWorker persistentStageWorker(
+    PersistentWorkDispatcher persistentStageWorker(
             ExecutionEngineStore store,
             StageExecutor executor,
             ExecutionResources resources,
@@ -111,13 +111,13 @@ public class EngineConfiguration {
             com.lawrence.travel.application.lifecycle.LifecycleService lifecycle,
             com.lawrence.travel.application.port.StorageAdmission storage) {
         var worker =
-                new PersistentStageWorker(
+                new PersistentWorkDispatcher(
                         store,
                         executor,
                         resources,
                         controls.limits().researchConcurrencyPerRun(),
                         Duration.ofSeconds(15));
-        worker.readiness(() -> lifecycle.ready() && storage.accepting());
+        worker.setReadinessCheck(() -> lifecycle.ready() && storage.accepting());
         if (enabled) worker.start();
         return worker;
     }
@@ -132,7 +132,7 @@ public class EngineConfiguration {
     RunService runService(
             ExecutionEngineStore store,
             BusinessTransactions transactions,
-            PersistentStageWorker worker) {
+            PersistentWorkDispatcher worker) {
         return new RunService(store, transactions, worker);
     }
 }

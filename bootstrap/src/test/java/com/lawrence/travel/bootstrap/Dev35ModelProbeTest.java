@@ -315,7 +315,7 @@ class Dev35ModelProbeTest {
                                 new com.lawrence.travel.infrastructure.interaction.DialogueMapper
                                         .Hint(user, chat)))
                 .when(dialogueMapper)
-                .hints();
+                .listPendingChatHints();
         long started = System.nanoTime();
         int completed = 0;
         boolean valid = true;

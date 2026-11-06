@@ -178,7 +178,7 @@ public final class LifecycleService {
                                         // 来源版本只撤销读者与本文件解析；无关解析使用独立原件，不随之丢失资格。
                                         for (var job :
                                                 store.sourceJobs(user, preview.chat(), target))
-                                            jobs.control(scope, job, false);
+                                            jobs.applyJobRetryOrCancellation(scope, job, false);
                                     } else jobs.invalidate(scope);
                                 }
                                 if (preview.task() != null)

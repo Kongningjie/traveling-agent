@@ -446,7 +446,7 @@ class SupportIntegrationTest {
                         UUID.class,
                         u.id(),
                         t.id());
-        jobs.control(new Jobs.Scope(u.id(), t.scope()), inputJob, false);
+        jobs.applyJobRetryOrCancellation(new Jobs.Scope(u.id(), t.scope()), inputJob, false);
         var run = engine.start(task, UUID.randomUUID(), stage);
         var hint =
                 engine.candidates(100).stream()
