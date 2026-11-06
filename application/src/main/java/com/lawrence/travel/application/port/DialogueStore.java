@@ -182,7 +182,7 @@ public interface DialogueStore {
 
     /**
      * 将当前输入产生的新旅行关联到聊天，不允许替换已存在的旅行关联。
-     * @param chatInputClaim 已通过guard的领取
+     * @param chatInputClaim 已通过isChatInputExecutionValid的领取
      * @param task 新任务
      * @return 关联结果；已有任务不得替换
      */
@@ -190,7 +190,7 @@ public interface DialogueStore {
 
     /**
      * 按原执行围栏提交本轮回复与待确认动作，并与后台作业状态保持原子一致。
-     * @param chatInputClaim 已通过guard
+     * @param chatInputClaim 已通过isChatInputExecutionValid
      * @param state DONE、CONFIRM、CLARIFY或PAUSED
      * @param reply 可信协议中的回复
      * @param operation 待确认动作，可空

@@ -185,7 +185,7 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
 
     /**
-     * 由DialogueService.send的事务调用：锁定归属 → 检查重放原文/附件集合 → 限制未决输入数量 → 插入原文 → 绑定文件内容版本 → ensureJob登记持久作业。
+     * 由DialogueService.send的事务调用：锁定归属 → 检查重放原文/附件集合 → 限制未决输入数量 → 插入原文 → 绑定文件内容版本 → getOrCreateChatInputJobId登记持久作业。
      */
     @Override
     public Dialogue.View saveChatInputAndEnsureJob(
@@ -370,7 +370,7 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
 
     /**
-     * 由process提交前调用，同时比较JobStore围栏、输入有效状态及旅行Basis。
+     * 由processChatInput提交前调用，同时比较JobStore围栏、输入有效状态及旅行Basis。
      */
     @Override
     public boolean isChatInputExecutionValid(Dialogue.Claim chatInputClaim) {
@@ -553,7 +553,7 @@ public final class PostgresDialogueStore implements DialogueStore {
     }
 
     /**
-     * 保证聊天输入关联唯一持久作业，作为receive与claimExcluding衔接后台调度的桥梁。
+     * 保证聊天输入关联唯一持久作业，作为saveChatInputAndEnsureJob与claimNextChatInputExcludingUsers衔接后台调度的桥梁。
      *
      * @param userId 归属
      * @param chatId 聊天
